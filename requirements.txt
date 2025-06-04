@@ -1,0 +1,6 @@
+earthengine-api
+geemap
+jupyter
+numpy
+pre-commit
+ruff
