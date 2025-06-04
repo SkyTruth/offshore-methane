@@ -12,12 +12,12 @@ This repository hosts experimental code and notebooks for SkyTruth's offshore me
 
 ## Setup
 
-1. Create a virtual environment and install dependencies:
+1. Create a conda environment and install dependencies using
+   [mamba](https://mamba.readthedocs.io/en/latest/):
 
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
+   mamba env create -f environment.yml
+   conda activate methane
    ```
 
 2. Install pre-commit hooks:
