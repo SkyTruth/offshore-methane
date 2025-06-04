@@ -27,6 +27,10 @@ This repository hosts experimental code and notebooks for SkyTruth's offshore me
    ```
 
 3. Run tests with `pytest`.
+## MBSP retrieval
+
+The notebook `mbsp_demo.ipynb` offers a quick-look visualization only. The module `src/mbsp.py` implements a more complete version of the algorithm from Varon et al. (2021), including cloud masking, robust regression, column conversion and source-rate estimation.
+
 
 ## Contributing
 
