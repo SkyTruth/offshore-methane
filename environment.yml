@@ -1,0 +1,11 @@
+name: methane
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - earthengine-api
+  - geemap
+  - jupyter
+  - numpy
+  - pre-commit
+  - ruff
