@@ -1,3 +1,13 @@
+[project]
+name = "offshore_methane"
+version = "0.1.0"
+description = "Utilities for offshore methane detection"
+authors = [{ name = "SkyTruth" }]
+dependencies = ["numpy"]
+
+[tool.setuptools]
+packages = ["offshore_methane"]
+
 [tool.ruff]
 line-length = 88
 

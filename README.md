@@ -4,7 +4,7 @@ This repository hosts experimental code and notebooks for SkyTruth's offshore me
 
 ## Project Structure
 
-- `src/` – Python modules and utilities.
+- `offshore_methane/` – Python modules and utilities.
 - `notebooks/` – Exploratory Jupyter notebooks.
 - `data/` – Input data or small examples.
 - `docs/` – Additional documentation and references.
@@ -18,6 +18,7 @@ This repository hosts experimental code and notebooks for SkyTruth's offshore me
    ```bash
    mamba env create -f environment.yml
    conda activate methane
+   pip install -e .
    ```
 
 2. Install pre-commit hooks:
