@@ -32,16 +32,16 @@ def compute_scaling_coefficient(b11: np.ndarray, b12: np.ndarray) -> float:
     Returns
     -------
     float
-        Best fit slope ``c`` such that ``b12 ~ c * b11``.
+        Best fit slope ``c`` such that ``b11 ~ c * b12``.
     """
     mask = np.isfinite(b11) & np.isfinite(b12)
     if not np.any(mask):
         raise ValueError("No valid pixels to compute slope")
     s12 = np.sum(b11[mask] * b12[mask])
-    s11 = np.sum(b11[mask] ** 2)
-    if s11 == 0:
+    s22 = np.sum(b12[mask] ** 2)
+    if s22 == 0:
         raise ValueError("Sum of squares is zero")
-    return s12 / s11
+    return s12 / s22
 
 
 def mbsp_fractional_absorption(b11: np.ndarray, b12: np.ndarray) -> Tuple[float, np.ndarray]:
