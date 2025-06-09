@@ -69,5 +69,3 @@ def sentinel2_geemap(id):
         return 'Image not found in Sentinel-2 TOA repo.'
     else:
         return map
-    
-# print(sentinel2_geemap('20230611T162839_20230611T164034_T16RBT'))
