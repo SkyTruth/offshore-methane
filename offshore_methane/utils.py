@@ -3,9 +3,6 @@ import ee
 import geemap
 import datetime
 
-ee.Authenticate()
-ee.Initialize()
-
 # Pass in a Sentinel-2 L1C (TOA) EE Scene ID, Product ID, or Granule ID.
 # Returns the image on a geemap.
 def sentinel2_geemap(id):
