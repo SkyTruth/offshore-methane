@@ -10,3 +10,6 @@ dependencies:
   - pre-commit
   - ruff
   - pytest
+  - lxml
+  - python-dotenv
+

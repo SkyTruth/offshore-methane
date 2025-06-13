@@ -81,3 +81,6 @@ cython_debug/
 
 # Notebooks outputs
 .notebooks/
+
+# Data
+data/sga

@@ -5,3 +5,5 @@ numpy
 pre-commit
 ruff
 pytest
+lxml
+python-dotenv
