@@ -96,11 +96,10 @@ def calculateSunglint_alpha(image):
 
     c = phi_naught.subtract(phi).cos()
 
-    # argument = A + 0.5 * B * cos(φo − φ)
     arg = (a.add((b.multiply(c)))).divide(2)
 
     # glint_intensity = arccos(argument)
     alpha = arg.acos()
     
     # return image with new metadata value "glint_intensity"
-    return image.set('glint_alpha',alpha.multiply(180/math.pi)
+    return image.set('glint_alpha',alpha.multiply(180/math.pi))
