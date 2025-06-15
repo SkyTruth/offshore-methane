@@ -12,4 +12,5 @@ dependencies:
   - pytest
   - lxml
   - python-dotenv
+  - pyproj
 
