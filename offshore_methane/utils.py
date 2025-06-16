@@ -1,5 +1,6 @@
 # Imports
 import ee
+import os
 import math
 import geemap
 import datetime
@@ -10,8 +11,6 @@ from lxml import etree
 from google.cloud import storage
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
-
-credentials, std_proj = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
 
 ee.Authenticate()
 ee.Initialize(project = 'skytruth-tech')
@@ -135,38 +134,31 @@ def get_grid_values_from_xml(tree_node, xpath_str):
 
 # Could also consider passing an ee.Image in as input so we can map the function in the EE env.
 def create_sunglint_map_s2(index):
+    # Credentials for writing to 
+    credentials, std_proj = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
 
     # Load in image of interest.
     image = ee.Image(f'COPERNICUS/S2_HARMONIZED/{index}')
 
-    # Pull out original name for final file naming.
-    orig_name = image.get('PRODUCT_ID').getInfo()
-
-    # Find SR equivalent image.
-    sr_img = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-             .filterBounds(image.geometry())
-             .filter(ee.Filter.eq('system:index',index)).first())
-
     # Retireving information from the equivalent SR image.
-    sr_index = sr_img.get('system:index').getInfo()
-    projection_info = sr_img.select('B12').projection().getInfo()
+    projection_info = image.select('B12').projection().getInfo()
     transform = projection_info['transform']
     crs = projection_info['crs']
     transform[0] = 5000
     transform[4] = -5000
 
-    tile_ids = sr_index.split('_')[2]
+    tile_ids = index.split('_')[2]
 
     # These will be used to get our product of interest.
     tile_num = tile_ids[1:3]
     lat_band = tile_ids[3]
     grid_square = tile_ids[4:]
-    product_uri = sr_img.get('PRODUCT_ID').getInfo()+'.SAFE'
-    granule_id = sr_img.get('GRANULE_ID').getInfo()
+    product_uri = image.get('PRODUCT_ID').getInfo()
+    granule_id = image.get('GRANULE_ID').getInfo()
 
     # Name of xml product to query, which holds metadata for solar angles.
-    # ex: gs://gcp-public-data-sentinel-2/L2/tiles/01/C/CV/S2B_MSIL2A_20181213T210519_N0211_R071_T01CCV_20181213T221546.SAFE/GRANULE/L2A_T01CCV_A009249_20181213T210519/MTD_TL.xml
-    file_id = f"L2/tiles/{tile_num}/{lat_band}/{grid_square}/{product_uri}/GRANULE/{granule_id}/MTD_TL.xml"
+    # ex: gcp-public-data-sentinel-2/tiles/15/R/XL/S2B_MSIL1C_20170705T164319_N0205_R126_T15RXL_20170705T165225.SAFE/GRANULE/L1C_T15RXL_A001725_20170705T165225/MTD_TL.xml
+    file_id = f"tiles/{tile_num}/{lat_band}/{grid_square}/{product_uri}.SAFE/GRANULE/{granule_id}/MTD_TL.xml"
 
 
     client = storage.Client()
@@ -208,7 +200,7 @@ def create_sunglint_map_s2(index):
     # Prepare out_bucket for receiving COG file.
     image_bucket = client.bucket('offshore-methane')
     # Name for GCS object.
-    source_file_name = f'glint_{orig_name}_cog.tif'
+    source_file_name = f'glint_{product_uri}_cog.tif'
 
     with rasterio.open(
         source_file_name, 'w',
@@ -226,14 +218,12 @@ def create_sunglint_map_s2(index):
                 source_file_name,
                 cog_profiles.get('deflate'),
                 in_memory=False
-            )
-                
+            )          
 
     blob = image_bucket.blob(source_file_name)
     blob.upload_from_filename(source_file_name)
 
+    # Remove temporary file.
+    os.remove(source_file_name)
     # Load the image into Google Earth Engine
-    gcs_image_url = f"gs://offshore-methane/{source_file_name}"
-    
-    # Not really sure what would be useful to return, so I figured that I'd return the GCS 
-    return gcs_image_url
+    # gcs_image_url = f"gs://{out_bucket}/{source_file_name}"
