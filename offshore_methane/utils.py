@@ -9,13 +9,9 @@ import numpy as np
 from lxml import etree
 from google.cloud import storage
 from rio_cogeo.cogeo import cog_translate
-from rio_cogeo.profiles import cog_profiles
+import math
 
-credentials, std_proj = google.auth.default(
-    scopes=["https://www.googleapis.com/auth/cloud-platform"]
-)
 
-ee.Authenticate()
 ee.Initialize(project="skytruth-tech")
 
 

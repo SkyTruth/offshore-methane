@@ -1,4 +1,5 @@
 """Utilities for MultiBand Single Pass methane retrieval."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,7 +45,9 @@ def compute_scaling_coefficient(b11: np.ndarray, b12: np.ndarray) -> float:
     return s12 / s22
 
 
-def mbsp_fractional_absorption(b11: np.ndarray, b12: np.ndarray) -> Tuple[float, np.ndarray]:
+def mbsp_fractional_absorption(
+    b11: np.ndarray, b12: np.ndarray
+) -> Tuple[float, np.ndarray]:
     """Compute fractional absorption field for MBSP retrieval.
 
     Parameters
