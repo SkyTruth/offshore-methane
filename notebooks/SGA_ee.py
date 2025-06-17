@@ -1,7 +1,7 @@
 # %%
 #!/usr/bin/env python3
 """
-gee_mbsp.py
+SGA_ee.py
 ~~~~~~~~~~~
 Sentinel-2 MBSP with maximum server-side execution in Google Earth Engine.
 
@@ -11,6 +11,7 @@ Sentinel-2 MBSP with maximum server-side execution in Google Earth Engine.
 # ---------------------------------------------------------------------
 #  Imports & config
 # ---------------------------------------------------------------------
+import csv
 import os
 import re
 import subprocess
@@ -18,33 +19,48 @@ import time
 from pathlib import Path
 
 import ee
+import geojson
 import numpy as np
 import rasterio
 import requests
+from affine import Affine
 from dotenv import load_dotenv
 from lxml import etree
 from pyproj import Transformer  # noqa: F401 (kept)
+from rasterio.features import geometry_mask, shapes
 from rasterio.transform import from_origin
 from scipy.interpolate import RegularGridInterpolator  # noqa: F401 (still used)
+from scipy.ndimage import label
+from shapely.geometry import MultiPolygon, shape
 
 # ---------------------------------------------------------------------
-#  User-editable parameters
+#  Parameters
 # ---------------------------------------------------------------------
+ASSET_ROOT = "projects/cerulean-338116/assets/offshore_methane"
+GCS_BUCKET = "offshore_methane"  # Also used during SGA calc as staging bucket
+MAX_CONCURRENT_TASKS = 10
+
+# ---------------- Scene / local filter thresholds ----------------
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 START, END = "2017-07-04", "2017-07-06"
-MAX_CLOUD = 20
+SITES_CSV = "../data/sites.csv"  # optional batch file, overrides hard-coded site
 
-ASSET_ROOT = "projects/cerulean-338116/assets/offshore_methane"
-GCS_BUCKET = "offshore_methane"  # staging bucket
-MAX_CONCURRENT_TASKS = 10
-GLINT_MASK_RANGE = (0.0, 20.0)  # SGA degrees kept as "good"
-AOI_RADIUS_M = 5_000
-# Algorithm selection ―‒ set to True for the simpler fractional-slope MBSP (Varon et al. 2021)
-USE_SIMPLE_MBSP = False
+AOI_RADIUS_M = 5_000  # radius of the area of interest in meters
+LOCAL_PLUME_DIST_M = 500  # keep plumes within this distance of centre_pt
 
-SHOW_THUMB = True  # False to silence QA thumbnails
+SCENE_MAX_CLOUD = 20  # metadata CLOUDY_PIXEL_PERCENTAGE %
+LOCAL_MAX_CLOUD = 5  # QA60-based cloud % inside AOI
+
+SCENE_SGA_RANGE = (0.0, 25)  # degrees, cheap metadata test
+LOCAL_SGA_RANGE = (0.0, 20)  # degrees, coarse-grid test inside 5km AOI
+
+# ---------------- Algorithm parameters -----------------------
+USE_SIMPLE_MBSP = True  # True for the simpler fractional-slope MBSP (Varon)
+PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08  # see docstring below
+
+SHOW_THUMB = False  # False to silence QA thumbnails
 EXPORT_PARAM = {  # Uncommment Zero or One of the following
-    # "bucket": GCS_BUCKET,
+    "bucket": GCS_BUCKET,
     # "ee_asset": ASSET_ROOT,
 }
 assert len(EXPORT_PARAM) < 2, "Can only set more than one export parameter"
@@ -295,19 +311,110 @@ def ensure_sga_asset(
 
 
 # ---------------------------------------------------------------------
+#  Ancillary filters (local cloud, wind, scene glint)
+# ---------------------------------------------------------------------
+def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
+    qa = img.select("QA60")
+    cloudy = qa.bitwiseAnd(1 << 10).Or(qa.bitwiseAnd(1 << 11))
+    return img.updateMask(cloudy.Not())
+
+
+# ---------------------------------------------------------------------
+#  Scene-level sun-glint & cloud checks  (metadata, *very* cheap)
+# ---------------------------------------------------------------------
+
+
+def _scene_glint_ok(img: ee.Image) -> bool:
+    """Cheap metadata-only SGA test."""
+    try:
+        sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
+        saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
+        vza = ee.Number(img.get("MEAN_INCIDENCE_ZENITH_ANGLE_B11"))
+        vaa = ee.Number(img.get("MEAN_INCIDENCE_AZIMUTH_ANGLE_B11"))
+
+        sza_r = sza.multiply(np.pi / 180)
+        vza_r = vza.multiply(np.pi / 180)
+        dphi_r = saa.subtract(vaa).abs().multiply(np.pi / 180)
+
+        cos_sga = (
+            sza_r.cos()
+            .multiply(vza_r.cos())
+            .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
+        )
+        sga_deg = cos_sga.acos().multiply(180 / np.pi)
+
+        ok = sga_deg.gt(SCENE_SGA_RANGE[0]).And(sga_deg.lt(SCENE_SGA_RANGE[1]))
+        return ok.getInfo()
+    except Exception:
+        # missing metadata → keep scene
+        return True
+
+
+# ---------------------------------------------------------------------
+#  Local (5 km) cloud & glint checks  - need pixels / coarse SGA grid
+# ---------------------------------------------------------------------
+def _local_cloud_ok(img: ee.Image, centre: ee.Geometry) -> bool:
+    """QA60-pixel fraction ≤ LOCAL_MAX_CLOUD."""
+    cloudy = _qa60_cloud_mask(img).Not()
+    frac = (
+        cloudy.reduceRegion(
+            ee.Reducer.mean(), centre.buffer(AOI_RADIUS_M), 60, bestEffort=True
+        )
+        .values()
+        .get(0)
+    )
+    return ee.Number(frac).multiply(100).lte(LOCAL_MAX_CLOUD).getInfo()
+
+
+def _local_glint_ok(sga_img: ee.Image, centre: ee.Geometry) -> bool:
+    """Mean coarse-grid SGA inside AOI within LOCAL_SGA_RANGE."""
+    sga_mean = (
+        sga_img.reduceRegion(ee.Reducer.mean(), centre.buffer(AOI_RADIUS_M), 5000)
+        .values()
+        .get(0)
+    )
+    ok = (
+        ee.Number(sga_mean)
+        .gt(LOCAL_SGA_RANGE[0])
+        .And(ee.Number(sga_mean).lt(LOCAL_SGA_RANGE[1]))
+    )
+    return ok.getInfo()
+
+
+# ---------------------------------------------------------------------
 #  2.  MBSP pipeline in Earth Engine  (unchanged math; coarse SGA upscale)
 # ---------------------------------------------------------------------
 def mbsp_ee(image: ee.Image, sga_coarse: ee.Image, centre: ee.Geometry) -> ee.Image:
     """Return a single-band EE Image with fractional MBSP R."""
 
-    b03 = image.select("B3").divide(10000)
+    # --- bands to 0-1 reflectance ----------------------------------
+    b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)
-    b12 = image.select("B12").divide(10000)
 
-    b03 = b03.resample("bilinear").reproject(crs=b11.projection()).rename("B3_20m")
+    # average VIS (B02 + B03 + B04) → resample to 20 m
+    b02 = (
+        image.select("B2")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b03 = (
+        image.select("B3")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b04 = (
+        image.select("B4")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b_vis = b02.add(b03).add(b04).divide(3).rename("Bvis_20m")
 
-    denom = b12.add(b03).max(1e-4)
-    sgi = b12.subtract(b03).divide(denom).clamp(-1, 1)
+    # Sun–glint index (Varon 2021, eqn 4)
+    denom = b12.add(b_vis).max(1e-4)
+    sgi = b12.subtract(b_vis).divide(denom).clamp(-1, 1)
 
     mask_geom = centre.buffer(50_000)
 
@@ -347,7 +454,7 @@ def mbsp_ee(image: ee.Image, sga_coarse: ee.Image, centre: ee.Geometry) -> ee.Im
     sga_hi = sga_coarse.resample("bilinear").reproject(crs=b11.projection())
 
     R = R.updateMask(
-        sga_hi.gt(GLINT_MASK_RANGE[0]).And(sga_hi.lt(GLINT_MASK_RANGE[1]))
+        sga_hi.gt(LOCAL_SGA_RANGE[0]).And(sga_hi.lt(LOCAL_SGA_RANGE[1]))
     ).rename("MBSP")
     return ee.Image(R).copyProperties(image, ["PRODUCT_ID", "system:time_start"])
 
@@ -381,6 +488,123 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
         .set({"slope": slope})
     )
     return R.copyProperties(image, ["PRODUCT_ID", "system:time_start"])
+
+
+# ---------------------------------------------------------------------
+#  Three-P algorithm  (ported verbatim from your snippet)
+# ---------------------------------------------------------------------
+def instances_from_probs(
+    raster,
+    p1,
+    p2,
+    p3,
+    transform=Affine.identity(),
+    addl_props={},
+    discard_edge_polygons_buffer=0.005,
+):
+    """Return GeoJSON features for independent plumes (see original docstring)."""
+
+    def overlap_percent(a, b):
+        if not a.intersects(b):
+            return 0.0
+        elif a.within(b):
+            return 1.0
+        else:
+            return a.intersection(b).area / a.area
+
+    nodata_mask = raster == 0
+
+    # --- choose operator depending on the sign of the thresholds ----
+    if p1 < 0 and p2 < 0 and p3 < 0:
+        # capture pixels BELOW the (negative) thresholds
+        p1_islands, _ = label(raster <= p1)
+        p2_mask = raster <= p2
+        p3_mask = raster <= p3
+    else:
+        # original behaviour: pixels ABOVE the (positive) thresholds
+        p1_islands, _ = label(raster >= p1)
+        p2_mask = raster >= p2
+        p3_mask = raster >= p3
+
+    p1_p3_labels = np.unique(p1_islands[p3_mask])
+    p1_p3_mask = np.isin(p1_islands, p1_p3_labels)
+    p1_p2_p3_mask = p1_p3_mask & p2_mask
+    combined_raster = p1_p2_p3_mask * p1_islands
+
+    scene_edge = MultiPolygon(
+        shape(geom)
+        for geom, value in shapes(
+            nodata_mask.astype(np.uint8), mask=nodata_mask, transform=transform
+        )
+        if value == 1
+    ).buffer(discard_edge_polygons_buffer)
+
+    label_geometries = {}
+    for geom, lbl in shapes(
+        combined_raster, mask=combined_raster > 0, transform=transform
+    ):
+        poly = shape(geom)
+        if overlap_percent(poly, scene_edge) <= 0.5:
+            label_geometries.setdefault(lbl, []).append(poly)
+
+    features = []
+    for polys in label_geometries.values():
+        mp = MultiPolygon(polys)
+        geom_mask = geometry_mask(
+            [mp], out_shape=raster.shape, transform=transform, invert=True
+        )
+        masked = raster[geom_mask]
+        features.append(
+            geojson.Feature(
+                geometry=mp,
+                properties={
+                    "mean_conf": float(np.mean(masked)),
+                    "median_conf": float(np.median(masked)),
+                    "max_conf": float(np.max(masked)),
+                    "machine_confidence": float(np.median(masked)),
+                    **addl_props,
+                },
+            )
+        )
+    return features
+
+
+def plume_polygons_three_p(
+    R_img: ee.Image, region: ee.Geometry
+) -> ee.FeatureCollection:
+    """Run Three-P locally on 5 km AOI and push polygons back to EE."""
+    info = R_img.sampleRectangle(region=region, defaultValue=0).getInfo()
+
+    # sampleRectangle → {'type':'Feature', 'geometry':..., 'properties':{band:2-D list}}
+    try:
+        grid = np.array(info["properties"]["MBSP"], dtype=np.float32)
+    except KeyError as e:
+        raise KeyError(
+            f"MBSP band not found in sampleRectangle result; "
+            f"available keys={list(info.get('properties', {}).keys())}"
+        ) from e
+    grid[np.isnan(grid)] = 0.0
+
+    # quick WGS-84 affine (fine for tiny window)
+    coords = region.bounds().coordinates().getInfo()[0]
+    minx, maxx = min(c[0] for c in coords), max(c[0] for c in coords)
+    miny, maxy = min(c[1] for c in coords), max(c[1] for c in coords)
+    h, w = grid.shape
+    transform = from_origin(minx, maxy, (maxx - minx) / w, (maxy - miny) / h)
+
+    feats = instances_from_probs(
+        grid,
+        PLUME_P1,
+        PLUME_P2,
+        PLUME_P3,
+        transform=transform,
+        addl_props={"scale_m": 20, "threeP": True},
+        discard_edge_polygons_buffer=0.0005,
+    )
+
+    return ee.FeatureCollection(
+        [ee.Feature(ee.Geometry(f.geometry), f.properties) for f in feats]
+    )
 
 
 # ---------------------------------------------------------------------
@@ -428,75 +652,126 @@ def export_image(
     return task
 
 
+def export_polygons(
+    fc: ee.FeatureCollection, description: str, bucket=None, ee_asset=None
+):
+    task = None
+    if bucket:
+        task = ee.batch.Export.table.toCloudStorage(
+            collection=fc,
+            description=f"{description}_vect",
+            bucket=bucket,
+            fileNamePrefix=f"vectors/{description}",
+            fileFormat="GeoJSON",
+        )
+    elif ee_asset:
+        task = ee.batch.Export.table.toAsset(
+            collection=fc,
+            description=f"{description}_vect",
+            assetId=f"{ee_asset}/{description}_vect",
+        )
+    if task:
+        task.start()
+    return task
+
+
+def iter_sites():
+    csv_path = Path(SITES_CSV)
+    if csv_path.is_file():
+        with open(csv_path, newline="") as f:
+            for row in csv.DictReader(f):
+                yield {
+                    "lon": float(row["lon"]),
+                    "lat": float(row["lat"]),
+                    "start": row.get("start", START),
+                    "end": row.get("end", END),
+                }
+    else:
+        print(f"⚠  {csv_path} not found - processing single hard-coded site")
+        yield dict(lon=CENTRE_LON, lat=CENTRE_LAT, start=START, end=END)
+
+
 # ---------------------------------------------------------------------
 #  4.  Main driver
 # ---------------------------------------------------------------------
 def main():
-    centre_pt = ee.Geometry.Point([CENTRE_LON, CENTRE_LAT])
-    products = sentinel2_product_ids(centre_pt, START, END, MAX_CLOUD)
-    if not products:
-        raise SystemExit("No matching Sentinel-2 products.")
-    print(f"Found {len(products)} product(s)")
-
     active = []
-    for pid in products:
-        print(f"▶ {pid}")
-        s2 = ee.Image(
-            ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-            .filter(ee.Filter.eq("PRODUCT_ID", pid))
-            .first()
+    for site in iter_sites():
+        centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
+        products = sentinel2_product_ids(
+            centre_pt, site["start"], site["end"], SCENE_MAX_CLOUD
         )
-        if s2 is None:
-            print("  ⚠ EE image not found; skipped")
+        if not products:
+            print(f"No products for {site}")
             continue
+        print(f"{len(products)} product(s) for {site}")
 
-        if USE_SIMPLE_MBSP:
-            # Simple fractional-slope MBSP (no glint masking)
-            print("  ⚠ Simple MBSP selected")
-            R_img = ee.Image(mbsp_simple_ee(s2, centre_pt))
-        else:
-            # Complex two-stage MBSP with coarse-SGA masking
-            print("  ⚠ Complex MBSP selected")
+        for pid in products:
+            print(f"▶ {pid}")
+            s2 = ee.Image(
+                ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+                .filter(ee.Filter.eq("PRODUCT_ID", pid))
+                .first()
+            )
+            if s2 is None:
+                print("  ⚠ EE image not found")
+                continue
+
+            if not _scene_glint_ok(s2):
+                print("  ✗ scene SGA out of range")
+                continue
+            if not _local_cloud_ok(s2, centre_pt):
+                print("  ✗ too cloudy inside AOI")
+                continue
+
             sga_asset = ensure_sga_asset(pid, **EXPORT_PARAM)
             sga_img = ee.Image(sga_asset)
-            R_img = ee.Image(mbsp_ee(s2, sga_img, centre_pt))
+            if not _local_glint_ok(sga_img, centre_pt):
+                print("  ✗ local SGA out of range")
+                continue
 
-        export_roi = centre_pt.buffer(AOI_RADIUS_M)
-        R_img = R_img.clip(export_roi)
-        R_img = R_img.toFloat()
-        if SHOW_THUMB:
-            png_url = R_img.visualize(
-                min=-0.1, max=0.1, palette=["red", "white", "blue"]
-            ).getThumbURL({"region": centre_pt.buffer(AOI_RADIUS_M), "dimensions": 512})
-            print(f"  🖼  thumbnail → {png_url}")
-        task = export_image(
-            R_img,
-            description=f"MBSP_{pid}",
-            region=centre_pt.buffer(AOI_RADIUS_M),
-            **EXPORT_PARAM,
-        )
-        if task:
-            active.append(task)
-            print(f"  ⧗ export {task.id} started")
-        else:
-            print("  ↪ export skipped")
+            # ---------------- MBSP computation -----------------
+            if USE_SIMPLE_MBSP:
+                R_img = mbsp_simple_ee(s2, centre_pt)
+                mode_tag = "MBSPs"  # simple
+            else:
+                R_img = mbsp_ee(s2, sga_img, centre_pt)
+                mode_tag = "MBSPc"  # complex (SGA + SGI)
 
-        while (
-            len([t for t in active if t.status()["state"] in ("READY", "RUNNING")])
-            >= MAX_CONCURRENT_TASKS
-        ):
-            time.sleep(1)
+            export_roi = centre_pt.buffer(AOI_RADIUS_M)
+            R_img = ee.Image(R_img).clip(export_roi).toFloat()
 
-    print("Waiting for EE exports to finish …")
+            if SHOW_THUMB:
+                url = R_img.visualize(
+                    min=-0.1, max=0.1, palette=["red", "white", "blue"]
+                ).getThumbURL({"region": export_roi, "dimensions": 512})
+                print(f"  🖼  thumb → {url}")
+
+            desc = f"{mode_tag}_{pid}"
+            rast_task = export_image(R_img, desc, export_roi, **EXPORT_PARAM)
+            if rast_task:
+                active.append(rast_task)
+                print(f"  ⧗ raster task {rast_task.id} started")
+
+            vect_fc = plume_polygons_three_p(R_img, export_roi)
+            vect_fc = vect_fc.filterBounds(centre_pt.buffer(LOCAL_PLUME_DIST_M))
+            vect_task = export_polygons(vect_fc, desc, **EXPORT_PARAM)
+            if vect_task:
+                active.append(vect_task)
+                print(f"  ⧗ vector task {vect_task.id} started")
+
+            # throttle EE queue
+            while (
+                sum(t.status()["state"] in ("READY", "RUNNING") for t in active)
+                >= MAX_CONCURRENT_TASKS
+            ):
+                time.sleep(1)
+
+    # ------------- monitor outstanding tasks -----------------
+    print("Waiting for EE exports …")
     while any(t.status()["state"] in ("READY", "RUNNING") for t in active):
-        statuses = {}
-        for t in active:
-            s = t.status()
-            statuses[t.id] = f"{s['state']} ({s.get('progress', '?')}%)"
-            if s.get("error_message"):
-                statuses[t.id] += f"  ERROR: {s['error_message']}"
-        print(statuses)
-        time.sleep(10)  # poll every 10 s, not every second
+        print({t.id: t.status()["state"] for t in active})
+        time.sleep(10)
     print("Done.")
 
 

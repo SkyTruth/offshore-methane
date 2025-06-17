@@ -13,4 +13,5 @@ dependencies:
   - lxml
   - python-dotenv
   - pyproj
+  - shapely
 

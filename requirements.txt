@@ -8,3 +8,4 @@ pytest
 lxml
 pyproj
 python-dotenv
+shapely
