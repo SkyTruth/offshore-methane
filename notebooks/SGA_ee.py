@@ -5,7 +5,7 @@ gee_mbsp.py
 ~~~~~~~~~~~
 Sentinel-2 MBSP with maximum server-side execution in Google Earth Engine.
 
-2025-06-16  • Upload *un-interpolated* 23 × 23 SGA grid; resample in EE.
+2025-06-16  • Upload *un-interpolated* 23 x 23 SGA grid; resample in EE.
 """
 
 # ---------------------------------------------------------------------
@@ -34,13 +34,20 @@ CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 START, END = "2017-07-04", "2017-07-06"
 MAX_CLOUD = 20
 
-SGA_ASSET_ROOT = "projects/cerulean-338116/assets/offshore_methane"
+ASSET_ROOT = "projects/cerulean-338116/assets/offshore_methane"
 GCS_BUCKET = "offshore_methane"  # staging bucket
-EXPORT_DEST = "gcs"  # "drive" or "gcs"
-EXPORT_FOLDER = "offshore_methane"  # Drive folder *or* GCS bucket
 MAX_CONCURRENT_TASKS = 10
-GLINT_MASK_RANGE = (1.0, 15.0)  # SGA degrees kept as "good"
-AOI_RADIUS_M = 55_000
+GLINT_MASK_RANGE = (0.0, 20.0)  # SGA degrees kept as "good"
+AOI_RADIUS_M = 5_000
+# Algorithm selection ―‒ set to True for the simpler fractional-slope MBSP (Varon et al. 2021)
+USE_SIMPLE_MBSP = False
+
+SHOW_THUMB = True  # False to silence QA thumbnails
+EXPORT_PARAM = {  # Uncommment Zero or One of the following
+    # "bucket": GCS_BUCKET,
+    # "ee_asset": ASSET_ROOT,
+}
+assert len(EXPORT_PARAM) < 2, "Can only set more than one export parameter"
 
 
 # ---------------------------------------------------------------------
@@ -155,10 +162,10 @@ def _download_xml(product_id: str, xml_path: Path):
     _download_object(f"{_granule_uri(product_id)}/Nodes(MTD_TL.xml)/$value", xml_path)
 
 
-# ---------- NEW:  produce COARSE 23×23 GeoTIFF (5 km pixels) ----------
+# ---------- NEW:  produce COARSE 23x23 GeoTIFF (5 km pixels) ----------
 def compute_sga_coarse(product_id: str, tif_path: Path) -> None:
     """
-    Save the un-interpolated 23 × 23 SGA grid (5 km pixels) as GeoTIFF
+    Save the un-interpolated 23 x 23 SGA grid (5 km pixels) as GeoTIFF
     with correct orientation for Earth Engine.
     """
     xml_path = tif_path.with_suffix(".xml")
@@ -181,7 +188,7 @@ def compute_sga_coarse(product_id: str, tif_path: Path) -> None:
         ]
         return np.nanmean(arrays, axis=0)
 
-    # -- raw 23×23 values -------------------------------------------
+    # -- raw 23x23 values -------------------------------------------
     sza = _grid2array(root.xpath(".//Sun_Angles_Grid/Zenith/Values_List/VALUES/text()"))
     saa = _grid2array(
         root.xpath(".//Sun_Angles_Grid/Azimuth/Values_List/VALUES/text()")
@@ -254,12 +261,18 @@ def gcs_stage(local_path: Path, bucket: str) -> str:
     return dst
 
 
-def ensure_sga_asset(product_id: str, out_root: Path = Path("../data")) -> str:
-    asset_id = f"{SGA_ASSET_ROOT}/{product_id}"
+def ensure_sga_asset(
+    product_id: str,
+    out_root: Path = Path("../data"),
+    ee_asset: str = None,
+    bucket: str = None,
+) -> str:
+    prefixed_product_id = f"SGA_{product_id}"
+    asset_id = f"{ASSET_ROOT}/{prefixed_product_id}"
     if ee_asset_exists(asset_id):
         return asset_id
 
-    tif_path = out_root / "sga" / f"{product_id}.tif"
+    tif_path = out_root / "sga" / f"{prefixed_product_id}.tif"
     if not tif_path.is_file():
         print(f"  ↻ computing *coarse* SGA grid for {product_id}")
         compute_sga_coarse(product_id, tif_path)
@@ -267,16 +280,17 @@ def ensure_sga_asset(product_id: str, out_root: Path = Path("../data")) -> str:
     print("  ↑ staging coarse GeoTIFF to GCS")
     gcs_url = gcs_stage(tif_path, GCS_BUCKET)
 
-    print(f"  ↑ ingesting as EE asset {asset_id}")
-    subprocess.run(
-        ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
-        check=True,
-    )
+    if EXPORT_PARAM.get("ee_asset"):
+        print(f"  ↑ ingesting as EE asset {asset_id}")
+        subprocess.run(
+            ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
+            check=True,
+        )
 
-    while not ee_asset_exists(asset_id):
-        time.sleep(1)
+        while not ee_asset_exists(asset_id):
+            time.sleep(1)
 
-    subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
+        subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
     return asset_id
 
 
@@ -290,7 +304,7 @@ def mbsp_ee(image: ee.Image, sga_coarse: ee.Image, centre: ee.Geometry) -> ee.Im
     b11 = image.select("B11").divide(10000)
     b12 = image.select("B12").divide(10000)
 
-    b03 = b03.resample("nearest").reproject(crs=b11.projection()).rename("B3_20m")
+    b03 = b03.resample("bilinear").reproject(crs=b11.projection()).rename("B3_20m")
 
     denom = b12.add(b03).max(1e-4)
     sgi = b12.subtract(b03).divide(denom).clamp(-1, 1)
@@ -334,43 +348,83 @@ def mbsp_ee(image: ee.Image, sga_coarse: ee.Image, centre: ee.Geometry) -> ee.Im
 
     R = R.updateMask(
         sga_hi.gt(GLINT_MASK_RANGE[0]).And(sga_hi.lt(GLINT_MASK_RANGE[1]))
-    ).rename("R")
+    ).rename("MBSP")
     return ee.Image(R).copyProperties(image, ["PRODUCT_ID", "system:time_start"])
+
+
+# ---------------------------------------------------------------------
+#  2b.  Simpler fractional MBSP (Varon et al. 2021)
+# ---------------------------------------------------------------------
+def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
+    """Scene-wide zero-intercept regression of B11 on B12."""
+    region = centre.buffer(50_000)  # same window used by the complex variant
+
+    # c = Σ(R11·R12) / Σ(R12²)
+    num = (
+        image.select("B11")
+        .multiply(image.select("B12"))
+        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
+    )
+    den = (
+        image.select("B12")
+        .pow(2)
+        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
+    )
+    slope = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
+
+    R = (
+        image.select("B12")
+        .multiply(slope)
+        .subtract(image.select("B11"))
+        .divide(image.select("B11"))
+        .rename("MBSP")
+        .set({"slope": slope})
+    )
+    return R.copyProperties(image, ["PRODUCT_ID", "system:time_start"])
 
 
 # ---------------------------------------------------------------------
 #  3.  Export helper
 # ---------------------------------------------------------------------
+
+
 def export_image(
     image: ee.Image,
     description: str,
     region: ee.Geometry,
-    dest: str = EXPORT_DEST,
-    folder_or_bucket: str = EXPORT_FOLDER,
+    bucket=None,
+    ee_asset=None,
 ):
     image = ee.Image(image)
     roi = region.bounds().coordinates().getInfo()
-    if dest == "drive":
-        task = ee.batch.Export.image.toDrive(
-            image=image,
-            description=description,
-            folder=folder_or_bucket,
-            fileNamePrefix=description,
-            region=roi,
-            scale=20,
-            maxPixels=1 << 36,
-        )
-    else:
+    task = None
+
+    if bucket:
+        utm = image.select("MBSP").projection()
         task = ee.batch.Export.image.toCloudStorage(
             image=image,
             description=description,
-            bucket=folder_or_bucket,
-            fileNamePrefix=description,
+            bucket=bucket,
+            fileNamePrefix=f"MBSP/{description}",
             region=roi,
             scale=20,
+            crs=utm,
             maxPixels=1 << 36,
         )
-    task.start()
+    elif ee_asset:
+        utm = image.select("MBSP").projection()
+        task = ee.batch.Export.image.toAsset(
+            image=image,
+            description=description,
+            assetId=f"{ee_asset}/{description}",
+            region=region.bounds().coordinates().getInfo(),
+            scale=20,
+            crs=utm,
+            maxPixels=1 << 36,
+            pyramidingPolicy={"MBSP": "sample"},
+        )
+    if task:
+        task.start()
     return task
 
 
@@ -387,9 +441,6 @@ def main():
     active = []
     for pid in products:
         print(f"▶ {pid}")
-        sga_asset = ensure_sga_asset(pid)
-        sga_img = ee.Image(sga_asset)
-
         s2 = ee.Image(
             ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
             .filter(ee.Filter.eq("PRODUCT_ID", pid))
@@ -399,15 +450,36 @@ def main():
             print("  ⚠ EE image not found; skipped")
             continue
 
-        R_img = mbsp_ee(s2, sga_img, centre_pt)
+        if USE_SIMPLE_MBSP:
+            # Simple fractional-slope MBSP (no glint masking)
+            print("  ⚠ Simple MBSP selected")
+            R_img = ee.Image(mbsp_simple_ee(s2, centre_pt))
+        else:
+            # Complex two-stage MBSP with coarse-SGA masking
+            print("  ⚠ Complex MBSP selected")
+            sga_asset = ensure_sga_asset(pid, **EXPORT_PARAM)
+            sga_img = ee.Image(sga_asset)
+            R_img = ee.Image(mbsp_ee(s2, sga_img, centre_pt))
 
+        export_roi = centre_pt.buffer(AOI_RADIUS_M)
+        R_img = R_img.clip(export_roi)
+        R_img = R_img.toFloat()
+        if SHOW_THUMB:
+            png_url = R_img.visualize(
+                min=-0.1, max=0.1, palette=["red", "white", "blue"]
+            ).getThumbURL({"region": centre_pt.buffer(AOI_RADIUS_M), "dimensions": 512})
+            print(f"  🖼  thumbnail → {png_url}")
         task = export_image(
             R_img,
-            description=f"{pid}_R",
+            description=f"MBSP_{pid}",
             region=centre_pt.buffer(AOI_RADIUS_M),
+            **EXPORT_PARAM,
         )
-        active.append(task)
-        print(f"  ⧗ export {task.id} started")
+        if task:
+            active.append(task)
+            print(f"  ⧗ export {task.id} started")
+        else:
+            print("  ↪ export skipped")
 
         while (
             len([t for t in active if t.status()["state"] in ("READY", "RUNNING")])
@@ -417,9 +489,14 @@ def main():
 
     print("Waiting for EE exports to finish …")
     while any(t.status()["state"] in ("READY", "RUNNING") for t in active):
-        states = {t.id: t.status()["state"] for t in active}
-        print(states)
-        time.sleep(1)
+        statuses = {}
+        for t in active:
+            s = t.status()
+            statuses[t.id] = f"{s['state']} ({s.get('progress', '?')}%)"
+            if s.get("error_message"):
+                statuses[t.id] += f"  ERROR: {s['error_message']}"
+        print(statuses)
+        time.sleep(10)  # poll every 10 s, not every second
     print("Done.")
 
 
