@@ -5,3 +5,7 @@ numpy
 pre-commit
 ruff
 pytest
+lxml
+pyproj
+python-dotenv
+shapely
