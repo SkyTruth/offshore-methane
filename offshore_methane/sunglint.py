@@ -40,7 +40,7 @@ def add_cloud_probability(image):
     return image.addBands(cloud_prob.rename("cloud_probability"))
 
 
-def mask_clouds(image, prob_threshold=50, buffer_meters=None):
+def mask_clouds(image, prob_threshold=100, buffer_meters=None):
     cloud_prob = (
         ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
         .filter(ee.Filter.eq("system:index", image.get("system:index")))
@@ -59,6 +59,7 @@ def mask_clouds(image, prob_threshold=50, buffer_meters=None):
 
 
 def add_sgi(image):
+    image = mask_clouds(image)
     # --- bands to 0-1 reflectance ----------------------------------
     b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)
@@ -86,22 +87,27 @@ def add_sgi(image):
 
     # Sun–glint index (Varon 2021, eqn 4)
     denom = b12.add(b_vis).max(1e-4)
-    sgi = b12.subtract(b_vis).divide(denom).clamp(-1, 1)
-    return sgi
+    sgi = b12.subtract(b_vis).divide(denom).clamp(-1, 1).rename("sgi")
+    return image.addBands(sgi)
 
 
-def add_sgi_b12_b3(image):
-    img = image
-    # img = mask_clouds(image, buffer_meters=None)
-    img = mask_land(img)
+def add_sgi_b3(image):
+    image = mask_clouds(image)
+    # --- bands to 0-1 reflectance ----------------------------------
+    b12 = image.select("B12").divide(10000)  # SWIR 20 m
+    b11 = image.select("B11").divide(10000)
 
-    swir = img.select("B12")  # SWIR band (~2200 nm)
-    green = img.select("B3")  # Green band (~560 nm)
+    b03 = (
+        image.select("B3")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
 
-    # Zhang et al. (2022) SGI: (SWIR - Green) / (SWIR + Green)
-    sgi = swir.subtract(green).divide(swir.add(green)).rename("sgi_b12_b3")
-
-    return img.addBands(sgi)
+    # Sun–glint index (Varon 2021, eqn 4)
+    denom = b12.add(b03).max(1e-4)
+    sgi = b12.subtract(b03).divide(denom).clamp(-1, 1).rename("sgi_b3")
+    return image.addBands(sgi)
 
 
 def add_mean_sgi_metadata(image, aoi):

@@ -3,10 +3,12 @@
 import os
 import sys
 
+
 module_path = os.path.abspath(os.path.join("..", "offshore_methane"))
 if module_path not in sys.path:
     sys.path.append(module_path)
 from utils import calculateSunglint_alpha
+from sunglint import add_sgi, add_sgi_b3
 import ee
 import geemap
 
@@ -76,7 +78,6 @@ def mask_land(image):
 
 
 # Step 1: Set universal values here.
-index = 20
 mbsp_visRange = 0.3
 
 # Step 2: Define study area.
@@ -94,6 +95,13 @@ plume_list = plume_locs.toList(plume_locs.size())
 # 7 is really good.
 # 12, 28, 31, 33,  is dirty, but boost up palette and draw geometry around sus area.
 # 17, 19, 27, 34 might be good? They're ambiguous to me.
+index = 26
+glint_alphas = []
+sgi_means = []
+sgi_means_b3 = []
+
+# %%
+index += 1
 platform = ee.Feature(plume_list.get(index))
 
 # Define the area of interest (AOI) by buffering the platform location by 10 km,
@@ -122,9 +130,9 @@ ir_vis = {
 
 # Visual parameters for the enhancement (omega) band.
 enhancement_vis = {
-    "bands": ["omega"],
-    "min": 0.000000001,
-    "max": 0.000002,
+    # "bands": ["omega"],
+    "min": -1.0,
+    "max": 1.0,
     "palette": ["#4B2991", "#952EA0", "#D44292", "#F66D7A", "#F6A97A"],
 }
 
@@ -154,10 +162,19 @@ img = linear_fit(img)
 img = MBSP(img)
 img = img.clip(aoi)
 
+cloud_prob = (
+    ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
+    .filter(ee.Filter.eq("system:index", img.get("system:index")))
+    .first()
+    .select("probability")
+)
+# img.addBand(cloud_prob)
+
 
 # Step 5: Map display.
 
 # Add true-color (RGB) layer.
+Map.addLayer(cloud_prob, {}, "Cloud Probability")
 Map.addLayer(img, rgb_vis, "Sentinel-2 True-Colour", True)
 
 # Add MBSP ratio (IR_comp) layer.
@@ -225,13 +242,43 @@ Map.add_legend(
 )
 
 # %%
+
+radius_of_interest = 5000
 img = calculateSunglint_alpha(img)
-print("glint_alpha:", img.get("glint_alpha").getInfo())
+glint_alpha = img.get("glint_alpha").getInfo()
+print("glint_alpha:", glint_alpha)
+img = add_sgi(img)
+img = add_sgi_b3(img)
+Map.addLayer(img.select("sgi"), enhancement_vis, "SGI")
+
+mean_dict = img.select("sgi").reduceRegion(
+    reducer=ee.Reducer.mean(),
+    geometry=platform.buffer(radius_of_interest).geometry(),
+    bestEffort=True,  # optionally optimize for large geometries
+)
+
+sgi_mean = mean_dict.get("sgi").getInfo()
+
+mean_dict_b3 = img.select("sgi_b3").reduceRegion(
+    reducer=ee.Reducer.mean(),
+    geometry=platform.buffer(radius_of_interest).geometry(),
+    bestEffort=True,  # optionally optimize for large geometries
+)
+
+sgi_mean_b3 = mean_dict_b3.get("sgi_b3").getInfo()
+
+print("SGI mean:", sgi_mean)
+print("SGI b3 mean:", sgi_mean_b3)
+glint_alphas.append(glint_alpha)
+sgi_means.append(sgi_mean)
+sgi_means_b3.append(sgi_mean)
+# Map.addLayer(img.select("sgi").focal_median(), enhancement_vis, "SGI focal")
+
 
 # %%
 # Add the platform point to the Map for reference.
 Map.addLayer(
-    ee.FeatureCollection([platform]),
+    ee.FeatureCollection([platform.buffer(radius_of_interest)]),
     {"color": "green"},
     "Platform (Emission Source)",
 )
