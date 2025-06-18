@@ -1,109 +1,113 @@
-"""Utilities for MultiBand Single Pass methane retrieval."""
-from __future__ import annotations
+"""
+Both the complex (SGI + coarse SGA) and simple (Varon 21 fractional-slope)
+MBSP implementations, unchanged from your monolith.
+"""
 
-from dataclasses import dataclass
-from typing import Tuple
-
-import numpy as np
-
-
-@dataclass
-class MBSPConstants:
-    """Absorption coefficients for Sentinel-2 MBSP retrieval."""
-
-    k11: float
-    k12: float
+import ee
 
 
-S2_CONSTANTS = {
-    "A": MBSPConstants(k11=0.009258572808558494, k12=0.05481104252792486),
-    "B": MBSPConstants(k11=0.007711602805452748, k12=0.04210953353251079),
-}
-
-
-def compute_scaling_coefficient(b11: np.ndarray, b12: np.ndarray) -> float:
-    """Return regression slope between band 11 and band 12.
-
-    Parameters
-    ----------
-    b11, b12 : np.ndarray
-        Arrays of the same shape containing reflectances.
-
-    Returns
-    -------
-    float
-        Best fit slope ``c`` such that ``b11 ~ c * b12``.
+# ------------------------------------------------------------------
+def mbsp_complex_ee(
+    image: ee.Image,
+    sga_coarse: ee.Image,
+    centre: ee.Geometry,
+    local_sga_range: tuple[float, float],
+) -> ee.Image:
     """
-    mask = np.isfinite(b11) & np.isfinite(b12)
-    if not np.any(mask):
-        raise ValueError("No valid pixels to compute slope")
-    s12 = np.sum(b11[mask] * b12[mask])
-    s22 = np.sum(b12[mask] ** 2)
-    if s22 == 0:
-        raise ValueError("Sum of squares is zero")
-    return s12 / s22
-
-
-def mbsp_fractional_absorption(b11: np.ndarray, b12: np.ndarray) -> Tuple[float, np.ndarray]:
-    """Compute fractional absorption field for MBSP retrieval.
-
-    Parameters
-    ----------
-    b11, b12 : np.ndarray
-        Arrays of band 11 and band 12 reflectances.
-
-    Returns
-    -------
-    Tuple[float, np.ndarray]
-        The regression coefficient ``c`` and the fractional field ``R``.
+    Complex MBSP (Varon 2021, §3.2) with scene-specific regression +
+    coarse-grid SGA upscale to 20 m.
     """
-    c = compute_scaling_coefficient(b11, b12)
-    r = (c * b12 - b11) / b11
-    return c, r
+    b12 = image.select("B12").divide(10000)
+    b11 = image.select("B11").divide(10000)
+
+    b02 = (
+        image.select("B2")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b03 = (
+        image.select("B3")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b04 = (
+        image.select("B4")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b_vis = b02.add(b03).add(b04).divide(3).rename("Bvis_20m")
+
+    # -- SGI ---------------------------------------------------------
+    denom = b12.add(b_vis).max(1e-4)
+    sgi = b12.subtract(b_vis).divide(denom).clamp(-1, 1)
+
+    mask_geom = centre.buffer(50_000)  # @Ethan is this right? Improved mask?
+
+    # @Ethan Think through the following code and make sure it's correct.
+    reg1_img = ee.Image.cat(ee.Image.constant(1), sgi, b11.rename("y"))
+    lr1 = reg1_img.reduceRegion(
+        ee.Reducer.linearRegression(numX=2, numY=1),
+        geometry=mask_geom,
+        scale=20,
+        bestEffort=True,
+    )
+    coef1 = ee.Array(lr1.get("coefficients"))
+    a0, a1 = coef1.get([0, 0]), coef1.get([1, 0])
+    fit = ee.Image.constant(a0).add(ee.Image.constant(a1).multiply(sgi))
+    b11_flat = b11.subtract(fit)
+
+    ratio = b12.divide(b11.add(1e-6))
+    b12_flat = b12.subtract(fit.multiply(ratio))
+
+    x1 = b12_flat
+    x2 = b12_flat.multiply(sgi)
+    reg2_img = ee.Image.cat(x1, x2, b11_flat.rename("y"))
+    lr2 = reg2_img.reduceRegion(
+        ee.Reducer.linearRegression(numX=2, numY=1),
+        geometry=mask_geom,
+        scale=20,
+        bestEffort=True,
+    )
+    coef2 = ee.Array(lr2.get("coefficients"))
+    c0, c1 = coef2.get([0, 0]), coef2.get([1, 0])
+    c = ee.Image.constant(c0).add(ee.Image.constant(c1).multiply(sgi))
+
+    R = c.multiply(b12_flat).subtract(b11_flat).divide(b11_flat.add(1e-6))
+
+    sga_hi = sga_coarse.resample("bilinear").reproject(crs=b11.projection())
+    R = R.updateMask(
+        sga_hi.gt(local_sga_range[0]).And(sga_hi.lt(local_sga_range[1]))
+    ).rename("MBSP")
+    return ee.Image(R).copyProperties(image, ["PRODUCT_ID", "system:time_start"])
 
 
-def invert_mbsp(r: np.ndarray, const: MBSPConstants, tol: float = 1e-6) -> np.ndarray:
-    """Invert MBSP fractional absorption to methane column enhancement.
-
-    Solves ``r = exp(-k12 * delta) - exp(-k11 * delta)`` for ``delta``.
-
-    Parameters
-    ----------
-    r : np.ndarray
-        Fractional absorption field.
-    const : MBSPConstants
-        Absorption coefficients for the sensor.
-    tol : float, optional
-        Root solver tolerance.
-
-    Returns
-    -------
-    np.ndarray
-        Array of methane column enhancements ``delta``.
+# ------------------------------------------------------------------
+def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     """
+    Fractional-slope MBSP (single zero-intercept regression).
+    """
+    region = centre.buffer(50_000)  # @Ethan is this right? Improved mask?
+    num = (
+        image.select("B11")
+        .multiply(image.select("B12"))
+        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
+    )
+    den = (
+        image.select("B12")
+        .pow(2)
+        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
+    )
+    slope = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
 
-    def solve(value: float) -> float:
-        lo = 0.0
-        hi = 5.0
-        # Bracket root
-        for _ in range(100):
-            f_hi = np.exp(-const.k12 * hi) - np.exp(-const.k11 * hi) - value
-            f_lo = np.exp(-const.k12 * lo) - np.exp(-const.k11 * lo) - value
-            if f_lo * f_hi < 0:
-                break
-            hi *= 2
-        for _ in range(100):
-            mid = 0.5 * (lo + hi)
-            f_mid = np.exp(-const.k12 * mid) - np.exp(-const.k11 * mid) - value
-            if abs(f_mid) < tol:
-                return mid
-            if f_lo * f_mid <= 0:
-                hi = mid
-                f_hi = f_mid
-            else:
-                lo = mid
-                f_lo = f_mid
-        return mid
-
-    vectorized = np.vectorize(solve, otypes=[float])
-    return vectorized(r)
+    R = (
+        image.select("B12")
+        .multiply(slope)
+        .subtract(image.select("B11"))
+        .divide(image.select("B11"))
+        .rename("MBSP")
+        .set({"slope": slope})
+    )
+    return R.copyProperties(image, ["PRODUCT_ID", "system:time_start"])
