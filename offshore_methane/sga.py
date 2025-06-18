@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
+import shutil
 
 import numpy as np
 import rasterio
@@ -101,6 +102,40 @@ def compute_sga_coarse(product_id: str, tif_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
+def safe_gsutil_cp(local_path: Path, bucket: str, subfolder: str = "sga") -> str:
+    """
+    Upload a local file to GCS using gsutil, safely across OSes.
+
+    Args:
+        local_path (Path): Path to the local file to upload.
+        bucket (str): GCS bucket name (without gs://).
+        subfolder (str): Subfolder in the bucket. Default is "sga".
+
+    Returns:
+        str: The gs:// URL to the uploaded file.
+    """
+    if not local_path.exists():
+        raise FileNotFoundError(f"Local file does not exist: {local_path}")
+
+    dst = f"gs://{bucket}/{subfolder}/{local_path.name}"
+
+    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
+    if gsutil_cmd is None:
+        raise RuntimeError("gsutil not found on system PATH.")
+
+    try:
+        subprocess.run(
+            [gsutil_cmd, "cp", str(local_path.resolve()), dst],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"gsutil cp failed:\n{e.stderr.decode()}")
+
+    return dst
+
+
 def _is_cog(tif: Path) -> bool:
     try:
         import rasterio
@@ -115,13 +150,14 @@ def gcs_stage(local_path: Path, bucket: str) -> str:
     """
     Upload *local_path* to GCS bucket (if not present) and return gs:// URL.
     """
-    dst = f"gs://{bucket}/sga/{local_path.name}"
-    subprocess.run(
-        ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    return dst
+    return safe_gsutil_cp(local_path, bucket)
+    # dst = f"gs://{bucket}/sga/{local_path.name}"
+    # subprocess.run(
+    #     ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
+    #     check=True,
+    #     stdout=subprocess.DEVNULL,
+    # )
+    # return dst
 
 
 def ensure_sga_asset(
@@ -149,6 +185,8 @@ def ensure_sga_asset(
         print(f"  ↻ computing *coarse* SGA grid for {product_id}")
         compute_sga_coarse(product_id, tif_path)
 
+    print("DEBUG tif_path =", tif_path)
+    print("Exists?", tif_path.exists())
     gcs_url = gcs_stage(tif_path, bucket)
 
     if preferred_location == "ee_asset_folder":
