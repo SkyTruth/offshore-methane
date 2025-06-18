@@ -140,7 +140,7 @@ def ensure_sga_asset(
     """
     prefixed = f"SGA_{product_id}"
     asset_id = f"{ee_asset_folder}/{prefixed}"
-    if ee_asset_folder and ee_asset_exists(asset_id):
+    if preferred_location == "ee_asset_folder" and ee_asset_exists(asset_id):
         return asset_id
 
     tif_path = local_path / "sga" / f"{prefixed}.tif"

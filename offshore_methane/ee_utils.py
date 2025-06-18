@@ -10,14 +10,21 @@ ee.Initialize()  # single global EE session
 
 # ------------------------------------------------------------------
 def sentinel2_product_ids(
-    point: ee.Geometry, start: str, end: str, cloud_pct: int
+    point: ee.Geometry,
+    start: str,
+    end: str,
+    cloud_pct: int,
+    sga_range: tuple[float, float] = (0.0, 25.0),
 ) -> list[str]:
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
         .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_pct))
+        .map(lambda img: add_sga_ok(img, sga_range))
+        .filter(ee.Filter.eq("SGA_OK", 1))
     )
+
     return sorted(set(coll.aggregate_array("PRODUCT_ID").getInfo()))
 
 
@@ -114,61 +121,82 @@ def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
 # ------------------------------------------------------------------
 #  Scene-level sun-glint (metadata only – cheap)
 # ------------------------------------------------------------------
-def scene_glint_check(img: ee.Image, scene_sga_range: tuple[float, float]) -> bool:
-    try:
-        sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
-        saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
-        vza = ee.Number(img.get("MEAN_INCIDENCE_ZENITH_ANGLE_B11"))
-        vaa = ee.Number(img.get("MEAN_INCIDENCE_AZIMUTH_ANGLE_B11"))
+def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> ee.Image:
+    """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
+    # metadata → Numbers
+    sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
+    saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
+    vza = ee.Number(img.get("MEAN_INCIDENCE_ZENITH_ANGLE_B11"))
+    vaa = ee.Number(img.get("MEAN_INCIDENCE_AZIMUTH_ANGLE_B11"))
 
-        sza_r = sza.multiply(np.pi / 180)
-        vza_r = vza.multiply(np.pi / 180)
-        dphi_r = saa.subtract(vaa).abs().multiply(np.pi / 180)
+    # radians
+    rad = ee.Number(np.pi).divide(180)
+    sza_r = sza.multiply(rad)
+    vza_r = vza.multiply(rad)
+    dphi_r = saa.subtract(vaa).abs().multiply(rad)
 
-        cos_sga = (
-            sza_r.cos()
-            .multiply(vza_r.cos())
-            .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
-        )
-        sga_deg = cos_sga.acos().multiply(180 / np.pi)
+    cos_sga = (
+        sza_r.cos()
+        .multiply(vza_r.cos())
+        .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
+    )
+    sga_deg = cos_sga.acos().multiply(180 / np.pi)
 
-        ok = sga_deg.gt(scene_sga_range[0]).And(sga_deg.lt(scene_sga_range[1]))
-        return ok.getInfo()
-    except Exception:
-        return True  # missing metadata → keep scene
+    ok = sga_deg.gt(sga_range[0]).And(sga_deg.lt(sga_range[1]))
+
+    # keep images that *lack* metadata
+    return img.set(
+        "SGA_OK",
+        ee.Algorithms.If(
+            img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
+        ),
+    )
 
 
 # ------------------------------------------------------------------
 #  Local (5 km) tests – require pixels/coarse SGA grid
 # ------------------------------------------------------------------
-def local_cloud_check(
-    img: ee.Image, centre: ee.Geometry, aoi_radius_m: int, local_max_cloud: int
-) -> bool:
-    cloudy = _qa60_cloud_mask(img).Not()
-    frac = (
-        cloudy.reduceRegion(
-            ee.Reducer.mean(), centre.buffer(aoi_radius_m), 60, bestEffort=True
+def product_ok(
+    s2: ee.Image,
+    sga_img: ee.Image,
+    centre: ee.Geometry,
+    aoi_radius_m: int,
+    local_max_cloud: int,
+    local_sga_range: tuple[float, float],
+) -> ee.ComputedObject:
+    """
+    Single EE expression that returns True/False for a product:
+        • cloud fraction inside AOI ≤ local_max_cloud
+        • mean SGA inside AOI within local_sga_range
+    The caller can use `.getInfo()` for blocking or `.evaluate()` for async.
+    """
+    # --- cloud % ---
+    cloud_frac = (
+        _qa60_cloud_mask(s2)
+        .Not()
+        .reduceRegion(
+            ee.Reducer.mean(),
+            centre.buffer(aoi_radius_m),
+            60,
+            bestEffort=True,
         )
         .values()
         .get(0)
     )
-    return ee.Number(frac).multiply(100).lte(local_max_cloud).getInfo()
+    cloud_ok = ee.Number(cloud_frac).multiply(100).lte(local_max_cloud)
 
-
-def local_glint_check(
-    sga_img: ee.Image,
-    centre: ee.Geometry,
-    aoi_radius_m: int,
-    local_sga_range: tuple[float, float],
-) -> bool:
+    # --- sun-glint (SGA) ---
     sga_mean = (
-        sga_img.reduceRegion(ee.Reducer.mean(), centre.buffer(aoi_radius_m), 5000)
+        sga_img.reduceRegion(
+            ee.Reducer.mean(), centre.buffer(aoi_radius_m), 5000, bestEffort=True
+        )
         .values()
         .get(0)
     )
-    ok = (
+    glint_ok = (
         ee.Number(sga_mean)
         .gt(local_sga_range[0])
         .And(ee.Number(sga_mean).lt(local_sga_range[1]))
     )
-    return ok.getInfo()
+
+    return cloud_ok.And(glint_ok)

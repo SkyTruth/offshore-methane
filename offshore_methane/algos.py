@@ -123,3 +123,27 @@ def plume_polygons_three_p(
     return ee.FeatureCollection(
         [ee.Feature(ee.Geometry(f.geometry), f.properties) for f in feats]
     )
+
+
+def logistic_speckle(
+    img: ee.Image,
+    radius_px: int = 4,
+    sigma0: float = 0.02,
+    k: float = 50,
+) -> ee.Image:
+    """
+    Blend each pixel with its neighbourhood mean using a logistic weight:
+        w(sigma) = 1 / (1 + exp( k · (sigma - sigma₀) ))
+    Low sigma  ⇒  w→1 (heavy smoothing),  High sigma ⇒ w→0 (retain detail).
+    """
+    img = ee.Image(img)  # ← ensure Image API is available
+
+    kernel = ee.Kernel.square(radius_px, "pixels", False)
+
+    # nbr_mean = img.reduceNeighborhood(ee.Reducer.mean(), kernel)
+    nbr_var = img.reduceNeighborhood(ee.Reducer.variance(), kernel)
+    sigma = nbr_var.sqrt()
+
+    w = (sigma.subtract(sigma0).multiply(k).multiply(-1)).exp().add(1).pow(-1)
+    return img.multiply(w)
+    # return w.multiply(nbr_mean).add(ee.Image(1).subtract(w).multiply(img))

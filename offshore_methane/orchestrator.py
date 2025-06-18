@@ -13,13 +13,11 @@ from pathlib import Path
 
 import ee
 
-from offshore_methane.algos import plume_polygons_three_p
+from offshore_methane.algos import logistic_speckle, plume_polygons_three_p
 from offshore_methane.ee_utils import (
     export_image,
     export_polygons,
-    local_cloud_check,
-    local_glint_check,
-    scene_glint_check,
+    product_ok,
     sentinel2_product_ids,
 )
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
@@ -43,7 +41,12 @@ LOCAL_SGA_RANGE = (0.0, 20)  # deg
 #  Algorithm switches / constants
 # ------------------------------------------------------------------
 # 0 ⇒ no speckle filtering, 1  ⇒  3 × 3 median window (≈ 20 m), 2 ⇒ 5 × 5
-SPECKLE_RADIUS_PX = 3
+SPECKLE_RADIUS_PX = 10  # size of the square window
+SPECKLE_FILTER_MODE = "adaptive"  # "none" | "median" | "adaptive"
+# Logistic curve controls for adaptive speckle filtering
+LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
+LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
+
 USE_SIMPLE_MBSP = True
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
@@ -52,8 +55,8 @@ EXPORT_PARAMS = {  # uncomment ZERO or ONE key
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
     "max_concurrent_tasks": 10,
-    "preferred_location": None,
-    # "preferred_location": "bucket",
+    # "preferred_location": None,
+    "preferred_location": "bucket",
     # "preferred_location": "ee_asset_folder",
 }
 
@@ -89,9 +92,12 @@ def main():
 
     for site in iter_sites():
         centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
+
+        # ------------- product search -----------------
         products = sentinel2_product_ids(
             centre_pt, site["start"], site["end"], cloud_pct=20
         )
+
         if not products:
             print(f"No products for {site}")
             continue
@@ -99,6 +105,8 @@ def main():
 
         for pid in products:
             print(f"▶ {pid}")
+
+            # ----------- load S2 image -----------------
             s2 = ee.Image(
                 ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
                 .filter(ee.Filter.eq("PRODUCT_ID", pid))
@@ -108,26 +116,23 @@ def main():
                 print("  ⚠ EE image not found")
                 continue
 
-            if not scene_glint_check(s2, SCENE_SGA_RANGE):
-                print("  ✗ scene SGA out of range")
-                continue
-            if not local_cloud_check(s2, centre_pt, AOI_RADIUS_M, LOCAL_MAX_CLOUD):
-                print("  ✗ too cloudy inside AOI")
-                continue
-
-            # Obtain the source (asset ID *or* gs:// URL) …
+            # ----------- SGA asset ---------------------
             sga_src = ensure_sga_asset(pid, **EXPORT_PARAMS)
+
             sga_img = (
                 ee.Image.loadGeoTIFF(sga_src)
                 if isinstance(sga_src, str) and sga_src.startswith("gs://")
                 else ee.Image(sga_src)
             )
 
-            if not local_glint_check(sga_img, centre_pt, AOI_RADIUS_M, LOCAL_SGA_RANGE):
-                print("  ✗ local SGA out of range")
+            # ----------- local cloud/glint -------------------
+            if not product_ok(
+                s2, sga_img, centre_pt, AOI_RADIUS_M, LOCAL_MAX_CLOUD, LOCAL_SGA_RANGE
+            ).getInfo():
+                print("  ✗ local cloud/glint rejected")
                 continue
 
-            # ---------------- MBSP computation -----------------
+            # ---------------- MBSP computation ---------
             if USE_SIMPLE_MBSP:
                 R_img = mbsp_simple_ee(s2, centre_pt)
                 mode_tag = "MBSPs"
@@ -135,8 +140,13 @@ def main():
                 R_img = mbsp_complex_ee(s2, sga_img, centre_pt, LOCAL_SGA_RANGE)
                 mode_tag = "MBSPc"
 
+            # ---------------- Speckle filter -----------
             export_roi = centre_pt.buffer(AOI_RADIUS_M)
-            if SPECKLE_RADIUS_PX > 0:
+            if SPECKLE_FILTER_MODE == "adaptive" and SPECKLE_RADIUS_PX > 0:
+                R_img = logistic_speckle(
+                    R_img, SPECKLE_RADIUS_PX, LOGISTIC_SIGMA0, LOGISTIC_K
+                )
+            elif SPECKLE_FILTER_MODE == "median" and SPECKLE_RADIUS_PX > 0:
                 R_img = (
                     ee.Image(R_img)
                     .clip(export_roi)
@@ -148,32 +158,39 @@ def main():
             else:
                 R_img = ee.Image(R_img).clip(export_roi).toFloat()
 
+            # ---------------- Thumbnail ----------------
             if SHOW_THUMB:
                 url = R_img.visualize(
                     min=-0.1, max=0.1, palette=["red", "white", "blue"]
                 ).getThumbURL({"region": export_roi, "dimensions": 512})
                 print(f"  🖼  thumb → {url}")
 
+            # ---------------- Export raster ------------
             desc = f"{mode_tag}_{pid}"
             rast_task = export_image(R_img, desc, export_roi, **EXPORT_PARAMS)
             if rast_task:
                 active.append(rast_task)
                 print(f"  ⧗ raster task {rast_task.id} started")
 
+            # ---------------- Plume polygons -----------
             vect_fc = plume_polygons_three_p(
                 R_img, export_roi, PLUME_P1, PLUME_P2, PLUME_P3
             ).filterBounds(centre_pt.buffer(LOCAL_PLUME_DIST_M))
+
+            # ---------------- Export vectors -----------
             vect_task = export_polygons(vect_fc, desc, **EXPORT_PARAMS)
             if vect_task:
                 active.append(vect_task)
                 print(f"  ⧗ vector task {vect_task.id} started")
 
-            # throttle EE queue
+            # ---------------- Throttle queue -----------
             while (
                 sum(t.status()["state"] in ("READY", "RUNNING") for t in active)
                 >= EXPORT_PARAMS["max_concurrent_tasks"]
             ):
                 time.sleep(1)
+
+            # ---------------- Total per product --------
 
     # ------------- monitor outstanding tasks -----------------
     print("Waiting for EE exports …")
