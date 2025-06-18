@@ -1,3 +1,4 @@
+# mbsp.py
 """
 Both the complex (SGI + coarse SGA) and simple (Varon 21 fractional-slope)
 MBSP implementations, unchanged from your monolith.

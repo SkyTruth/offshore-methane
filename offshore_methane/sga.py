@@ -1,3 +1,4 @@
+# sga.py
 """
 Write the 23x23 *coarse* Sun-Glint-Angle grid to GeoTIFF and stage it to
 either GCS or EE assets.

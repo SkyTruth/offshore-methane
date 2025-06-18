@@ -1,3 +1,4 @@
+# cdse.py
 """
 All interaction with the Copernicus Dataspace ecosystem lives here.
 """

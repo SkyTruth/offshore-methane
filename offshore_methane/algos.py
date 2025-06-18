@@ -1,3 +1,4 @@
+# algos.py
 """
 Local Three-P plume-polygon extraction (raster → GeoJSON → EE FC).
 Byte-identical port of your original implementation.
@@ -145,5 +146,5 @@ def logistic_speckle(
     sigma = nbr_var.sqrt()
 
     w = (sigma.subtract(sigma0).multiply(k).multiply(-1)).exp().add(1).pow(-1)
-    return img.multiply(w)
+    return img.multiply(w)  # Drive to zero instead of mean
     # return w.multiply(nbr_mean).add(ee.Image(1).subtract(w).multiply(img))
