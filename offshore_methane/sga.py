@@ -15,7 +15,7 @@ import rasterio
 from lxml import etree
 from rasterio.transform import from_origin
 
-from offshore_methane.cdse import download_xml
+from offshore_methane.gcs_utils import download_xml
 from offshore_methane.ee_utils import ee_asset_exists
 
 
@@ -27,9 +27,10 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
     oriented for Earth-Engine ingestion.
     """
-    xml_path = tif_path.with_suffix(".xml")
-    download_xml(sid, xml_path)  # @Brendan which is cheaper and faster? GCS vs CDSE
-    root = etree.parse(str(xml_path))
+    glint_bytes = download_xml(sid)
+
+    parser = etree.XMLParser(no_network=True, remove_blank_text=True)
+    root = etree.fromstring(glint_bytes, parser=parser)
 
     # ----- helpers ---------------------------------------------------
     def _grid2array(values_list):
