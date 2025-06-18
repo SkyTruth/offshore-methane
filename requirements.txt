@@ -10,3 +10,5 @@ pyproj
 python-dotenv
 shapely
 affine
+rasterio
+scipy
