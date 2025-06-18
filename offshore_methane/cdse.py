@@ -50,20 +50,31 @@ _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
 # ------------------------------------------------------------------
 #  Helper regex & tiny wrappers
 # ------------------------------------------------------------------
-_PRODUCT_RE = re.compile(
-    r"^(S2[AB])_MSIL(?P<lvl>[12])[AC]_"
-    r"(?P<start>\d{8}T\d{6})_"
-    r"N\d{4}_R\d{3}_T(?P<tile>\d{2}[A-Z]{3})_"
-    r"(?P<proc>\d{8}T\d{6})$"
+_SYSTEM_INDEX_RE = re.compile(
+    r"^(?P<start>\d{8}T\d{6})_"  # sensing UTC
+    r"(?P<proc>\d{8}T\d{6})_"  # processing UTC
+    r"T(?P<tile>\d{2}[A-Z]{3})$"  # MGRS tile
 )
 
 
-def parse_pid(pid: str) -> dict:
-    m = _PRODUCT_RE.match(pid)
+def parse_sid(sid: str) -> dict:
+    """
+    Parse a Sentinel-2 GEE system:index into its components.
+
+    Returns
+    -------
+    dict :
+        {
+            'start' : sensing datetime string "YYYYMMDDTHHMMSS",
+            'proc'  : processing datetime string,
+            'tile'  : MGRS tile,
+            'date'  : sensing date "YYYYMMDD"
+        }
+    """
+    m = _SYSTEM_INDEX_RE.match(sid)
     if not m:
-        raise ValueError(f"Unrecognised Sentinel-2 Product ID: {pid}")
+        raise ValueError(f"Unrecognised Sentinel-2 system:index: {sid}")
     d = m.groupdict()
-    d["sc"] = "Sentinel-2A" if m.group(1) == "S2A" else "Sentinel-2B"
     d["date"] = d["start"][:8]
     return d
 
@@ -79,26 +90,48 @@ def _list_nodes(uri: str) -> list[dict]:
     return []
 
 
-def _cdse_uuid(product_id: str) -> str | None:
-    p = parse_pid(product_id)
+def _cdse_uuid(sid: str, *, prefer_l2a: bool = False):
+    """
+    Map a GEE Sentinel-2 system:index to its CDSE UUID.
+
+    Parameters
+    ----------
+    sid : str
+        The system:index (not the old PRODUCT_ID).
+    prefer_l2a : bool, optional
+        Query L2A first, then fall back to L1C if nothing found.
+        Set False to invert the order.
+
+    Returns
+    -------
+    str | None
+        CDSE UUID, or None if nothing matched.
+    """
+    p = parse_sid(sid)
     ts = p["start"]
     tile = p["tile"]
-    levelstr = f"MSIL{p['lvl']}C"
 
-    url = (
-        f"{_CATALOG}/Products?$select=Id,Name&$top=1"
-        f"&$orderby=ContentDate/Start desc"
-        f"&$filter=contains(Name,'{ts}') and contains(Name,'T{tile}') "
-        f"and contains(Name,'{levelstr}')"
-    )
-    items = _get(url).json().get("value", [])
-    return items[0]["Id"] if items else None
+    lvl_order = ("MSIL2A", "MSIL1C") if prefer_l2a else ("MSIL1C", "MSIL2A")
+    base = f"{_CATALOG}/Products?$select=Id,Name&$top=1&$orderby=ContentDate/Start desc"
+
+    for lvl in lvl_order:
+        url = (
+            f"{base}"
+            f"&$filter=contains(Name,'{ts}') "
+            f"and contains(Name,'T{tile}') "
+            f"and contains(Name,'{lvl}')"
+        )
+        items = _get(url).json().get("value", [])
+        if items:
+            return items[0]["Id"]
+
+    return None
 
 
-def granule_uri(product_id: str) -> str:
-    uuid = _cdse_uuid(product_id)
+def granule_uri(sid: str) -> str:
+    uuid = _cdse_uuid(sid)
     if uuid is None:
-        raise RuntimeError(f"No UUID for {product_id}")
+        raise RuntimeError(f"No UUID for {sid}")
     root_uri = f"{_DL_BASE}({uuid})/Nodes"
     safe_dir = next(n for n in _list_nodes(root_uri) if n["Name"].endswith(".SAFE"))
     granule_dir = next(
@@ -119,13 +152,13 @@ def download_object(url: str, out_path: Path):
     tmp.rename(out_path)
 
 
-def download_xml(product_id: str, xml_path: Path):
+def download_xml(sid: str, xml_path: Path):
     """
-    Download MTD_TL.xml for *product_id* unless it already exists on disk.
+    Download MTD_TL.xml for *system_index* unless it already exists on disk.
     """
     if xml_path.is_file():
         return
-    download_object(f"{granule_uri(product_id)}/Nodes(MTD_TL.xml)/$value", xml_path)
+    download_object(f"{granule_uri(sid)}/Nodes(MTD_TL.xml)/$value", xml_path)
 
 
 # ------------------------------------------------------------------

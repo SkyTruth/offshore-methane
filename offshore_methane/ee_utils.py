@@ -10,7 +10,7 @@ ee.Initialize()  # single global EE session
 
 
 # ------------------------------------------------------------------
-def sentinel2_product_ids(
+def sentinel2_system_indexes(
     point: ee.Geometry,
     start: str,
     end: str,
@@ -26,7 +26,7 @@ def sentinel2_product_ids(
         .filter(ee.Filter.eq("SGA_OK", 1))
     )
 
-    return sorted(set(coll.aggregate_array("PRODUCT_ID").getInfo()))
+    return sorted(set(coll.aggregate_array("system:index").getInfo()))
 
 
 def ee_asset_exists(asset_id: str) -> bool:

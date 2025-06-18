@@ -2,8 +2,8 @@
 # orchestrator.py
 #!/usr/bin/env python3
 """
-Centralised run‑time configuration & immutable constants.
-Refactored for high‑throughput, thread‑parallel processing.
+Centralised run-time configuration & immutable constants.
+Refactored for high-throughput, thread-parallel processing.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from offshore_methane.ee_utils import (
     export_image,
     export_polygons,
     product_ok,
-    sentinel2_product_ids,
+    sentinel2_system_indexes,
 )
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
@@ -29,7 +29,7 @@ from offshore_methane.sga import ensure_sga_asset
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
-START, END = "2017-07-04", "2017-07-06"
+START, END = "2017-07-04", "2017-07-06"  # Known pollution event
 AOI_RADIUS_M = 5_000
 LOCAL_PLUME_DIST_M = 500
 
@@ -52,7 +52,7 @@ LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
 USE_SIMPLE_MBSP = True
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
-SHOW_THUMB = True  # QA only – keep False in bulk
+SHOW_THUMB = True  # QA only - keep False in bulk
 MAX_WORKERS = 32  # parallel threads
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
@@ -82,39 +82,35 @@ def iter_sites():
                     "end": row.get("end", END),
                 }
     else:
-        print(f"⚠  {SITES_CSV} not found – processing single hard-coded site")
+        print(f"⚠  {SITES_CSV} not found - processing single hard-coded site")
         yield dict(lon=CENTRE_LON, lat=CENTRE_LAT, start=START, end=END)
 
 
 # ------------------------------------------------------------------
-#  Per‑product work unit
+#  Per-product work unit
 # ------------------------------------------------------------------
-def process_product(site: dict, pid: str) -> list[ee.batch.Task]:
+def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     """
-    Entire original inner‑loop wrapped in a function that can run in
+    Entire original inner-loop wrapped in a function that can run in
     parallel threads.  Returns the list of EE tasks it started.
 
-    NOTE: No need to call `ee.Initialize()` here – the global session
-    established in `ee_utils` is thread‑safe and already active.
+    NOTE: No need to call `ee.Initialize()` here - the global session
+    established in `ee_utils` is thread-safe and already active.
     """
     tasks: list[ee.batch.Task] = []
     centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
     export_roi = centre_pt.buffer(AOI_RADIUS_M)
 
-    print(f"▶ {pid}")
+    print(f"▶ {sid}")
 
     # ----------- load S2 image -----------------
-    s2 = ee.Image(
-        ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-        .filter(ee.Filter.eq("PRODUCT_ID", pid))
-        .first()
-    )
+    s2 = ee.Image(f"COPERNICUS/S2_HARMONIZED/{sid}")
     if s2 is None:
         print("  ⚠ EE image not found")
         return tasks
 
     # ----------- SGA asset ---------------------
-    sga_src = ensure_sga_asset(pid, **EXPORT_PARAMS)
+    sga_src = ensure_sga_asset(sid, **EXPORT_PARAMS)
 
     sga_img = (
         ee.Image.loadGeoTIFF(sga_src)
@@ -158,7 +154,7 @@ def process_product(site: dict, pid: str) -> list[ee.batch.Task]:
         print(f"  🖼  thumb → {url}")
 
     # ---------------- Export raster ------------
-    desc = f"{mode_tag}_{pid}"
+    desc = f"{mode_tag}_{sid}"
     rast_task = export_image(R_img, desc, export_roi, **EXPORT_PARAMS)
     if rast_task:
         tasks.append(rast_task)
@@ -190,7 +186,7 @@ def main():
             centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
 
             # -------- product search ----------
-            products = sentinel2_product_ids(
+            products = sentinel2_system_indexes(
                 centre_pt, site["start"], site["end"], cloud_pct=SCENE_MAX_CLOUD
             )
 
@@ -199,8 +195,8 @@ def main():
                 continue
             print(f"{len(products)} product(s) for {site}")
 
-            for pid in products:
-                futures.append(pool.submit(process_product, site, pid))
+            for sid in products:
+                futures.append(pool.submit(process_product, site, sid))
 
         for fut in as_completed(futures):
             active.extend(fut.result())

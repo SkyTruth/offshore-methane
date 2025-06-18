@@ -22,15 +22,13 @@ from offshore_methane.ee_utils import ee_asset_exists
 # ---------------------------------------------------------------------
 #  GeoTIFF writer
 # ---------------------------------------------------------------------
-def compute_sga_coarse(product_id: str, tif_path: Path) -> None:
+def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     """
     Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
     oriented for Earth-Engine ingestion.
     """
     xml_path = tif_path.with_suffix(".xml")
-    download_xml(
-        product_id, xml_path
-    )  # @Brendan which is cheaper and faster? GCS vs CDSE
+    download_xml(sid, xml_path)  # @Brendan which is cheaper and faster? GCS vs CDSE
     root = etree.parse(str(xml_path))
 
     # ----- helpers ---------------------------------------------------
@@ -125,7 +123,7 @@ def gcs_stage(local_path: Path, bucket: str) -> str:
 
 
 def ensure_sga_asset(
-    product_id: str,
+    sid: str,
     ee_asset_folder: str,
     bucket: str,
     local_path: Path = Path("../data"),
@@ -133,21 +131,21 @@ def ensure_sga_asset(
     **kwargs,
 ) -> str:
     """
-    Guarantee that the coarse-grid SGA for *product_id* is available
+    Guarantee that the coarse-grid SGA for *sid* is available
     as either an EE asset or a staged GeoTIFF in GCS.
 
     Returns the EE asset ID (if asset uploads are enabled) *otherwise*
     the gs:// URL.
     """
-    prefixed = f"SGA_{product_id}"
+    prefixed = f"SGA_{sid}"
     asset_id = f"{ee_asset_folder}/{prefixed}"
     if preferred_location == "ee_asset_folder" and ee_asset_exists(asset_id):
         return asset_id
 
     tif_path = local_path / "sga" / f"{prefixed}.tif"
     if not tif_path.is_file():
-        print(f"  ↻ computing *coarse* SGA grid for {product_id}")
-        compute_sga_coarse(product_id, tif_path)
+        print(f"  ↻ computing *coarse* SGA grid for {sid}")
+        compute_sga_coarse(sid, tif_path)
 
     gcs_url = gcs_stage(tif_path, bucket)
 
