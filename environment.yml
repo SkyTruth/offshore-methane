@@ -14,4 +14,4 @@ dependencies:
   - python-dotenv
   - pyproj
   - shapely
-
+  - affine
