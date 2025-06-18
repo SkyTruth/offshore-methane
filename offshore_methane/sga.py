@@ -7,22 +7,22 @@ either GCS or EE assets.
 from __future__ import annotations
 
 import subprocess
-import time
 from pathlib import Path
-
+import os
 import numpy as np
 import rasterio
 from lxml import etree
+from rio_cogeo import cog_profiles
+from rio_cogeo.cogeo import cog_translate
 from rasterio.transform import from_origin
 
-from offshore_methane.gcs_utils import download_xml
-from offshore_methane.ee_utils import ee_asset_exists
-
+from offshore_methane.gcs_utils import get_grid_values_from_xml, download_xml
+from google.cloud import storage
 
 # ---------------------------------------------------------------------
 #  GeoTIFF writer
 # ---------------------------------------------------------------------
-def compute_sga_coarse(sid: str, tif_path: Path) -> None:
+def compute_sga_coarse(sid: str, tif_path: Path, image_bucket = 'offshore-methane') -> None:
     """
     Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
     oriented for Earth-Engine ingestion.
@@ -32,29 +32,11 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     parser = etree.XMLParser(no_network=True, remove_blank_text=True)
     root = etree.fromstring(glint_bytes, parser=parser)
 
-    # ----- helpers ---------------------------------------------------
-    def _grid2array(values_list):
-        rows = [np.fromstring(row, sep=" ") for row in values_list]
-        return np.vstack(rows).astype(np.float32)
-
-    def _mean_detector_grid(root_, band_id: str, xpath_suffix: str):
-        expr = (
-            f".//Viewing_Incidence_Angles_Grids[@bandId='{band_id}']/"
-            f"{xpath_suffix}/Values_List/VALUES/text()"
-        )
-        blocks = root_.xpath(expr)
-        arrays = [
-            _grid2array(blocks[i * 23 : (i + 1) * 23]) for i in range(len(blocks) // 23)
-        ]
-        return np.nanmean(arrays, axis=0)
-
     # ----- raw 23x23 values -----------------------------------------
-    sza = _grid2array(root.xpath(".//Sun_Angles_Grid/Zenith/Values_List/VALUES/text()"))
-    saa = _grid2array(
-        root.xpath(".//Sun_Angles_Grid/Azimuth/Values_List/VALUES/text()")
-    )
-    vza = _mean_detector_grid(root, "12", "Zenith")
-    vaa = _mean_detector_grid(root, "12", "Azimuth")
+    sza = get_grid_values_from_xml(root, './/Sun_Angles_Grid/Zenith')
+    saa = get_grid_values_from_xml(root, './/Sun_Angles_Grid/Azimuth')
+    vza = get_grid_values_from_xml(root, './/Viewing_Incidence_Angles_Grids/Zenith')
+    vaa = get_grid_values_from_xml(root, './/Viewing_Incidence_Angles_Grids/Azimuth')
 
     # sun-glint angle
     delta_phi = np.deg2rad(np.abs(saa - vaa))
@@ -64,11 +46,6 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
             - np.sin(np.deg2rad(sza)) * np.sin(np.deg2rad(vza)) * np.cos(delta_phi)
         )
     ).astype(np.float32)
-
-    # EE expects origin top-left with row-major order
-    sga_grid = np.rot90(
-        np.flipud(sga_grid.T), k=-1
-    )  # @Brendan WTF is jona doing here? Should I really be rotating and flipping arbitrarily to make it "look right"?
 
     # geotransform: 5 km pixels
     ulx = float(root.findtext(".//Geoposition/ULX"))
@@ -83,22 +60,27 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         "dtype": "float32",
         "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
         "transform": tr,
-        # --- COG‑compliant settings ----------------------------------
-        "tiled": True,  # GeoTIFF is now tiled
-        "blockxsize": 16,  # must be multiple of 16
-        "blockysize": 16,
-        "compress": "deflate",
-        "predictor": 2,
     }
     tif_path.parent.mkdir(parents=True, exist_ok=True)
+
     with rasterio.open(tif_path, "w", **profile) as dst:
         dst.write(sga_grid, 1)
+        cog_translate(
+                dst,
+                tif_path,
+                cog_profiles.get('deflate'),
+                in_memory=False
+            )
+    
+    blob = image_bucket.blob(tif_path)
+    blob.upload_from_filename(tif_path)
 
+    # Removes the file on local.
+    os.remove(tif_path)
 
 # ---------------------------------------------------------------------
 #  GCS + EE staging helpers
 # ---------------------------------------------------------------------
-
 
 def _is_cog(tif: Path) -> bool:
     try:
@@ -125,43 +107,20 @@ def gcs_stage(local_path: Path, bucket: str) -> str:
 
 def ensure_sga_asset(
     sid: str,
-    ee_asset_folder: str,
-    bucket: str,
+    bucket,
+    tif_path,
     local_path: Path = Path("../data"),
-    preferred_location: str = None,
     **kwargs,
 ) -> str:
-    """
-    Guarantee that the coarse-grid SGA for *sid* is available
-    as either an EE asset or a staged GeoTIFF in GCS.
+    client = storage.Client()                # Uses default credentials
+    bucket = client.bucket(bucket)
+    blob = bucket.blob(f"{bucket}/{tif_path}")
 
-    Returns the EE asset ID (if asset uploads are enabled) *otherwise*
-    the gs:// URL.
-    """
-    prefixed = f"SGA_{sid}"
-    asset_id = f"{ee_asset_folder}/{prefixed}"
-    if preferred_location == "ee_asset_folder" and ee_asset_exists(asset_id):
-        return asset_id
-
-    tif_path = local_path / "sga" / f"{prefixed}.tif"
-    if not tif_path.is_file():
+    if not blob.exists(client):                  # Pass client for a single round-trip
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
-        compute_sga_coarse(sid, tif_path)
+        compute_sga_coarse(sid,tif_path,bucket)
 
-    gcs_url = gcs_stage(tif_path, bucket)
+    else:
+        print(f'Grid for {sid} already exists.')
 
-    if preferred_location == "ee_asset_folder":
-        # @Brendan it would be SOO nice if we could just use this from GCS instead of doing asset upload... ALSO check for anywhere else we're doing an asset upload and think through how to do better.
-        print(f"  ↑ ingesting as EE asset {asset_id}")
-        subprocess.run(
-            ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
-            check=True,
-        )
-
-        while not ee_asset_exists(asset_id):
-            time.sleep(1)
-
-        subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
-        return asset_id
-
-    return gcs_url
+    return f"gs://{bucket}/{tif_path}"
