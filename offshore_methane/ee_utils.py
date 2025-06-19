@@ -155,23 +155,39 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 
 
 # ------------------------------------------------------------------
-#  Local (5 km) tests – require pixels/coarse SGA grid
+#  Local (5 km) tests – require pixels/coarse SGA grid
 # ------------------------------------------------------------------
-def product_ok(
-    s2: ee.Image,
-    sga_img: ee.Image,
-    centre: ee.Geometry,
-    aoi_radius_m: int,
-    local_max_cloud: int,
-    local_sga_range: tuple[float, float],
-) -> ee.ComputedObject:
-    """
-    Single EE expression that returns True/False for a product:
-        • cloud fraction inside AOI ≤ local_max_cloud
-        • mean SGA inside AOI within local_sga_range
-    The caller can use `.getInfo()` for blocking or `.evaluate()` for async.
-    """
-    # --- cloud % ---
+def _wind_test(s2, centre, aoi_radius_m, max_wind_10m):
+    acq_time = ee.Date(s2.get("system:time_start"))
+    img = (
+        ee.ImageCollection("NOAA/CFSV2/FOR6H")
+        .filterDate(
+            acq_time.advance(-3, "hour"),  # ±1 h catches the nearest 00:30 stamp
+            acq_time.advance(3, "hour"),
+        )
+        .first()
+    )
+
+    u = img.select(
+        "u-component_of_wind_height_above_ground"
+    )  # or CFSv2 band names if you chose that
+    v = img.select("v-component_of_wind_height_above_ground")
+    w = u.hypot(v).rename("wind10")
+
+    local_mean = (
+        w.reduceRegion(
+            ee.Reducer.mean(), centre.buffer(aoi_radius_m), 20_000, bestEffort=True
+        )
+        .values()
+        .get(0)
+    )
+
+    return ee.Algorithms.If(
+        local_mean, ee.Number(local_mean).lte(max_wind_10m), ee.Number(1)
+    )
+
+
+def _cloud_test(s2, centre, aoi_radius_m, local_max_cloud):
     cloud_frac = (
         _qa60_cloud_mask(s2)
         .Not()
@@ -184,9 +200,10 @@ def product_ok(
         .values()
         .get(0)
     )
-    cloud_ok = ee.Number(cloud_frac).multiply(100).lte(local_max_cloud)
+    return ee.Number(cloud_frac).multiply(100).lte(local_max_cloud)
 
-    # --- sun-glint (SGA) ---
+
+def _glint_test(sga_img, centre, aoi_radius_m, local_sga_range):
     sga_mean = (
         sga_img.reduceRegion(
             ee.Reducer.mean(), centre.buffer(aoi_radius_m), 5000, bestEffort=True
@@ -194,10 +211,32 @@ def product_ok(
         .values()
         .get(0)
     )
-    glint_ok = (
+
+    return (
         ee.Number(sga_mean)
         .gt(local_sga_range[0])
         .And(ee.Number(sga_mean).lt(local_sga_range[1]))
     )
 
-    return cloud_ok.And(glint_ok)
+
+def product_ok(
+    s2: ee.Image,
+    sga_img: ee.Image,
+    centre: ee.Geometry,
+    aoi_radius_m: int,
+    local_max_cloud: int,
+    local_sga_range: tuple[float, float],
+    max_wind_10m: float,
+) -> ee.ComputedObject:
+    """
+    True/False quality gate for a Sentinel-2 product:
+        • cloud fraction inside AOI ≤ local_max_cloud
+        • mean SGA inside AOI within local_sga_range
+        • CFSv2 10 m wind (local) ≤ max_wind_10m
+    """
+    # ---------- combined verdict -----------------------------------------
+    return (
+        _cloud_test(s2, centre, aoi_radius_m, local_max_cloud)
+        .And(_glint_test(sga_img, centre, aoi_radius_m, local_sga_range))
+        .And(_wind_test(s2, centre, aoi_radius_m, max_wind_10m))
+    )

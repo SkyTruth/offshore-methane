@@ -35,6 +35,7 @@ LOCAL_PLUME_DIST_M = 500
 
 SCENE_MAX_CLOUD = 20  # % metadata CLOUDY_PIXEL_PERCENTAGE
 LOCAL_MAX_CLOUD = 5  # % QA60 inside AOI
+MAX_WIND_10M = 9  # m s‑1 upper limit for ERA5 10 m wind
 
 SCENE_SGA_RANGE = (0.0, 25)  # deg
 LOCAL_SGA_RANGE = (0.0, 20)  # deg
@@ -120,7 +121,13 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ----------- local cloud/glint -------------------
     if not product_ok(
-        s2, sga_img, centre_pt, AOI_RADIUS_M, LOCAL_MAX_CLOUD, LOCAL_SGA_RANGE
+        s2,
+        sga_img,
+        centre_pt,
+        AOI_RADIUS_M,
+        LOCAL_MAX_CLOUD,
+        LOCAL_SGA_RANGE,
+        MAX_WIND_10M,
     ).getInfo():
         print("  ✗ local cloud/glint rejected")
         return tasks
