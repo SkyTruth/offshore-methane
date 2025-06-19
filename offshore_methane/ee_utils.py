@@ -155,6 +155,63 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 
 
 # ------------------------------------------------------------------
+# Local-level glint – SGI
+# ------------------------------------------------------------------
+
+
+def add_sgi(image):
+    image = _qa60_cloud_mask(image)
+    # --- bands to 0-1 reflectance ----------------------------------
+    b12 = image.select("B12").divide(10000)  # SWIR 20 m
+    b11 = image.select("B11").divide(10000)
+
+    # average VIS (B02 + B03 + B04) → resample to 20 m
+    b02 = (
+        image.select("B2")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b03 = (
+        image.select("B3")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b04 = (
+        image.select("B4")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+    b_vis = b02.add(b03).add(b04).divide(3).rename("Bvis_20m")
+
+    # Sun–glint index (Varon 2021, eqn 4)
+    denom = b12.add(b_vis).max(1e-4)
+    sgi = b12.subtract(b_vis).divide(denom).clamp(-1, 1).rename("sgi")
+    return image.addBands(sgi)
+
+
+def add_sgi_b3(image):
+    image = _qa60_cloud_mask(image)
+    # --- bands to 0-1 reflectance ----------------------------------
+    b12 = image.select("B12").divide(10000)  # SWIR 20 m
+    b11 = image.select("B11").divide(10000)
+
+    b03 = (
+        image.select("B3")
+        .divide(10000)
+        .resample("bilinear")
+        .reproject(crs=b11.projection())
+    )
+
+    # Sun–glint index (Varon 2021, eqn 4)
+    denom = b12.add(b03).max(1e-4)
+    sgi = b12.subtract(b03).divide(denom).clamp(-1, 1).rename("sgi_b3")
+    return image.addBands(sgi)
+
+
+# ------------------------------------------------------------------
 #  Local (5 km) tests – require pixels/coarse SGA grid
 # ------------------------------------------------------------------
 def _wind_test(s2, centre, aoi_radius_m, max_wind_10m):
