@@ -82,7 +82,7 @@ def mbsp_complex_ee(
     R = R.updateMask(
         sga_hi.gt(local_sga_range[0]).And(sga_hi.lt(local_sga_range[1]))
     ).rename("MBSP")
-    return ee.Image(R).copyProperties(image, ["PRODUCT_ID", "system:time_start"])
+    return ee.Image(R).copyProperties(image, ["system:index", "system:time_start"])
 
 
 # ------------------------------------------------------------------
@@ -111,4 +111,4 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
         .rename("MBSP")
         .set({"slope": slope})
     )
-    return R.copyProperties(image, ["PRODUCT_ID", "system:time_start"])
+    return R.copyProperties(image, ["system:index", "system:time_start"])
