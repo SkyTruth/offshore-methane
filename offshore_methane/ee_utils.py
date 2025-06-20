@@ -5,8 +5,55 @@ Thin wrappers around the Earth-Engine Python client.
 
 import ee
 import numpy as np
+import geemap
 
 ee.Initialize()  # single global EE session
+
+
+def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
+    """
+    Display a Sentinel-2 image by system:index from S2_HARMONIZED using geemap.
+    Optionally, zoom to a given region (ee.Geometry).
+    Allows custom bands and autoscaled visualization.
+    """
+    # Find the image by system:index
+    coll = ee.ImageCollection("COPERNICUS/S2_HARMONIZED").filter(
+        ee.Filter.eq("system:index", system_index)
+    )
+    img = coll.first()
+
+    # Autoscale: get min/max for each band in the region or image footprint
+    scale_region = region if region is not None else img.geometry()
+    stats = (
+        img.select(bands)
+        .reduceRegion(
+            reducer=ee.Reducer.percentile([2, 98]),
+            geometry=scale_region,
+            scale=20,
+            bestEffort=True,
+        )
+        .getInfo()
+    )
+
+    # Build min/max lists for visualization
+    min_vals = [stats.get(f"{b}_p2", 0) for b in bands]
+    max_vals = [stats.get(f"{b}_p98", 3000) for b in bands]
+
+    vis_params = {
+        "bands": bands,
+        "min": min_vals,
+        "max": max_vals,
+        "gamma": 1.2,
+    }
+
+    Map = geemap.Map()
+    Map.addLayer(img, vis_params, f"S2 {system_index}")
+    if region is not None:
+        Map.centerObject(region, 10)
+    else:
+        Map.centerObject(img, 10)
+    Map.addLayerControl()
+    return Map
 
 
 # ------------------------------------------------------------------
