@@ -17,26 +17,8 @@ from shapely.geometry import MultiPolygon, shape
 
 
 # ------------------------------------------------------------------
-def instances_from_probs(
-    raster,
-    p1,
-    p2,
-    p3,
-    transform=Affine.identity(),
-    addl_props={},
-    discard_edge_polygons_buffer=0.005,
-):
+def instances_from_probs(raster, p1, p2, p3, transform=Affine.identity()):
     """Return GeoJSON features for independent plumes."""
-
-    def overlap_percent(a, b):
-        if not a.intersects(b):
-            return 0.0
-        elif a.within(b):
-            return 1.0
-        else:
-            return a.intersection(b).area / a.area
-
-    nodata_mask = raster == 0
 
     # choose operator depending on sign
     if p1 < 0 and p2 < 0 and p3 < 0:
@@ -53,21 +35,12 @@ def instances_from_probs(
     p1_p2_p3_mask = p1_p3_mask & p2_mask
     combined_raster = p1_p2_p3_mask * p1_islands
 
-    scene_edge = MultiPolygon(
-        shape(geom)
-        for geom, value in shapes(
-            nodata_mask.astype(np.uint8), mask=nodata_mask, transform=transform
-        )
-        if value == 1
-    ).buffer(discard_edge_polygons_buffer)
-
     label_geometries = {}
     for geom, lbl in shapes(
         combined_raster, mask=combined_raster > 0, transform=transform
     ):
         poly = shape(geom)
-        if overlap_percent(poly, scene_edge) <= 0.5:
-            label_geometries.setdefault(lbl, []).append(poly)
+        label_geometries.setdefault(lbl, []).append(poly)
 
     features = []
     for polys in label_geometries.values():
@@ -84,7 +57,6 @@ def instances_from_probs(
                     "median_conf": float(np.median(masked)),
                     "max_conf": float(np.max(masked)),
                     "machine_confidence": float(np.median(masked)),
-                    **addl_props,
                 },
             )
         )
@@ -112,15 +84,7 @@ def plume_polygons_three_p(
     h, w = grid.shape
     transform = from_origin(minx, maxy, (maxx - minx) / w, (maxy - miny) / h)
 
-    feats = instances_from_probs(
-        grid,
-        p1,
-        p2,
-        p3,
-        transform=transform,
-        addl_props={"scale_m": 20, "threeP": True},
-        discard_edge_polygons_buffer=0.0005,
-    )
+    feats = instances_from_probs(grid, p1, p2, p3, transform=transform)
     return ee.FeatureCollection(
         [ee.Feature(ee.Geometry(f.geometry), f.properties) for f in feats]
     )
