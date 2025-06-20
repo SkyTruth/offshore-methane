@@ -7,7 +7,6 @@ either GCS or EE assets.
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -25,11 +24,15 @@ from offshore_methane.gcs_utils import download_xml, get_grid_values_from_xml
 #  GeoTIFF writer
 # ---------------------------------------------------------------------
 def compute_sga_coarse(
-    sid: str, tif_path: Path, image_bucket="offshore-methane"
+    sid: str,
+    local_tif: Path,
+    bucket_obj: storage.Bucket,
+    remote_path: str,
 ) -> None:
     """
-    Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
-    oriented for Earth-Engine ingestion.
+    Save the un-interpolated 23 x 23 SGA grid (5 km px) as a Cloud-Optimised
+    GeoTIFF, upload it to ``bucket_obj`` at ``remote_path`` and remove the
+    on-disk temporary.
     """
     glint_bytes = download_xml(sid)
 
@@ -65,63 +68,63 @@ def compute_sga_coarse(
         "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
         "transform": tr,
     }
-    tif_path.parent.mkdir(parents=True, exist_ok=True)
+    local_tif.parent.mkdir(parents=True, exist_ok=True)
 
-    with rasterio.open(tif_path, "w", **profile) as dst:
+    with rasterio.open(local_tif, "w", **profile) as dst:
         dst.write(sga_grid, 1)
-        cog_translate(dst, tif_path, cog_profiles.get("deflate"), in_memory=False)
+        cog_translate(dst, local_tif, cog_profiles.get("deflate"), in_memory=False)
 
-    blob = image_bucket.blob(tif_path)
-    blob.upload_from_filename(tif_path)
+    # ─── Upload to GCS ────────────────────────────────────────────────
+    blob = bucket_obj.blob(remote_path)
+    blob.upload_from_filename(str(local_tif))
 
-    # Removes the file on local.
-    os.remove(tif_path)
+    # Clean up local artefact
+    os.remove(local_tif)
 
 
 # ---------------------------------------------------------------------
 #  GCS + EE staging helpers
 # ---------------------------------------------------------------------
-
-
-def _is_cog(tif: Path) -> bool:
-    try:
-        import rasterio
-
-        with rasterio.open(tif) as ds:
-            return ds.is_tiled
-    except Exception:
-        return False
-
-
-def gcs_stage(local_path: Path, bucket: str) -> str:
-    """
-    Upload *local_path* to GCS bucket (if not present) and return gs:// URL.
-    """
-    dst = f"gs://{bucket}/sga/{local_path.name}"
-    subprocess.run(
-        ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    return dst
-
-
 def ensure_sga_asset(
     sid: str,
-    bucket,
-    tif_path,
-    local_path: Path = Path("../data"),
+    bucket: str,
+    local_dir: Path = Path("../data/sga"),
     **kwargs,
 ) -> str:
+    """
+    Guarantee that a Cloud-Optimised GeoTIFF for the Sentinel-2 ``sid`` exists
+    in the requested destination and return its URL.
+
+    Parameters
+    ----------
+    sid
+        Sentinel-2 image identifier (same string you’d pass to
+        ``COPERNICUS/S2_HARMONIZED``).
+    bucket
+        Name of the GCS bucket where the file should live.
+    local_dir
+        Where to create the temporary GeoTIFF.
+
+    Returns
+    -------
+    str
+        ``gs://`` URL.
+    """
+    # File naming convention
+    filename = f"{sid}_sga_coarse.tif"
+    remote_path = f"sga/{filename}"
+    local_tif = local_dir / filename
+
+    # Set up GCS client/bucket
     client = storage.Client()  # Uses default credentials
-    bucket = client.bucket(bucket)
-    blob = bucket.blob(f"{bucket}/{tif_path}")
+    bucket_obj = client.bucket(bucket)
+    blob = bucket_obj.blob(remote_path)
 
     if not blob.exists(client):  # Pass client for a single round-trip
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
-        compute_sga_coarse(sid, tif_path, bucket)
+        compute_sga_coarse(sid, local_tif, bucket_obj, remote_path)
 
     else:
         print(f"Grid for {sid} already exists.")
 
-    return f"gs://{bucket}/{tif_path}"
+    return f"gs://{bucket}/{remote_path}"

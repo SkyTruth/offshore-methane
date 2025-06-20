@@ -112,12 +112,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ----------- SGA asset ---------------------
     sga_src = ensure_sga_asset(sid, **EXPORT_PARAMS)
-
-    sga_img = (
-        ee.Image.loadGeoTIFF(sga_src)
-        if isinstance(sga_src, str) and sga_src.startswith("gs://")
-        else ee.Image(sga_src)
-    )
+    sga_img = ee.Image.loadGeoTIFF(sga_src)
 
     # ----------- local cloud/glint -------------------
     if not product_ok(
