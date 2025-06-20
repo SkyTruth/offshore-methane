@@ -183,8 +183,6 @@ def ensure_sga_asset(
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
         compute_sga_coarse(sid, tif_path)
 
-    print("DEBUG tif_path =", tif_path)
-    print("Exists?", tif_path.exists())
     gcs_url = gcs_stage(tif_path, bucket)
 
     if preferred_location == "ee_asset_folder":

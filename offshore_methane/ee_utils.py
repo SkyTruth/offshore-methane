@@ -119,6 +119,35 @@ def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
     return img.updateMask(cloudy.Not())
 
 
+def _cloud_color_mask(img: ee.Image) -> ee.Image:
+    """Adds bands to identify clouds based on RGB whiteness.
+
+    Adds:
+        - 'color_cloud': binary mask (1 = likely cloud)
+        - 'brightness': mean of RGB reflectance
+        - 'rgb_std': standard deviation of RGB reflectance
+    """
+
+    # Select and scale RGB bands (assuming DN values; scale to reflectance)
+    rgb = img.select(["B4", "B3", "B2"])  # Red, Green, Blue
+
+    # Calculate brightness (mean) and std deviation (color similarity)
+    brightness = rgb.reduce(ee.Reducer.mean()).rename("brightness")
+    rgb_std = rgb.reduce(ee.Reducer.stdDev()).rename("rgb_std")
+
+    # Default thresholds (can be adjusted experimentally)
+    bright_thresh = 2000
+    std_thresh = 200
+
+    # Identify bright, low-saturation (white-ish) pixels
+    # cloud_mask = brightness.gt(bright_thresh).And(rgb_std.lt(std_thresh))
+    cloud_mask = brightness.lt(bright_thresh).Or(rgb_std.gt(std_thresh))
+
+    # Add all three bands
+    # return img.addBands([brightness, rgb_std, cloud_mask.rename("color_cloud").uint8()])
+    return img.updateMask(cloud_mask)
+
+
 # ------------------------------------------------------------------
 #  Scene-level sun-glint (metadata only – cheap)
 # ------------------------------------------------------------------
@@ -147,10 +176,12 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 
     # keep images that *lack* metadata
     return img.set(
-        "SGA_OK",
-        ee.Algorithms.If(
-            img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
-        ),
+        {
+            "SGA_DEG": sga_deg,
+            "SGA_OK": ee.Algorithms.If(
+                img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
+            ),
+        }
     )
 
 
@@ -159,8 +190,8 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 # ------------------------------------------------------------------
 
 
-def add_sgi(image):
-    image = _qa60_cloud_mask(image)
+def add_sgi(image: ee.Image) -> ee.Image:
+    image = _cloud_color_mask(image)
     # --- bands to 0-1 reflectance ----------------------------------
     b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)
@@ -193,7 +224,7 @@ def add_sgi(image):
 
 
 def add_sgi_b3(image):
-    image = _qa60_cloud_mask(image)
+    image = _cloud_color_mask(image)
     # --- bands to 0-1 reflectance ----------------------------------
     b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)
