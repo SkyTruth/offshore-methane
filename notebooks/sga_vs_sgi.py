@@ -335,3 +335,28 @@ plt.show()
 # csv_path = Path("../data") / "sgi_vs_sga_pixels.csv"
 # df.to_csv(csv_path, index=False)
 # print(f"Saved DataFrame to {csv_path}")
+# %%
+
+sga_pixels_arr = np.array(sga_pixels)
+sgi_pixels_arr = np.array(sgi_pixels)
+
+# coeffs = np.polyfit(sga_pixels_arr, sgi_pixels_arr, deg=1)  # degree 1 = linear
+# m, b = coeffs
+# sgi_pixels_fit = m * sga_pixels_arr + b
+
+poly_coeffs = np.polyfit(sga_pixels_arr, sgi_pixels_arr, deg=5)
+
+# # Turn into function
+p = np.poly1d(poly_coeffs)
+sgi_pixels_fit = p(sga_pixels_arr)
+
+plt.scatter(sga_pixels, sgi_pixels, alpha=0.005)
+# plt.scatter(np.linspace(10, 45), m * np.linspace(10, 45) + b)
+plt.scatter(np.linspace(10, 45), p(np.linspace(10, 45)))
+## %%
+system_index = "20240913T162829_20240913T163739_T15QWB"
+s2_image = (
+    ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+    .filter(ee.Filter.eq("system:index", system_index))
+    .first()
+)
