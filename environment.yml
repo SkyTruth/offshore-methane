@@ -7,6 +7,7 @@ dependencies:
   - geemap
   - jupyter
   - numpy
+  - ipywidgets
   - pre-commit
   - ruff
   - pytest
