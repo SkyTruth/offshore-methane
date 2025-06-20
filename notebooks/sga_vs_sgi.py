@@ -11,7 +11,7 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
 import matplotlib.pyplot as plt
-
+from tqdm import tqdm
 
 module_path = os.path.abspath(os.path.join("..", "offshore_methane"))
 if module_path not in sys.path:
@@ -99,7 +99,7 @@ def sample_glint_vs_sgi(
     plt.grid(True)
     plt.show()
 
-    return image_with_sgi
+    return gdf
 
 
 def linear_fit(img):
@@ -162,7 +162,11 @@ def mask_land(image):
 
 
 # Step 1: Set universal values here.
-mbsp_visRange = 0.3
+rgb_vis = {
+    "bands": ["B4", "B3", "B2"],
+    "min": 0,
+    "max": 2500,
+}
 
 # Step 2: Define study area.
 
@@ -185,9 +189,12 @@ glint_alphas = []
 sgi_means = []
 sgi_means_b3 = []
 
+sgi_pixels = []
+sga_pixels = []
+sid_pixels = []
 # %%
-# for index in range(p_size.getInfo()):
-for index in [0, 28]:
+for index in tqdm(range(p_size.getInfo())):
+    # for index in range(41):
     platform = ee.Feature(plume_list.get(index))
     aoi = platform.geometry().buffer(10000).bounds()
     plume_date = ee.Date(platform.get("start_date"))
@@ -240,35 +247,91 @@ for index in [0, 28]:
     #     sid, tif_path, n_points=500, aoi=platform.buffer(radius_of_interest).geometry()
     # )
 
-    glint_vs_sgi_gdf = sample_glint_vs_sgi(sid, tif_path, n_points=5000)
+    if not tif_path.is_file():
+        print(f"  ↻ computing *coarse* SGA grid for {sid}")
+        compute_sga_coarse(sid, tif_path)
 
-    # if not tif_path.is_file():
-    #     print(f"  ↻ computing *coarse* SGA grid for {sid}")
-    #     compute_sga_coarse(sid, tif_path)
+    glint_vs_sgi_gdf = sample_glint_vs_sgi(sid, tif_path, n_points=5000)
+    sgi_pixels.extend(list(glint_vs_sgi_gdf["sgi"].values))
+    sga_pixels.extend(list(glint_vs_sgi_gdf["glint_alpha"].values))
+    sid_pixels.extend([sid] * len(glint_vs_sgi_gdf))
+
+    # %%
+    # import matplotlib.pyplot as plt
+
+    # plt.figure(figsize=(8, 6))
+    # plt.scatter(glint_alphas, sgi_means, label="Sun Glint Index", color="blue", alpha=0.7)
+    # plt.scatter(
+    #     glint_alphas,
+    #     sgi_means_b3,
+    #     label="Sun Glint Index (GREEN)",
+    #     color="green",
+    #     alpha=0.7,
+    # )
+    # plt.xlabel("Sun Glint Alpha")
+    # plt.ylabel("SGI Mean")
+    # plt.title("SGI Mean vs Sun Glint Alpha")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
+    # plt.show()
+    # %%
+
+    # %%
+# index = 0
+# # index = 28
+# platform = ee.Feature(plume_list.get(index))
+# aoi = platform.geometry().buffer(10000).bounds()
+# plume_date = ee.Date(platform.get("start_date"))
+# print("Plume start date:", plume_date.getInfo())
+# s2_collection = (
+#     ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+#     .filterBounds(aoi)
+#     # .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 90))
+#     .filterDate(plume_date.format("YYYY-MM-dd"), plume_date.advance(2, "day"))
+# )
+# sgi = add_sgi(s2_collection.first())
+# Map = geemap.Map()
+# Map.addLayer(s2_collection.first(), rgb_vis, "Sentinel-2 True-Colour", True)
+# Map.addLayer(sgi.select("sgi"), {}, "actual sgi")
+# Map.centerObject(platform, 9)
+# Map
 
 # %%
+
+
 import matplotlib.pyplot as plt
 
+# Assign a unique color to each sid using a colormap
+unique_sids = list(set(sid_pixels))
+colors = plt.cm.tab20(np.linspace(0, 1, len(unique_sids)))
+sid_to_color = {sid: colors[i] for i, sid in enumerate(unique_sids)}
+
 plt.figure(figsize=(8, 6))
-plt.scatter(glint_alphas, sgi_means, label="Sun Glint Index", color="blue", alpha=0.7)
-plt.scatter(
-    glint_alphas,
-    sgi_means_b3,
-    label="Sun Glint Index (GREEN)",
-    color="green",
-    alpha=0.7,
-)
-plt.xlabel("Sun Glint Alpha")
-plt.ylabel("SGI Mean")
-plt.title("SGI Mean vs Sun Glint Alpha")
-plt.legend()
-plt.grid(True)
+for sid in unique_sids:
+    idx = [i for i, s in enumerate(sid_pixels) if s == sid]
+    plt.scatter(
+        [sga_pixels[i] for i in idx],
+        [sgi_pixels[i] for i in idx],
+        color=sid_to_color[sid],
+        alpha=0.01,
+        label=str(sid),
+    )
+
+plt.xlabel("glint_alpha")
+plt.ylabel("sgi")
+plt.title("Glint Alpha vs SGI (colored by sid)")
+# plt.legend(title="sid", loc="upper right")
 plt.tight_layout()
 plt.show()
-# %%
-Map = geemap.Map()
-Map.addLayer(img.select("sgi"), {}, "actual sgi")
-Map.centerObject(platform, 9)
-Map
 
 # %%
+# # Save sgi_pixels, sga_pixels, sid_pixels as a DataFrame and export to CSV
+# df = pd.DataFrame({
+#     "sgi": sgi_pixels,
+#     "glint_alpha": sga_pixels,
+#     "sid": sid_pixels
+# })
+# csv_path = Path("../data") / "sgi_vs_sga_pixels.csv"
+# df.to_csv(csv_path, index=False)
+# print(f"Saved DataFrame to {csv_path}")

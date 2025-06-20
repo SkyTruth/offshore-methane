@@ -53,13 +53,13 @@ LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
 USE_SIMPLE_MBSP = True
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
-SHOW_THUMB = True  # QA only - keep False in bulk
+SHOW_THUMB = False  # QA only - keep False in bulk
 MAX_WORKERS = 32  # parallel threads
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
-    # "preferred_location": None, # Uncomment only one
-    "preferred_location": "bucket",  # Uncomment only one
+    "preferred_location": None,  # Uncomment only one
+    # "preferred_location": "bucket",  # Uncomment only one
     # "preferred_location": "ee_asset_folder", # Uncomment only one
 }
 
