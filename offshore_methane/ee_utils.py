@@ -160,6 +160,23 @@ def export_polygons(
 # ------------------------------------------------------------------
 #  Scene-level & local cloud / glint rejection tests.
 # ------------------------------------------------------------------
+def _mask_land(image):
+    """
+    Use JAXA/GCOM-C LST as a land mask. We take the mean over Jan 2024,
+    then mask out any pixel where LST_AVE is non-zero (i.e., keep non-land).
+    """
+    # Filter the land surface temperature collection to January 2024.
+    lst_collection = ee.ImageCollection("JAXA/GCOM-C/L3/LAND/LST/V3").filterDate(
+        "2024-01-01", "2024-02-01"
+    )
+    lst_mosaic = lst_collection.mean()
+    # Any pixel with a non-zero LST_AVE is considered land.
+    land_masker = lst_mosaic.select("LST_AVE").reduce(ee.Reducer.anyNonZero())
+
+    # Keep only pixels where land_masker == 0 (i.e., water or non-land).
+    return image.updateMask(land_masker.unmask(0).eq(0))
+
+
 def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
     qa = img.select("QA60")
     cloudy = qa.bitwiseAnd(1 << 10).Or(qa.bitwiseAnd(1 << 11))
@@ -239,6 +256,7 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 
 def add_sgi(image: ee.Image) -> ee.Image:
     image = _cloud_color_mask(image)
+    image = _mask_land(image)
     # --- bands to 0-1 reflectance ----------------------------------
     b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)
@@ -272,6 +290,8 @@ def add_sgi(image: ee.Image) -> ee.Image:
 
 def add_sgi_b3(image):
     image = _cloud_color_mask(image)
+    image = _mask_land(image)
+
     # --- bands to 0-1 reflectance ----------------------------------
     b12 = image.select("B12").divide(10000)  # SWIR 20 m
     b11 = image.select("B11").divide(10000)

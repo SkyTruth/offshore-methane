@@ -31,6 +31,7 @@ def sample_glint_vs_sgi(
     glint_alpha_path: str,
     n_points: int = 500,
     aoi: ee.Geometry = None,
+    use_single_band: str = None,
 ):
     """
     Samples 'sgi' from Earth Engine and 'glint_alpha' from a local GeoTIFF, then plots them.
@@ -53,7 +54,11 @@ def sample_glint_vs_sgi(
     if s2_image is None:
         raise ValueError(f"No image found for system:index = {system_index}")
 
-    image_with_sgi = add_sgi(s2_image).select("sgi")
+    if use_single_band is not None:
+        image_with_sgi = s2_image.select(use_single_band)
+    else:
+        use_single_band = "sgi"
+        image_with_sgi = add_sgi(s2_image).select("sgi")
 
     # ---- 2. Use provided AOI or fallback to image geometry ----
     sample_region = aoi or s2_image.geometry()
@@ -72,9 +77,9 @@ def sample_glint_vs_sgi(
     data = []
     for feat in sampled_info["features"]:
         coords = feat["geometry"]["coordinates"]
-        sgi_val = feat["properties"].get("sgi")
+        sgi_val = feat["properties"].get(use_single_band)
         if sgi_val is not None:
-            data.append({"lon": coords[0], "lat": coords[1], "sgi": sgi_val})
+            data.append({"lon": coords[0], "lat": coords[1], use_single_band: sgi_val})
 
     df = pd.DataFrame(data)
 
@@ -90,12 +95,12 @@ def sample_glint_vs_sgi(
         ]
 
     # ---- 6. Filter and plot ----
-    gdf = gdf.dropna(subset=["glint_alpha", "sgi"])
+    gdf = gdf.dropna(subset=["glint_alpha", use_single_band])
 
-    plt.scatter(gdf["glint_alpha"], gdf["sgi"], alpha=0.5)
+    plt.scatter(gdf["glint_alpha"], gdf[use_single_band], alpha=0.5)
     plt.xlabel("glint_alpha")
-    plt.ylabel("sgi")
-    plt.title(f"Glint Alpha vs SGI for {system_index}")
+    plt.ylabel(use_single_band)
+    plt.title(f"Glint Alpha vs {use_single_band} for {system_index}")
     plt.grid(True)
     plt.show()
 
@@ -251,8 +256,11 @@ for index in tqdm(range(p_size.getInfo())):
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
         compute_sga_coarse(sid, tif_path)
 
-    glint_vs_sgi_gdf = sample_glint_vs_sgi(sid, tif_path, n_points=5000)
-    sgi_pixels.extend(list(glint_vs_sgi_gdf["sgi"].values))
+    glint_vs_sgi_gdf = sample_glint_vs_sgi(
+        sid, tif_path, n_points=5000, use_single_band="B12"
+    )
+    # sgi_pixels.extend(list(glint_vs_sgi_gdf["sgi"].values))
+    sgi_pixels.extend(list(glint_vs_sgi_gdf["B12"].values))
     sga_pixels.extend(list(glint_vs_sgi_gdf["glint_alpha"].values))
     sid_pixels.extend([sid] * len(glint_vs_sgi_gdf))
 
@@ -314,7 +322,7 @@ for sid in unique_sids:
         [sga_pixels[i] for i in idx],
         [sgi_pixels[i] for i in idx],
         color=sid_to_color[sid],
-        alpha=0.01,
+        alpha=0.008,
         label=str(sid),
     )
 
