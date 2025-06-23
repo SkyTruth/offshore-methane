@@ -3,9 +3,12 @@
 Thin wrappers around the Earth-Engine Python client.
 """
 
+from pathlib import Path
+
 import ee
 import geemap
 import numpy as np
+import requests
 
 ee.Initialize()  # single global EE session
 
@@ -85,6 +88,21 @@ def ee_asset_exists(asset_id: str) -> bool:
 
 
 # ------------------------------------------------------------------
+#  Simple URL→file helper used by local exports
+# ------------------------------------------------------------------
+def _download_url(url: str, dest: Path, chunk: int = 1 << 20) -> None:
+    """
+    Stream `url` to `dest`, creating parent folders if needed.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as fh:
+            for block in r.iter_content(chunk):
+                fh.write(block)
+
+
+# ------------------------------------------------------------------
 #  Uniform wrappers around EE batch export APIs.
 # ------------------------------------------------------------------
 def export_image(
@@ -123,6 +141,27 @@ def export_image(
             maxPixels=1 << 36,
             pyramidingPolicy={"MBSP": "sample"},
         )
+    elif preferred_location == "local":
+        utm = image.select("MBSP").projection()
+        out_dir = Path("../data") / "MBSP"
+        out_path = out_dir / f"{description}.tif"
+
+        if out_path.is_file():  #  ← NEW early-exit guard
+            print(f"  ✓ raster exists → {out_path} (skipped)")
+            return None
+
+        # Build a synchronous download URL and save locally
+        url = image.clip(region).getDownloadURL(
+            {
+                "scale": 20,
+                "region": roi,
+                "crs": utm,
+                "format": "GEO_TIFF",
+            }
+        )
+        print(f"  ↓ raster → {out_path}")
+        _download_url(url, out_path)
+        return None  # no EE task started
     if task:
         task.start()
     return task
@@ -152,6 +191,18 @@ def export_polygons(
             description=f"{description}_vect",
             assetId=f"{ee_asset_folder}/{description}_vect",
         )
+    elif preferred_location == "local":
+        out_dir = Path("../data") / "vectors"
+        out_path = out_dir / f"{description}.geojson"
+
+        if out_path.is_file():  #  ← NEW early-exit guard
+            print(f"  ✓ vectors exist → {out_path} (skipped)")
+            return None
+
+        url = fc.getDownloadURL(filetype="geojson")
+        print(f"  ↓ vectors → {out_path}")
+        _download_url(url, out_path)
+        return None  # no EE task started
     if task:
         task.start()
     return task

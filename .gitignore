@@ -84,3 +84,6 @@ cython_debug/
 
 # Data
 data/sga/*
+data/MBSP/*
+data/vectors/*
+data/hitl/*

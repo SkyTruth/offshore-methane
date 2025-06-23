@@ -59,8 +59,9 @@ EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
     # "preferred_location": None, # Uncomment only one
-    "preferred_location": "bucket",  # Uncomment only one
+    # "preferred_location": "bucket",  # Uncomment only one
     # "preferred_location": "ee_asset_folder", # Uncomment only one
+    "preferred_location": "local",  # Uncomment only one
 }
 
 # ------------------------------------------------------------------
