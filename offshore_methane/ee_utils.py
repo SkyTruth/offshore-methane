@@ -4,8 +4,8 @@ Thin wrappers around the Earth-Engine Python client.
 """
 
 import ee
-import numpy as np
 import geemap
+import numpy as np
 
 ee.Initialize()  # single global EE session
 
@@ -36,8 +36,8 @@ def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
     )
 
     # Build min/max lists for visualization
-    min_vals = [stats.get(f"{b}_p2", 0) for b in bands]
-    max_vals = [stats.get(f"{b}_p98", 3000) for b in bands]
+    min_vals = [stats.get(f"{b}_p10", 0) for b in bands]
+    max_vals = [stats.get(f"{b}_p75", 3000) for b in bands]
 
     vis_params = {
         "bands": bands,
