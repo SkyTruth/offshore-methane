@@ -1,4 +1,4 @@
-region,platform,start_datetime,end_datetime,latitude,longitude,satellite,source,"volume (kg ch4/hr, unless otherwise noted)",volume uncertainty,wind_speed_avg_auto
+eez,platform,start_datetime,end_datetime,latitude,longitude,satellite,source,"volume (kg ch4/hr, unless otherwise noted)",volume uncertainty,wind_speed_avg_auto
 Gulf of Mexico,Zaap-C,2024-04-21,2024-04-21,19.5658,-92.2367,EMIT,https://earth.jpl.nasa.gov/emit/data/data-portal/Greenhouse-Gases/,,,
 Gulf of Mexico,Zaap-C,2024-08-23,2024-08-23,19.5658,-92.2367,EMIT,https://earth.jpl.nasa.gov/emit/data/data-portal/Greenhouse-Gases/,,,
 Persian Gulf,,2023-08-02,2023-08-02,29.68031042,48.80838203,EMIT,Carbon Mapper,,,
@@ -262,7 +262,7 @@ Malaysia,,2023/08/31 3:25:21,2023/08/31 3:25:21,7.59283,102.98827,Sentinel-2 - E
 Malaysia,,2024/08/15 3:25:21,2024/08/15 3:25:21,7.59346,102.98799,Sentinel-2 - ESA,UNEP IMEO MARS,13878,4032,1.87
 Malaysia,,2024/08/05 3:25:41,2024/08/05 3:25:41,7.59265,102.98827,Sentinel-2 - ESA,UNEP IMEO MARS,7603,2874,4.15
 Malaysia,,2025/01/02 3:31:41,2025/01/02 3:31:41,7.5911,102.9851,Sentinel-2 - ESA,UNEP IMEO MARS,24867,9270,3.94
-Gulf of Mexico,Zaap-C,2021-12-07,2021-12-17,19.5658,-92.2367,"WorldView 3
+,Zaap-C,2021-12-07,2021-12-17,19.5658,-92.2367,"WorldView 3
 Landsat 8",Link,3.36 million tons CO2e,,
 ,,,,,,,,,,
 ,,,,,,,,,,

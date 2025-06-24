@@ -84,3 +84,5 @@ cython_debug/
 
 # Data
 data/*
+!data/.gitkeep
+!data/sites.csv
