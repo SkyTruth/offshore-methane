@@ -3,9 +3,15 @@
 Thin wrappers around the Earth-Engine Python client.
 """
 
+import json
+import subprocess
+import time
+from pathlib import Path
+
 import ee
 import geemap
 import numpy as np
+import requests
 
 ee.Initialize()  # single global EE session
 
@@ -76,85 +82,274 @@ def sentinel2_system_indexes(
     return sorted(set(coll.aggregate_array("system:index").getInfo()))
 
 
-def ee_asset_exists(asset_id: str) -> bool:
+def _ee_asset_info(asset_id: str) -> dict | None:
+    """
+    Return the parsed JSON from `earthengine asset info <id>` or None
+    if the asset does not exist (return-code ≠ 0).
+    """
+    res = subprocess.run(
+        ["earthengine", "asset", "info", asset_id],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        return None
     try:
-        ee.Image(asset_id).getInfo()
-        return True
-    except Exception:
+        return json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def ee_asset_exists(asset_id: str) -> bool:
+    """True if *any* EE asset with that ID exists (Image, Table, …)."""
+    return _ee_asset_info(asset_id) is not None
+
+
+def ee_asset_ready(asset_id: str) -> bool:
+    """
+    Ready ⇔ asset exists *and* (for Images) has non-empty 'bands'.
+    For non-image assets we treat mere existence as 'ready'.
+    """
+    info = _ee_asset_info(asset_id)
+    if not info:
         return False
+    if info.get("type") == "Image":
+        return bool(info.get("bands"))
+    return True
+
+
+# ------------------------------------------------------------------
+#  Simple URL→file helper used by local exports
+# ------------------------------------------------------------------
+def _download_url(url: str, dest: Path, chunk: int = 1 << 20) -> None:
+    """
+    Stream `url` to `dest`, creating parent folders if needed.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as fh:
+            for block in r.iter_content(chunk):
+                fh.write(block)
 
 
 # ------------------------------------------------------------------
 #  Uniform wrappers around EE batch export APIs.
 # ------------------------------------------------------------------
+def _prepare_asset(
+    asset_id: str,
+    *,
+    overwrite: bool = False,
+    timeout: int = 300,
+    datatype: str = "asset",
+) -> bool:
+    """
+    Decide whether the caller should start a new export for *asset_id*.
+
+    Returns
+    -------
+    bool
+        True  → caller must export (asset missing or we deleted it for overwrite)
+        False → caller should SKIP (asset is already ready / became ready)
+
+    Behaviour
+    ---------
+    • overwrite = True
+        - if the asset exists (ready or ingesting) → delete it, return True
+        - if it doesn't exist                           → return True
+    • overwrite = False
+        - if the asset is ready                        → return False
+        - if ingesting → wait ≤ timeout until ready    → return False
+        - if missing                                   → return True
+    """
+    # ------------------------------------------------------------------ overwrite branch
+    if overwrite and ee_asset_exists(asset_id):
+        print(f"  ↻ deleting existing {datatype} asset → {asset_id}")
+        try:
+            ee.data.deleteAsset(asset_id)
+        except Exception as exc:
+            # EE occasionally throws 404 if asset vanished in the meantime
+            if "Asset not found" not in str(exc):
+                raise
+        # ensure eventual-consistency before we re-export
+        t0 = time.time()
+        while ee_asset_exists(asset_id):
+            if time.time() - t0 > 30:  # safety: 30 s should be plenty
+                raise RuntimeError(f"Timed out deleting {asset_id}")
+            time.sleep(2)
+        return True  # caller must export afresh
+
+    # -------------------------------------------------------------- non-overwrite branch
+    if not ee_asset_exists(asset_id):
+        return True  # missing → export required
+
+    if ee_asset_ready(asset_id):
+        print(f"  ✓ {datatype} asset exists → {asset_id} (skipped)")
+        return False  # already good
+
+    # asset exists but still ingesting
+    print(f"  … waiting for {datatype} asset ingestion → {asset_id}")
+    t0 = time.time()
+    while not ee_asset_ready(asset_id):
+        if time.time() - t0 > timeout:
+            raise TimeoutError(
+                f"{datatype} asset {asset_id} still ingesting after {timeout}s"
+            )
+        time.sleep(5)
+    print(f"  ✓ {datatype} asset now ready → {asset_id} (skipped)")
+    return False
+
+
 def export_image(
     image: ee.Image,
-    description: str,
+    sid: str,
     region: ee.Geometry,
     preferred_location: str,
     bucket: str,
     ee_asset_folder: str,
     **kwargs,
-):
+) -> tuple[ee.batch.Task | None, bool]:
+    """
+    Returns (task_or_None, exported_bool)
+    """
+    datatype = "MBSP"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
     roi = region.bounds().coordinates().getInfo()
-    task = None
+    task, exported = None, False
 
     if preferred_location == "bucket":
-        utm = image.select("MBSP").projection()
+        # Skip if object exists and overwrite is False
+        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+        already = (
+            subprocess.run(
+                ["gsutil", "ls", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        if already and not overwrite:
+            print(f"  ✓ raster exists → {gcs_path} (skipped)")
+            return None, False
+
+        utm = image.select(datatype).projection()
         task = ee.batch.Export.image.toCloudStorage(
             image=image,
-            description=description,
+            description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"MBSP/{description}",
+            fileNamePrefix=f"{sid}/{sid}_{datatype}",
             region=roi,
             scale=20,
             crs=utm,
             maxPixels=1 << 36,
         )
+        exported = True
+
     elif preferred_location == "ee_asset_folder":
-        utm = image.select("MBSP").projection()
-        task = ee.batch.Export.image.toAsset(
-            image=image,
-            description=description,
-            assetId=f"{ee_asset_folder}/{description}",
-            region=roi,
-            scale=20,
-            crs=utm,
-            maxPixels=1 << 36,
-            pyramidingPolicy={"MBSP": "sample"},
+        asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+        if _prepare_asset(
+            asset_id, overwrite=overwrite, timeout=timeout, datatype="raster"
+        ):
+            utm = image.select(datatype).projection()
+            task = ee.batch.Export.image.toAsset(
+                image=image,
+                description=f"{sid}_{datatype}",
+                assetId=asset_id,
+                region=roi,
+                scale=20,
+                crs=utm,
+                maxPixels=1 << 36,
+                pyramidingPolicy={datatype: "sample"},
+            )
+            exported = True
+
+    else:  # preferred_location == "local"
+        out_path = Path("../data") / sid / f"{sid}_{datatype}.tif"
+        if out_path.is_file() and not overwrite:
+            print(f"  ✓ raster exists → {out_path} (skipped)")
+            return None, False
+        url = image.clip(region).getDownloadURL(
+            {
+                "scale": 20,
+                "region": roi,
+                "crs": image.select(datatype).projection(),
+                "format": "GEO_TIFF",
+            }
         )
+        print(f"  ↓ raster → {out_path}")
+        _download_url(url, out_path)
+        exported = True
+
     if task:
         task.start()
-    return task
+    return task, exported
 
 
 def export_polygons(
     fc: ee.FeatureCollection,
-    description: str,
+    sid: str,
     preferred_location: str,
     bucket: str,
     ee_asset_folder: str,
     **kwargs,
-):
-    task = None
+) -> tuple[ee.batch.Task | None, bool]:
+    """
+    Returns (task_or_None, exported_bool)
+    """
+    datatype = "VEC"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
+    task, exported = None, False
 
     if preferred_location == "bucket":
+        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.geojson"
+        already = (
+            subprocess.run(
+                ["gsutil", "ls", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        if already and not overwrite:
+            print(f"  ✓ vectors exist → {gcs_path} (skipped)")
+            return None, False
+
         task = ee.batch.Export.table.toCloudStorage(
             collection=fc,
-            description=f"{description}_vect",
+            description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"vectors/{description}",
+            fileNamePrefix=f"{sid}/{sid}_{datatype}",
             fileFormat="GeoJSON",
         )
+        exported = True
+
     elif preferred_location == "ee_asset_folder":
-        task = ee.batch.Export.table.toAsset(
-            collection=fc,
-            description=f"{description}_vect",
-            assetId=f"{ee_asset_folder}/{description}_vect",
-        )
+        asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+        if _prepare_asset(
+            asset_id, overwrite=overwrite, timeout=timeout, datatype="vector"
+        ):
+            task = ee.batch.Export.table.toAsset(
+                collection=fc,
+                description=f"{sid}_{datatype}",
+                assetId=asset_id,
+            )
+            exported = True
+
+    else:  # preferred_location == "local"
+        out_path = Path("../data") / sid / f"{sid}_{datatype}.geojson"
+        if out_path.is_file() and not overwrite:
+            print(f"  ✓ vectors exist → {out_path} (skipped)")
+            return None, False
+        url = fc.getDownloadURL(filetype="geojson")
+        print(f"  ↓ vectors → {out_path}")
+        _download_url(url, out_path)
+        exported = True
+
     if task:
         task.start()
-    return task
+    return task, exported
 
 
 # ------------------------------------------------------------------
@@ -167,7 +362,7 @@ def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
 
 
 # ------------------------------------------------------------------
-#  Scene-level sun-glint (metadata only – cheap)
+#  Scene-level sun-glint (metadata only - cheap)
 # ------------------------------------------------------------------
 def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> ee.Image:
     """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
@@ -202,7 +397,7 @@ def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> e
 
 
 # ------------------------------------------------------------------
-#  Local (5 km) tests – require pixels/coarse SGA grid
+#  Local (5 km) tests - require pixels/coarse SGA grid
 # ------------------------------------------------------------------
 def _wind_test(s2, centre, aoi_radius_m, max_wind_10m):
     acq_time = ee.Date(s2.get("system:time_start"))

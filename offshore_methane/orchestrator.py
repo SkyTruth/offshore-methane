@@ -58,9 +58,8 @@ MAX_WORKERS = 32  # parallel threads
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
-    # "preferred_location": None, # Uncomment only one
-    "preferred_location": "bucket",  # Uncomment only one
-    # "preferred_location": "ee_asset_folder", # Uncomment only one
+    "preferred_location": "bucket",  # Choose one: "local", "bucket", "ee_asset_folder"
+    "overwrite": True,  # overwrite existing files
 }
 
 # ------------------------------------------------------------------
@@ -111,7 +110,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         return tasks
 
     # ----------- SGA asset ---------------------
-    sga_src = ensure_sga_asset(sid, **EXPORT_PARAMS)
+    sga_src, sga_new = ensure_sga_asset(sid, **EXPORT_PARAMS)
 
     sga_img = (
         ee.Image.loadGeoTIFF(sga_src)
@@ -135,10 +134,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     # ---------------- MBSP computation ---------
     if USE_SIMPLE_MBSP:
         R_img = mbsp_simple_ee(s2, centre_pt)
-        mode_tag = "MBSPs"
     else:
         R_img = mbsp_complex_ee(s2, sga_img, centre_pt, LOCAL_SGA_RANGE)
-        mode_tag = "MBSPc"
 
     # ---------------- Speckle filter -----------
     if SPECKLE_FILTER_MODE == "adaptive" and SPECKLE_RADIUS_PX > 0:
@@ -161,8 +158,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         print(f"  🖼  thumb → {url}")
 
     # ---------------- Export raster ------------
-    desc = f"{mode_tag}_{sid}"
-    rast_task = export_image(R_img, desc, export_roi, **EXPORT_PARAMS)
+    EXPORT_PARAMS["overwrite"] = EXPORT_PARAMS["overwrite"] or sga_new
+    rast_task, rast_new = export_image(R_img, sid, export_roi, **EXPORT_PARAMS)
     if rast_task:
         tasks.append(rast_task)
         print(f"  ⧗ raster task {rast_task.id} started")
@@ -173,7 +170,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     ).filterBounds(centre_pt.buffer(LOCAL_PLUME_DIST_M))
 
     # ---------------- Export vectors -----------
-    vect_task = export_polygons(vect_fc, desc, **EXPORT_PARAMS)
+    EXPORT_PARAMS["overwrite"] = EXPORT_PARAMS["overwrite"] or sga_new or rast_new
+    vect_task, _ = export_polygons(vect_fc, sid, **EXPORT_PARAMS)
     if vect_task:
         tasks.append(vect_task)
         print(f"  ⧗ vector task {vect_task.id} started")
@@ -210,9 +208,10 @@ def main():
 
     # -------- monitor outstanding tasks --------
     print("Waiting for EE exports …")
+    print({t.id: t.status()["state"] for t in active})
     while any(t.status()["state"] in ("READY", "RUNNING") for t in active):
-        print({t.id: t.status()["state"] for t in active})
-        time.sleep(10)
+        time.sleep(1)
+    print({t.id: t.status()["state"] for t in active})
     print("Done.")
 
 
