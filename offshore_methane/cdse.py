@@ -1,6 +1,9 @@
 # cdse.py
 """
 All interaction with the Copernicus Dataspace ecosystem lives here.
+The module can now be imported even when CDSE credentials are absent.
+Network‑touching helpers lazily add / refresh the bearer token when
+credentials are available, and raise a clear error otherwise.
 """
 
 from __future__ import annotations
@@ -22,13 +25,14 @@ _DL_BASE = "https://download.dataspace.copernicus.eu/odata/v1/Products"
 load_dotenv("../.env")  # CDSE creds
 CDSE_USER = os.getenv("CDSE_USERNAME")
 CDSE_PW = os.getenv("CDSE_PASSWORD")
-if not (CDSE_USER and CDSE_PW):
-    raise SystemExit("Need CDSE_USERNAME / CDSE_PASSWORD in .env")
-
+_AUTH_AVAILABLE = bool(CDSE_USER and CDSE_PW)
 
 # ------------------------------------------------------------------
-#  Session with bearer token
+#  Lazy session (token added when first needed)
 # ------------------------------------------------------------------
+_session = requests.Session()
+
+
 def _cdse_token(user: str, pw: str, client: str = "cdse-public") -> str:
     r = requests.post(
         _LOGIN,
@@ -44,8 +48,17 @@ def _cdse_token(user: str, pw: str, client: str = "cdse-public") -> str:
     return r.json()["access_token"]
 
 
-_session = requests.Session()
-_session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
+def _ensure_token() -> None:
+    """Attach a fresh bearer token to the module‑wide session if possible."""
+    if "Authorization" in _session.headers:
+        return  # already have one
+    if not _AUTH_AVAILABLE:
+        raise RuntimeError(
+            "CDSE credentials not configured – set CDSE_USERNAME / CDSE_PASSWORD "
+            "in the environment or a .env file to use remote CDSE features."
+        )
+    _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
+
 
 # ------------------------------------------------------------------
 #  Helper regex & tiny wrappers
@@ -58,22 +71,10 @@ _SYSTEM_INDEX_RE = re.compile(
 
 
 def parse_sid(sid: str) -> dict:
-    """
-    Parse a Sentinel-2 GEE system:index into its components.
-
-    Returns
-    -------
-    dict :
-        {
-            'start' : sensing datetime string "YYYYMMDDTHHMMSS",
-            'proc'  : processing datetime string,
-            'tile'  : MGRS tile,
-            'date'  : sensing date "YYYYMMDD"
-        }
-    """
+    """Parse a Sentinel‑2 GEE system:index into its components."""
     m = _SYSTEM_INDEX_RE.match(sid)
     if not m:
-        raise ValueError(f"Unrecognised Sentinel-2 system:index: {sid}")
+        raise ValueError(f"Unrecognised Sentinel‑2 system:index: {sid}")
     d = m.groupdict()
     d["date"] = d["start"][:8]
     return d
@@ -85,28 +86,13 @@ def _list_nodes(uri: str) -> list[dict]:
         return js["value"]
     if "result" in js:  # /Products('uuid')/Nodes
         return js["result"]
-    if "d" in js and "results" in js["d"]:  # SAP-ish
+    if "d" in js and "results" in js["d"]:  # SAP‑ish
         return js["d"]["results"]
     return []
 
 
 def _cdse_uuid(sid: str, *, prefer_l2a: bool = False):
-    """
-    Map a GEE Sentinel-2 system:index to its CDSE UUID.
-
-    Parameters
-    ----------
-    sid : str
-        The system:index (not the old PRODUCT_ID).
-    prefer_l2a : bool, optional
-        Query L2A first, then fall back to L1C if nothing found.
-        Set False to invert the order.
-
-    Returns
-    -------
-    str | None
-        CDSE UUID, or None if nothing matched.
-    """
+    """Map a GEE Sentinel‑2 system:index to its CDSE UUID."""
     p = parse_sid(sid)
     ts = p["start"]
     tile = p["tile"]
@@ -143,37 +129,42 @@ def granule_uri(sid: str) -> str:
 
 
 def download_object(url: str, out_path: Path):
+    _ensure_token()
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(".tmp")
-    with _session.get(url, stream=True, timeout=120) as r, open(tmp, "wb") as f:
-        r.raise_for_status()
+    with _get(url, stream=True) as r, open(tmp, "wb") as f:
         for chunk in r.iter_content(65536):
             f.write(chunk)
     tmp.rename(out_path)
 
 
 def download_xml(sid: str, xml_path: Path):
-    """
-    Download MTD_TL.xml for *system_index* unless it already exists on disk.
-    """
+    """Download MTD_TL.xml for *system_index* unless it already exists on disk."""
     if xml_path.is_file():
         return
     download_object(f"{granule_uri(sid)}/Nodes(MTD_TL.xml)/$value", xml_path)
 
 
 # ------------------------------------------------------------------
-#  Robust GET helper – transparently refreshes the bearer token
+#  Robust GET helper – transparently refreshes (or acquires) the token
 # ------------------------------------------------------------------
 
 
 def _get(uri: str, **kw) -> requests.Response:
-    """
-    GET *uri* using the module-wide session.
-    If the token has expired (403) we fetch a fresh one and retry once.
-    """
+    """GET *uri* with automatic token handling."""
+    try:
+        _ensure_token()
+    except RuntimeError:
+        # No creds: proceed without token – some endpoints are public.
+        pass
+
     r = _session.get(uri, timeout=30, **kw)
-    if r.status_code == 403:  # token probably timed-out (≈10 min TTL)
+
+    if r.status_code == 403 and _AUTH_AVAILABLE:
+        # maybe token expired (~10 min TTL) → refresh once
         _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
         r = _session.get(uri, timeout=30, **kw)
+
     r.raise_for_status()
     return r
