@@ -6,6 +6,7 @@ either GCS or EE assets.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -111,14 +112,35 @@ def _is_cog(tif: Path) -> bool:
 
 def gcs_stage(local_path: Path, sid: str, datatype: str, bucket: str) -> str:
     """
-    Upload *local_path* to GCS bucket (if not present) and return gs:// URL.
+    Upload a local file to GCS using gsutil, safely across OSes.
+
+    Args:
+        local_path (Path): Path to the local file to upload.
+        bucket (str): GCS bucket name (without gs://).
+        subfolder (str): Subfolder in the bucket. Default is "sga".
+
+    Returns:
+        str: The gs:// URL to the uploaded file.
     """
-    dst = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
-    subprocess.run(
-        ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
+    if not local_path.exists():
+        raise FileNotFoundError(f"Local file does not exist: {local_path}")
+
+    dst = f"gs://{bucket}/{datatype}/{local_path.name}"
+
+    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
+    if gsutil_cmd is None:
+        raise RuntimeError("gsutil not found on system PATH.")
+
+    try:
+        subprocess.run(
+            [gsutil_cmd, "cp", str(local_path.resolve()), dst],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"gsutil cp failed:\n{e.stderr.decode()}")
+
     return dst
 
 
