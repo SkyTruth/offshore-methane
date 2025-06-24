@@ -83,4 +83,4 @@ cython_debug/
 .notebooks/
 
 # Data
-data/sga/*
+data/*
