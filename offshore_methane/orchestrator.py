@@ -171,7 +171,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ---------------- Export vectors -----------
     EXPORT_PARAMS["overwrite"] = EXPORT_PARAMS["overwrite"] or sga_new or rast_new
-    vect_task, _ = export_polygons(vect_fc, sid, **EXPORT_PARAMS)
+    suffix = f"{site['lon']:.2f}_{site['lat']:.2f}"
+    vect_task, _ = export_polygons(vect_fc, sid, suffix, **EXPORT_PARAMS)
     if vect_task:
         tasks.append(vect_task)
         print(f"  ⧗ vector task {vect_task.id} started")

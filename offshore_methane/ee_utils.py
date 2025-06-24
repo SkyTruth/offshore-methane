@@ -289,6 +289,7 @@ def export_image(
 def export_polygons(
     fc: ee.FeatureCollection,
     sid: str,
+    suffix: str,
     preferred_location: str,
     bucket: str,
     ee_asset_folder: str,
@@ -303,7 +304,7 @@ def export_polygons(
     task, exported = None, False
 
     if preferred_location == "bucket":
-        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.geojson"
+        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}_{suffix}.geojson"
         already = (
             subprocess.run(
                 ["gsutil", "ls", gcs_path],
@@ -320,13 +321,13 @@ def export_polygons(
             collection=fc,
             description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"{sid}/{sid}_{datatype}",
+            fileNamePrefix=f"{sid}/{sid}_{datatype}_{suffix}",
             fileFormat="GeoJSON",
         )
         exported = True
 
     elif preferred_location == "ee_asset_folder":
-        asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+        asset_id = f"{ee_asset_folder}/{sid}_{datatype}_{suffix}"
         if _prepare_asset(
             asset_id, overwrite=overwrite, timeout=timeout, datatype="vector"
         ):
@@ -338,7 +339,7 @@ def export_polygons(
             exported = True
 
     else:  # preferred_location == "local"
-        out_path = Path("../data") / sid / f"{sid}_{datatype}.geojson"
+        out_path = Path("../data") / sid / f"{sid}_{datatype}_{suffix}.geojson"
         if out_path.is_file() and not overwrite:
             print(f"  ✓ vectors exist → {out_path} (skipped)")
             return None, False
