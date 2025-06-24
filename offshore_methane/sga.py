@@ -16,7 +16,7 @@ from lxml import etree
 from rasterio.transform import from_origin
 
 from offshore_methane.cdse import download_xml
-from offshore_methane.ee_utils import ee_asset_exists
+from offshore_methane.ee_utils import ee_asset_ready
 
 
 # ---------------------------------------------------------------------
@@ -109,11 +109,11 @@ def _is_cog(tif: Path) -> bool:
         return False
 
 
-def gcs_stage(local_path: Path, bucket: str) -> str:
+def gcs_stage(local_path: Path, sid: str, datatype: str, bucket: str) -> str:
     """
     Upload *local_path* to GCS bucket (if not present) and return gs:// URL.
     """
-    dst = f"gs://{bucket}/sga/{local_path.name}"
+    dst = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
     subprocess.run(
         ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
         check=True,
@@ -127,40 +127,58 @@ def ensure_sga_asset(
     ee_asset_folder: str,
     bucket: str,
     local_path: Path = Path("../data"),
-    preferred_location: str = None,
+    preferred_location: str | None = None,
     **kwargs,
-) -> str:
+) -> tuple[str, bool]:
     """
-    Guarantee that the coarse-grid SGA for *sid* is available
-    as either an EE asset or a staged GeoTIFF in GCS.
+    Return (location, exported)
 
-    Returns the EE asset ID (if asset uploads are enabled) *otherwise*
-    the gs:// URL.
+    exported == True  ⇢ we created / overwrote something this call
+    exported == False ⇢ artefact was already present & ready
     """
-    prefixed = f"SGA_{sid}"
-    asset_id = f"{ee_asset_folder}/{prefixed}"
-    if preferred_location == "ee_asset_folder" and ee_asset_exists(asset_id):
-        return asset_id
+    datatype = "SGA"
+    asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
+    exported = False
 
-    tif_path = local_path / "sga" / f"{prefixed}.tif"
-    if not tif_path.is_file():
+    tif_path = local_path / sid / f"{sid}_{datatype}.tif"
+    tif_path.parent.mkdir(parents=True, exist_ok=True)
+    if overwrite or not tif_path.is_file():
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
         compute_sga_coarse(sid, tif_path)
+        exported = True
 
-    gcs_url = gcs_stage(tif_path, bucket)
+    gcs_url = f"gs://{bucket}/{sid}/{tif_path.name}"
+    gcs_exists = (
+        subprocess.run(
+            ["gsutil", "ls", gcs_url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if overwrite or not gcs_exists:
+        gcs_url = gcs_stage(tif_path, sid, datatype, bucket)
+        exported = True
 
     if preferred_location == "ee_asset_folder":
-        # @Brendan it would be SOO nice if we could just use this from GCS instead of doing asset upload... ALSO check for anywhere else we're doing an asset upload and think through how to do better.
-        print(f"  ↑ ingesting as EE asset {asset_id}")
-        subprocess.run(
-            ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
-            check=True,
-        )
+        if overwrite or not ee_asset_ready(asset_id):
+            print(f"  ↑ ingesting as EE asset {asset_id}")
+            subprocess.run(
+                ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
+                check=True,
+            )
+            start = time.time()
+            while not ee_asset_ready(asset_id):
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"Timed out waiting for EE asset {asset_id}")
+                time.sleep(5)
+            exported = True
 
-        while not ee_asset_exists(asset_id):
-            time.sleep(1)
+        if overwrite or not gcs_exists:
+            subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
 
-        subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
-        return asset_id
+        return asset_id, exported
 
-    return gcs_url
+    return gcs_url, exported
