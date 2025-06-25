@@ -12,6 +12,8 @@ import csv
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from datetime import datetime
+from datetime import timedelta
 
 import ee
 
@@ -30,6 +32,8 @@ from offshore_methane.sga import ensure_sga_asset
 # ------------------------------------------------------------------
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 START, END = "2017-07-04", "2017-07-06"  # Known pollution event
+STARTDATE = datetime.fromisoformat(START) - timedelta(days=1)  # 1 day before
+ENDDATE = datetime.fromisoformat(END) + timedelta(days=1)  # 1 day after
 AOI_RADIUS_M = 5_000
 LOCAL_PLUME_DIST_M = 500
 
@@ -66,6 +70,16 @@ EXPORT_PARAMS = {
 #  Other files
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")  # @Ben to help us generate and manage this file
+# days to date
+
+
+def add_days_to_date(date_str: str, days: int, fmt: str = "%Y-%m-%d") -> str:
+    """
+    Converts a date string to a datetime object, adds specified days, and returns a string.
+    """
+    dt = datetime.strptime(date_str, fmt)
+    new_dt = dt + timedelta(days=days)
+    return new_dt.strftime(fmt)
 
 
 # ------------------------------------------------------------------
@@ -78,8 +92,10 @@ def iter_sites():
                 yield {
                     "lon": float(row["lon"]),
                     "lat": float(row["lat"]),
-                    "start": row.get("start", START),
-                    "end": row.get("end", END),
+                    "start": add_days_to_date(
+                        row.get("start", START), -1
+                    ),  # 1 day before
+                    "end": add_days_to_date(row.get("end", END), 1),  # 1 day after
                 }
     else:
         print(f"⚠  {SITES_CSV} not found - processing single hard-coded site")
