@@ -171,7 +171,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ---------------- Export vectors -----------
     EXPORT_PARAMS["overwrite"] = EXPORT_PARAMS["overwrite"] or sga_new or rast_new
-    suffix = f"{site['lon']:.2f}_{site['lat']:.2f}"
+    suffix = f"{site['lon']:.3f}_{site['lat']:.3f}"
     vect_task, _ = export_polygons(vect_fc, sid, suffix, **EXPORT_PARAMS)
     if vect_task:
         tasks.append(vect_task)
@@ -184,6 +184,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 #  Main
 # ------------------------------------------------------------------
 def main():
+    start_time = time.time()
     active: list[ee.batch.Task] = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -213,7 +214,7 @@ def main():
     while any(t.status()["state"] in ("READY", "RUNNING") for t in active):
         time.sleep(1)
     print({t.id: t.status()["state"] for t in active})
-    print("Done.")
+    print(f"Done in {time.time() - start_time:.2f} seconds.")
 
 
 # ------------------------------------------------------------------
