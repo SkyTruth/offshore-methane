@@ -32,8 +32,8 @@ from offshore_methane.sga import ensure_sga_asset
 # ------------------------------------------------------------------
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 START, END = "2017-07-04", "2017-07-06"  # Known pollution event
-STARTDATE = datetime.fromisoformat(START) - timedelta(days=1)  # 1 day before
-ENDDATE = datetime.fromisoformat(END) + timedelta(days=1)  # 1 day after
+DAYS_BEFORE_START = 5
+DAYS_AFTER_END = 5
 AOI_RADIUS_M = 5_000
 LOCAL_PLUME_DIST_M = 500
 
@@ -93,9 +93,11 @@ def iter_sites():
                     "lon": float(row["lon"]),
                     "lat": float(row["lat"]),
                     "start": add_days_to_date(
-                        row.get("start", START), -1
+                        row.get("start", START), -DAYS_BEFORE_START
                     ),  # 1 day before
-                    "end": add_days_to_date(row.get("end", END), 1),  # 1 day after
+                    "end": add_days_to_date(
+                        row.get("end", END), DAYS_AFTER_END
+                    ),  # 1 day after
                 }
     else:
         print(f"⚠  {SITES_CSV} not found - processing single hard-coded site")

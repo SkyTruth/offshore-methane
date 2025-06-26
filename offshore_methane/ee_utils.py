@@ -4,6 +4,7 @@ Thin wrappers around the Earth-Engine Python client.
 """
 
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -14,6 +15,16 @@ import numpy as np
 import requests
 
 ee.Initialize()  # single global EE session
+
+
+# ------------------------------------------------------------------
+#  GSUtil helper
+# ------------------------------------------------------------------
+def find_gsutil_cmd() -> str:
+    cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
+    if not cmd:
+        raise RuntimeError("gsutil not found on system PATH.")
+    return cmd
 
 
 def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
@@ -221,9 +232,10 @@ def export_image(
     if preferred_location == "bucket":
         # Skip if object exists and overwrite is False
         gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+        gsutil_cmd = find_gsutil_cmd()
         already = (
             subprocess.run(
-                ["gsutil", "ls", gcs_path],
+                [gsutil_cmd, "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ).returncode
@@ -305,9 +317,10 @@ def export_polygons(
 
     if preferred_location == "bucket":
         gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}_{suffix}.geojson"
+        gsutil_cmd = find_gsutil_cmd()
         already = (
             subprocess.run(
-                ["gsutil", "ls", gcs_path],
+                [gsutil_cmd, "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ).returncode

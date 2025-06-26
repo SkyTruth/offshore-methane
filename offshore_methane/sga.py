@@ -166,9 +166,13 @@ def ensure_sga_asset(
 
     # ------------------------------------------------------- preferred = bucket, fast path
     gcs_url = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
+    if not gsutil_cmd:
+        raise RuntimeError("gsutil not found on system PATH.")
+
     gcs_exists = (
         subprocess.run(
-            ["gsutil", "ls", gcs_url],
+            [gsutil_cmd, "ls", gcs_url],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode
