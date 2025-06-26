@@ -1,4 +1,4 @@
-lat,lon,start,start,citation,EEZ,satellite
+lat,lon,start,end,citation,EEZ,satellite
 19.5658,-92.2367,2024-04-21,2024-04-21,https://earth.jpl.nasa.gov/emit/data/data-portal/Greenhouse-Gases/,Gulf of Mexico,EMIT
 19.5658,-92.2367,2024-08-23,2024-08-23,https://earth.jpl.nasa.gov/emit/data/data-portal/Greenhouse-Gases/,Gulf of Mexico,EMIT
 29.68031042,48.80838203,2023-08-02,2023-08-02,Carbon Mapper,Persian Gulf,EMIT
