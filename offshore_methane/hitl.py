@@ -42,9 +42,9 @@ def save_drawn_feature_to_gcs(
 
 
 # === Reviewer Interface ===
-def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
+def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
     index = widgets.IntSlider(
-        value=0, min=0, max=len(system_indexes) - 1, description="Scene:"
+        value=0, min=0, max=len(detections) - 1, description="Scene:"
     )
     save_btn = widgets.Button(description="Save Plume")
     no_plume_btn = widgets.Button(description="Save as No Plume")
@@ -57,9 +57,9 @@ def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
 
     def display_scene(idx):
         nonlocal current_map
-        system_index = system_indexes[idx]
+        system_index, coords = detections[idx]
         current_map = display_s2_with_geojson_from_gcs(
-            system_index, bucket_name="offshore_methane"
+            system_index, coords, bucket_name="offshore_methane"
         )
         current_map.add_draw_control()
         out.clear_output()
@@ -71,7 +71,7 @@ def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
         status.value = ""
 
     def on_save_clicked(b):
-        system_index = system_indexes[index.value]
+        system_index, coords = detections[index.value]
         if not current_map.user_roi:
             status.value = "❗ Draw a geometry before saving."
             return
@@ -83,7 +83,7 @@ def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
         status.value = f"✔️ Saved plume for {system_index}"
 
     def on_no_plume_clicked(b):
-        system_index = system_indexes[index.value]
+        system_index, coords = detections[index.value]
         empty_geojson = []
         save_drawn_feature_to_gcs(empty_geojson, system_index, bucket_name)
         status.value = f"✔️ Marked {system_index} as no plume"
@@ -99,22 +99,50 @@ def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
     display(out)
 
 
-def list_unreviewed_system_indexes_from_gcs(
-    bucket_name,
-):
+def list_unreviewed_detections_from_gcs(bucket_name):
     """
-    List all unreviewed system:index values by comparing vector filenames
-    in 'vectors' and 'hitl' folders in GCS.
+    Returns a list of (system_index, coordinates) tuples for detections
+    that do not yet have corresponding HITL annotations.
     """
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    blobs = client.list_blobs(bucket, delimiter="/")
-    _ = [b for b in blobs]
-    return [b[:-1] for b in blobs.prefixes]
+
+    all_unreviewed = []
+
+    # Get all blobs
+    all_blobs = list(bucket.list_blobs())
+
+    # Group by system_index folders
+    from collections import defaultdict
+
+    detections = defaultdict(list)
+    hitl_files = set()
+
+    for blob in all_blobs:
+        name = blob.name
+        if name.endswith(".geojson"):
+            parts = name.split("/")
+            if len(parts) != 2:
+                continue  # Skip nested or malformed paths
+
+            system_index, filename = parts
+            if filename.startswith(f"{system_index}_VEC_"):
+                coords = filename[len(f"{system_index}_VEC_") : -len(".geojson")]
+                detections[system_index].append(coords)
+            elif filename.startswith(f"{system_index}_HITL_"):
+                coords = filename[len(f"{system_index}_HITL_") : -len(".geojson")]
+                hitl_files.add((system_index, coords))
+
+    for system_index, coords_list in detections.items():
+        for coords in coords_list:
+            if (system_index, coords) not in hitl_files:
+                all_unreviewed.append((system_index, coords))
+
+    return sorted(all_unreviewed)
 
 
 def display_s2_with_geojson_from_gcs(
-    system_index, bucket_name="offshore_methane", vectors_prefix="vectors"
+    system_index, coords, bucket_name="offshore_methane", vectors_prefix="vectors"
 ):
     """
     Load a GeoJSON file from GCS and display:
@@ -128,7 +156,7 @@ def display_s2_with_geojson_from_gcs(
     # === Load GeoJSON from GCS ===
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    filename = f"{system_index}_VEC.geojson"
+    filename = f"{system_index}_VEC_{coords}.geojson"
     blob_path = f"{system_index}/{filename}"
     blob = bucket.blob(blob_path)
 
@@ -219,9 +247,9 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-list_of_sids = list_unreviewed_system_indexes_from_gcs("offshore_methane")
+list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
 # display_s2_with_geojson_from_gcs(list_of_sids[0], "offshore_methane")
-start_hitl_review_loop(list_of_sids)
+start_hitl_review_loop(list_of_detections)
 
 # %%
 
