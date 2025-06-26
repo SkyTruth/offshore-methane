@@ -101,8 +101,6 @@ def start_hitl_review_loop(system_indexes, bucket_name="offshore_methane"):
 
 def list_unreviewed_system_indexes_from_gcs(
     bucket_name,
-    vectors_prefix="vectors/",
-    hitl_prefix="hitl/",
 ):
     """
     List all unreviewed system:index values by comparing vector filenames
@@ -110,33 +108,9 @@ def list_unreviewed_system_indexes_from_gcs(
     """
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-
-    # Get list of GeoJSON filenames in the vectors folder
-    vector_blobs = bucket.list_blobs(prefix=vectors_prefix)
-    vector_files = {
-        os.path.basename(blob.name)
-        for blob in vector_blobs
-        if blob.name.endswith(".geojson") and not blob.name.endswith("/")
-    }
-
-    # Get list of GeoJSON filenames in the hitl folder
-    hitl_blobs = bucket.list_blobs(prefix=hitl_prefix)
-    hitl_files = {
-        os.path.basename(blob.name)
-        for blob in hitl_blobs
-        if blob.name.endswith(".geojson") and not blob.name.endswith("/")
-    }
-
-    # Compute unreviewed filenames
-    unreviewed_files = vector_files - hitl_files
-
-    # Extract system:index values from filenames like 'SGA_<index>.geojson'
-    indexes = [
-        fname[len("MBSPs_") : -len(".geojson")]
-        for fname in unreviewed_files
-        if fname.startswith("MBSPs_") and fname.endswith(".geojson")
-    ]
-    return sorted(indexes)
+    blobs = client.list_blobs(bucket, delimiter="/")
+    _ = [b for b in blobs]
+    return [b[:-1] for b in blobs.prefixes]
 
 
 def display_s2_with_geojson_from_gcs(
