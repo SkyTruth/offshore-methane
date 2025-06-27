@@ -41,9 +41,9 @@ DEFAULT_MASK_PARAMS: Dict[str, Dict] = {
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.30, 1.0),
+        "local_sgi_range": (-0.30, 1.0),  # NDI
     },
-    "min_viable_mask_fraction": 0.005,
+    "min_viable_mask_fraction": 0.005,  # UNUSED?!
 }
 
 
