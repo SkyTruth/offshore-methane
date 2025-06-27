@@ -14,6 +14,7 @@ from typing import Dict
 
 import ee
 import geemap
+import numpy as np
 
 # ---------------------------------------------------------------------
 #  Module-level constants (avoid recomputing in map() lambdas)
@@ -21,20 +22,70 @@ import geemap
 _DEG2RAD = math.pi / 180.0
 _EARTH_R = 6_371_000  # m - WGS-84 authalic radius
 
-# ---------------------------------------------------------------------
-#  Default parameters
-# ---------------------------------------------------------------------
 DEFAULT_MASK_PARAMS: Dict[str, Dict] = {
-    "local_disk": {"radius_m": 5_000},  # AOI around infrastructure
-    "plume_disk": {"radius_m": 1_000},  # Upwind plume subset
-    "saturation": {"bands": ["B11", "B12"], "max": 10_000},
-    "cloud": {"qa_band": "cs_cdf", "cs_thresh": 0.65, "prob_thresh": 65},
-    "outlier": {"bands": ["B11", "B12"], "p_low": 2, "p_high": 98},
+    "dist": {"local_radius_m": 5_000, "plume_radius_m": 1_000},
+    "cloud": {
+        "scene_cloud_pct": 20,  # metadata
+        "local_cloud_pct": 5,  # QA60 UNUSED?!
+        "cs_thresh": 0.65,  # cloudy above
+        "prob_thresh": 65,  # BACKUP: cloudy below
+    },
+    "wind": {"max_wind_10m": 9},  # m s‑1, ERA5 / CFSv2 upper limit
+    "outlier": {
+        "bands": ["B11", "B12"],
+        "p_low": 2,
+        "p_high": 98,
+        "saturation": 10_000,
+    },
     "ndwi": {"threshold": 0.0},
-    "sga": {"max_deg": 20},
-    "sgi": {"min": -0.30},
+    "sunglint": {
+        "scene_sga_range": (0.0, 40.0),  # deg
+        "local_sga_range": (0.0, 30.0),  # deg
+        "local_sgi_range": (-0.30, 1.0),
+    },
     "min_viable_mask_fraction": 0.005,
 }
+
+
+# ---------------------------------------------------------------------
+#  Scene filters
+# ---------------------------------------------------------------------
+def scene_cloud_filter(p: Dict) -> ee.Filter:
+    return ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", p["cloud"]["scene_cloud_pct"])
+
+
+def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
+    """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
+    # metadata → Numbers
+    sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
+    saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
+    vza = ee.Number(img.get("MEAN_INCIDENCE_ZENITH_ANGLE_B11"))
+    vaa = ee.Number(img.get("MEAN_INCIDENCE_AZIMUTH_ANGLE_B11"))
+
+    # radians
+    rad = ee.Number(np.pi).divide(180)
+    sza_r = sza.multiply(rad)
+    vza_r = vza.multiply(rad)
+    dphi_r = saa.subtract(vaa).abs().multiply(rad)
+
+    cos_sga = (
+        sza_r.cos()
+        .multiply(vza_r.cos())
+        .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
+    )
+    sga_deg = cos_sga.acos().multiply(180 / np.pi)
+
+    ok = sga_deg.gt(p["sunglint"]["scene_sga_range"][0]).And(
+        sga_deg.lt(p["sunglint"]["scene_sga_range"][1])
+    )
+
+    # keep images that *lack* metadata
+    return img.set(
+        "SGA_OK",
+        ee.Algorithms.If(
+            img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
+        ),
+    )
 
 
 # ---------------------------------------------------------------------
@@ -54,11 +105,11 @@ def _geom_mask(centre: ee.Geometry, radius_m: float) -> ee.Image:
 #  Sub-mask builders
 # ---------------------------------------------------------------------
 def geom_mask(img: ee.Image, centre: ee.Geometry, p: Dict) -> ee.Image:  # noqa: D401
-    return _geom_mask(centre, p["local_disk"]["radius_m"])
+    return _geom_mask(centre, p["dist"]["local_radius_m"])
 
 
 def saturation_mask(img: ee.Image, p: Dict) -> ee.Image:
-    good = img.select(p["saturation"]["bands"]).lt(p["saturation"]["max"])
+    good = img.select(p["outlier"]["bands"]).lt(p["outlier"]["saturation"])
     return _single_band(good)
 
 
@@ -70,7 +121,6 @@ def cloud_mask(img: ee.Image, p: Dict) -> ee.Image:
     2) s2cloudless   (cloud prob % )   → keep where prob < prob_thresh
     3) Fallback (rare)                 → keep everything
     """
-    qa_band = p["cloud"].get("qa_band", "cs_cdf")
     cs_thr = float(p["cloud"].get("cs_thresh", 0.65))
     prob_thr = int(p["cloud"].get("prob_thresh", 60))
     sid = ee.String(img.get("system:index"))
@@ -79,7 +129,7 @@ def cloud_mask(img: ee.Image, p: Dict) -> ee.Image:
     cs_col = (
         ee.ImageCollection("GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED")
         .filter(ee.Filter.eq("system:index", sid))
-        .select(qa_band)
+        .select("cs_cdf")
     )
     has_cs = cs_col.size().gt(0)
 
@@ -106,7 +156,7 @@ def cloud_mask(img: ee.Image, p: Dict) -> ee.Image:
     return mask.rename("mask")
 
 
-def outlier_mask(img: ee.Image, centre: ee.Geometry, p: Dict) -> ee.Image:
+def outlier_mask(img: ee.Image, p: Dict) -> ee.Image:
     bands = p["outlier"]["bands"]
     stats = img.select(bands).reduceRegion(
         ee.Reducer.percentile([p["outlier"]["p_low"], p["outlier"]["p_high"]]),
@@ -130,19 +180,29 @@ def ndwi_mask(img: ee.Image, p: Dict) -> ee.Image:
 
 
 def sga_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGA").lt(p["sga"]["max_deg"]).rename("mask")
+    return img.select("SGA").lt(p["sunglint"]["local_sga_range"][1]).rename("mask")
 
 
 def sgi_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGI").gt(p["sgi"]["min"]).rename("mask")
+    return img.select("SGI").gt(p["sunglint"]["local_sgi_range"][0]).rename("mask")
 
 
-def wind_mask(img: ee.Image, centre: ee.Geometry, radius_m: float, p: Dict) -> ee.Image:
+def wind_mask(
+    img: ee.Image,
+    centre: ee.Geometry,
+    radius_m: float,
+    p: Dict,
+    inside: bool = True,
+    downwind: bool = True,
+    invert: bool = False,
+    time_window: int = 3,
+) -> ee.Image:
     """
     Returns 1 for pixels *not* in the down-wind half-disk, 0 otherwise.
+    And where wind speed is less than max_wind_10m.
 
     Robust to:
-      • No CFSv2 slice within ±48 h
+      • No CFSv2 slice within ±time_window h
       • Reduction over the slice returning nulls
 
     Fallback is an all-ones mask so downstream ops never break.
@@ -150,21 +210,22 @@ def wind_mask(img: ee.Image, centre: ee.Geometry, radius_m: float, p: Dict) -> e
     t0 = ee.Date(img.get("system:time_start"))
     met = (
         ee.ImageCollection("NOAA/CFSV2/FOR6H")
-        .filterDate(t0.advance(-3, "hour"), t0.advance(3, "hour"))
+        .filterDate(t0.advance(-time_window, "hour"), t0.advance(time_window, "hour"))
         .first()
     )
 
     # helper → compute mask given a valid met image
     def _make_mask(met_img):
         # Reduce over a disk
-        stats = met_img.select(
+        met_hi = met_img.resample("bilinear").reproject(crs="EPSG:4326", scale=1000)
+        stats = met_hi.select(
             [
                 "u-component_of_wind_height_above_ground",
                 "v-component_of_wind_height_above_ground",
             ]
         ).reduceRegion(
             reducer=ee.Reducer.mean(),
-            geometry=centre.buffer(30_000),
+            geometry=centre.buffer(radius_m),
             scale=20_000,
             bestEffort=True,
         )
@@ -192,10 +253,22 @@ def wind_mask(img: ee.Image, centre: ee.Geometry, radius_m: float, p: Dict) -> e
             )
 
             r2 = radius_m**2
-            inside = dx.pow(2).add(dy.pow(2)).lte(r2)
-            downwind = dx.multiply(ux).add(dy.multiply(uy)).gte(0)
+            in_out = (
+                dx.pow(2).add(dy.pow(2)).lte(r2)
+                if inside
+                else dx.pow(2).add(dy.pow(2)).gt(r2)
+            )
+            up_down = (
+                dx.multiply(ux).add(dy.multiply(uy)).gte(0)
+                if downwind
+                else dx.multiply(ux).add(dy.multiply(uy)).lt(0)
+            )
 
-            return inside.And(downwind).Not().rename("mask")
+            mask = in_out.And(up_down)
+            if invert:
+                mask = mask.Not()
+
+            return mask.And(mag.lt(p["wind"]["max_wind_10m"])).rename("mask")
 
         return ee.Image(
             _build(
@@ -216,17 +289,29 @@ def wind_mask(img: ee.Image, centre: ee.Geometry, radius_m: float, p: Dict) -> e
 #  Compound builders
 # ---------------------------------------------------------------------
 def build_mask_for_C(
-    img: ee.Image, centre: ee.Geometry, p: Dict = DEFAULT_MASK_PARAMS
+    img: ee.Image,
+    centre: ee.Geometry,
+    p: Dict = DEFAULT_MASK_PARAMS,
 ) -> ee.Image:
     mask = (
         geom_mask(img, centre, p)
         .And(saturation_mask(img, p))
         .And(cloud_mask(img, p))
-        .And(outlier_mask(img, centre, p))
+        .And(outlier_mask(img, p))
         .And(ndwi_mask(img, p))
-        .And(wind_mask(img, centre, p["plume_disk"]["radius_m"], p))
-        # .And(sga_mask(img, p))
-        # .And(sgi_mask(img, p))
+        .And(
+            wind_mask(
+                img,
+                centre,
+                p["dist"]["plume_radius_m"],
+                p,
+                inside=True,
+                downwind=True,
+                invert=True,
+            )
+        )
+        .And(sga_mask(img, p))
+        .And(sgi_mask(img, p))
     )
     return mask.rename("mask")
 
@@ -238,7 +323,16 @@ def build_mask_for_MBSP(
         saturation_mask(img, p)
         .And(cloud_mask(img, p))
         .And(ndwi_mask(img, p))
-        .And(wind_mask(img, centre, p["local_disk"]["radius_m"], p).Not())
+        .And(
+            wind_mask(
+                img,
+                centre,
+                p["dist"]["local_radius_m"],
+                p,
+                inside=True,
+                downwind=True,
+            )
+        )
     )
     return mask.rename("mask")
 
@@ -274,6 +368,16 @@ def view_mask(sid: str) -> geemap.Map:
         .divide(10_000)  # convert DN→reflectance 0-1
         .visualize(min=0.05, max=0.35)
     )
+
+    # Add SGA to image as a new band called "SGA"
+    sga_img = ee.Image.loadGeoTIFF(f"gs://offshore_methane/{sid}/{sid}_SGA.tif")
+    img = img.addBands(sga_img.rename("SGA"))
+
+    # Add SGI to image as a new band called "SGI"
+    b_vis = img.select("B2").add(img.select("B3")).add(img.select("B4")).divide(3)
+    img = img.addBands(b_vis.rename("B_vis"))
+    sgi = img.normalizedDifference(["B12", "B_vis"])
+    img = img.addBands(sgi.rename("SGI"))
 
     # 3️⃣ Build masks, turn into single-colour rasters
     mask_c = build_mask_for_C(img, centre, DEFAULT_MASK_PARAMS).selfMask()
