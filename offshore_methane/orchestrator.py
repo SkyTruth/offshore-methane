@@ -19,9 +19,9 @@ from offshore_methane.algos import logistic_speckle, plume_polygons_three_p
 from offshore_methane.ee_utils import (
     export_image,
     export_polygons,
-    product_ok,
     sentinel2_system_indexes,
 )
+from offshore_methane.masking import DEFAULT_MASK_PARAMS as MP  # ← single source
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
 
@@ -30,15 +30,6 @@ from offshore_methane.sga import ensure_sga_asset
 # ------------------------------------------------------------------
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 START, END = "2017-07-04", "2017-07-06"  # Known pollution event
-AOI_RADIUS_M = 5_000
-LOCAL_PLUME_DIST_M = 500
-
-SCENE_MAX_CLOUD = 20  # % metadata CLOUDY_PIXEL_PERCENTAGE
-LOCAL_MAX_CLOUD = 5  # % QA60 inside AOI
-MAX_WIND_10M = 9  # m s‑1 upper limit for ERA5 10 m wind
-
-SCENE_SGA_RANGE = (0.0, 25)  # deg
-LOCAL_SGA_RANGE = (0.0, 20)  # deg
 
 # ------------------------------------------------------------------
 #  Algorithm switches / constants
@@ -58,14 +49,14 @@ MAX_WORKERS = 32  # parallel threads
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
-    "preferred_location": "bucket",  # Choose one: "local", "bucket", "ee_asset_folder"
+    "preferred_location": "local",  # Choose one: "local", "bucket", "ee_asset_folder"
     "overwrite": True,  # overwrite existing files
 }
 
 # ------------------------------------------------------------------
 #  Other files
 # ------------------------------------------------------------------
-SITES_CSV = Path("../data/sites.csv")  # @Ben to help us generate and manage this file
+SITES_CSV = Path("../data/sites.csv")
 
 
 # ------------------------------------------------------------------
@@ -91,15 +82,13 @@ def iter_sites():
 # ------------------------------------------------------------------
 def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     """
-    Entire original inner-loop wrapped in a function that can run in
-    parallel threads.  Returns the list of EE tasks it started.
-
-    NOTE: No need to call `ee.Initialize()` here - the global session
-    established in `ee_utils` is thread-safe and already active.
+    Run the full MBSP + export pipeline for one Sentinel-2 product.
+    Returns the list of Earth-Engine tasks it started.
     """
     tasks: list[ee.batch.Task] = []
+
     centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
-    export_roi = centre_pt.buffer(AOI_RADIUS_M)
+    export_roi = centre_pt.buffer(MP["dist"]["local_radius_m"])
 
     print(f"▶ {sid}")
 
@@ -111,31 +100,26 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ----------- SGA asset ---------------------
     sga_src, sga_new = ensure_sga_asset(sid, **EXPORT_PARAMS)
-
     sga_img = (
         ee.Image.loadGeoTIFF(sga_src)
         if isinstance(sga_src, str) and sga_src.startswith("gs://")
         else ee.Image(sga_src)
     )
 
-    # ----------- local cloud/glint -------------------
-    if not product_ok(
-        s2,
-        sga_img,
-        centre_pt,
-        AOI_RADIUS_M,
-        LOCAL_MAX_CLOUD,
-        LOCAL_SGA_RANGE,
-        MAX_WIND_10M,
-    ).getInfo():
-        print("  ✗ local cloud/glint rejected")
-        return tasks
+    # Add SGA to image as a new band called "SGA"
+    s2 = s2.addBands(sga_img.rename("SGA"))
+
+    # Add SGI to image as a new band called "SGI"
+    b_vis = s2.select("B2").add(s2.select("B3")).add(s2.select("B4")).divide(3)
+    s2 = s2.addBands(b_vis.rename("B_vis"))
+    sgi = s2.normalizedDifference(["B12", "B_vis"])
+    s2 = s2.addBands(sgi.rename("SGI"))
 
     # ---------------- MBSP computation ---------
     if USE_SIMPLE_MBSP:
         R_img = mbsp_simple_ee(s2, centre_pt)
     else:
-        R_img = mbsp_complex_ee(s2, sga_img, centre_pt, LOCAL_SGA_RANGE)
+        R_img = mbsp_complex_ee(s2, sga_img, centre_pt, MP["local_sga_range"])
 
     # ---------------- Speckle filter -----------
     if SPECKLE_FILTER_MODE == "adaptive" and SPECKLE_RADIUS_PX > 0:
@@ -167,7 +151,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     # ---------------- Plume polygons -----------
     vect_fc = plume_polygons_three_p(
         R_img, export_roi, PLUME_P1, PLUME_P2, PLUME_P3
-    ).filterBounds(centre_pt.buffer(LOCAL_PLUME_DIST_M))
+    ).filterBounds(centre_pt.buffer(MP["dist"]["plume_radius_m"]))
 
     # ---------------- Export vectors -----------
     EXPORT_PARAMS["overwrite"] = EXPORT_PARAMS["overwrite"] or sga_new or rast_new
@@ -194,7 +178,9 @@ def main():
 
             # -------- product search ----------
             products = sentinel2_system_indexes(
-                centre_pt, site["start"], site["end"], cloud_pct=SCENE_MAX_CLOUD
+                centre_pt,
+                site["start"],
+                site["end"],
             )
 
             if not products:
