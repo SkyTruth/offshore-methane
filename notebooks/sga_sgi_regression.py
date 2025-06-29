@@ -121,3 +121,10 @@ list_of_ids = list(list_system_indexes("offshore_methane"))
 sampled_pd = sample_multiple_system_indexes(list_of_ids[0:1])
 
 # %%
+import geemap
+
+df, img = sample_image(list_of_ids, n_points=100)
+Map = geemap.Map(center=[sampled_pd["lat"].mean(), sampled_pd["lon"].mean()], zoom=8)
+Map.addLayer(img, {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}, "S2 Image")
+Map.addLayer(img.select("mask_c"), {}, "mask_c")
+Map.addLayer(img.select("mask_mbsp"), {}, "mask_mbsp")
