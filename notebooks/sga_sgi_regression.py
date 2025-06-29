@@ -67,15 +67,15 @@ def sample_image(system_index: str, n_points: int = 500):
     aoi = img.geometry()
     points_fc = ee.FeatureCollection.randomPoints(aoi, n_points, seed=42)
 
-    # mask_c = build_mask_for_C(img, aoi.centroid(1))  # assumes point somewhere central
-    # mask_m = build_mask_for_MBSP(img, aoi.centroid(1))
+    mask_c = build_mask_for_C(img, aoi.centroid(1))  # assumes point somewhere central
+    mask_m = build_mask_for_MBSP(img, aoi.centroid(1))
 
     # # Add masks to image
-    # img = img.addBands(mask_c.rename("mask_c"))
-    # img = img.addBands(mask_m.rename("mask_mbsp"))
+    img = img.addBands(mask_c.rename("mask_c"))
+    img = img.addBands(mask_m.rename("mask_mbsp"))
 
     # Sample image at those points
-
+    img = img.unmask(0)
     samples = img.sampleRegions(collection=points_fc, scale=20, geometries=True)
     sample_info = samples.getInfo()
     # return aoi
@@ -98,7 +98,7 @@ def sample_image(system_index: str, n_points: int = 500):
             }
         )
 
-    return pd.DataFrame.from_records(records)
+    return pd.DataFrame.from_records(records), img
 
 
 def sample_multiple_system_indexes(
@@ -108,7 +108,7 @@ def sample_multiple_system_indexes(
     for sid in system_indexes:
         try:
             print(f"Sampling {sid}...")
-            df = sample_image(sid, n_points=n_points)
+            df, _ = sample_image(sid, n_points=n_points)
             all_dfs.append(df)
         except Exception as e:
             print(f"Failed on {sid}: {e}")
