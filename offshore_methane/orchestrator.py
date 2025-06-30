@@ -9,6 +9,8 @@ Refactored for high-throughput, thread-parallel processing.
 from __future__ import annotations
 
 import csv
+import shutil  # needed for local clean‑ups
+import subprocess  # needed for gsutil clean‑ups
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -22,6 +24,7 @@ from offshore_methane.ee_utils import (
     sentinel2_system_indexes,
 )
 from offshore_methane.masking import DEFAULT_MASK_PARAMS as MP  # ← single source
+from offshore_methane.masking import build_mask_for_MBSP  # mask‑coverage test
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
 
@@ -57,6 +60,43 @@ EXPORT_PARAMS = {
 #  Other files
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")
+
+
+def _cleanup_sid_assets(sid: str) -> None:
+    """
+    Delete any previously‑exported artefacts (raster, vectors, SGA, XML …)
+    that share the Sentinel‑2 system:index *sid*.
+
+    The concrete deletion strategy follows the user‑selected export
+    backend in EXPORT_PARAMS["preferred_location"].
+    """
+    loc = EXPORT_PARAMS["preferred_location"]
+
+    if loc == "bucket":
+        prefix = f"gs://{EXPORT_PARAMS['bucket']}/{sid}"
+        subprocess.run(
+            ["gsutil", "-m", "rm", "-r", prefix],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"  ↻ removed Cloud‑Storage objects under {prefix}")
+
+    elif loc == "ee_asset_folder":
+        folder = EXPORT_PARAMS["ee_asset_folder"]
+        for suffix in ("MBSP", "VEC", "SGA", "xml"):
+            asset_id = f"{folder}/{sid}_{suffix}"
+            try:
+                ee.data.deleteAsset(asset_id)
+                print(f"  ↻ deleted EE asset {asset_id}")
+            except Exception as exc:
+                if "Asset not found" not in str(exc):
+                    print(f"  ⚠ could not delete {asset_id}: {exc}")
+
+    else:  # loc == "local"
+        local_dir = Path("../data") / sid
+        if local_dir.exists():
+            shutil.rmtree(local_dir, ignore_errors=True)
+            print(f"  ↻ removed local directory {local_dir}")
 
 
 # ------------------------------------------------------------------
@@ -97,6 +137,20 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     if s2 is None:
         print("  ⚠ EE image not found")
         return tasks
+
+    # ----------- mask‑coverage gate ------------------
+    # Build MBSP‑style mask and measure how much of the LOCAL RADIUS is retained
+    mask_img = build_mask_for_MBSP(s2, centre_pt, MP)
+    local_roi = centre_pt.buffer(MP["dist"]["local_radius_m"])
+    coverage = mask_img.reduceRegion(
+        ee.Reducer.mean(), local_roi, scale=20, bestEffort=True
+    ).get("mask")
+    cov_val = (coverage.getInfo() if coverage is not None else 0.0) or 0.0
+    print(f"  Clear Pixels {cov_val * 100:.1f}% for {sid}")
+    if cov_val < MP["min_valid_pct"]:
+        print(f"    {cov_val * 100:.1f}% < {MP['min_valid_pct'] * 100:.0f}% → skipping")
+        _cleanup_sid_assets(sid)  # remove any stale artefacts
+        return tasks  # abort this product completely
 
     # ----------- SGA asset ---------------------
     sga_src, sga_new = ensure_sga_asset(sid, **EXPORT_PARAMS)

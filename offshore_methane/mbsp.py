@@ -117,7 +117,7 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     MBSP_masked_img = image.updateMask(
         build_mask_for_MBSP(image, centre, DEFAULT_MASK_PARAMS)
     )
-    MBSP_layer = (
+    MBSP_masked_result = (
         MBSP_masked_img.select("B12")
         .multiply(C_factor)
         .subtract(MBSP_masked_img.select("B11"))
@@ -125,4 +125,7 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
         .rename("MBSP")
         .set({"C_factor": C_factor})
     )
-    return MBSP_layer.copyProperties(image, ["system:index", "system:time_start"])
+
+    return MBSP_masked_result.copyProperties(
+        image, ["system:index", "system:time_start"]
+    )

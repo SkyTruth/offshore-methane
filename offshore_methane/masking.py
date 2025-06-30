@@ -25,8 +25,7 @@ _EARTH_R = 6_371_000  # m - WGS-84 authalic radius
 DEFAULT_MASK_PARAMS: Dict[str, Dict] = {
     "dist": {"local_radius_m": 5_000, "plume_radius_m": 1_000},
     "cloud": {
-        "scene_cloud_pct": 20,  # metadata
-        "local_cloud_pct": 5,  # QA60 UNUSED?!
+        "scene_cloud_pct": 50,  # metadata
         "cs_thresh": 0.65,  # cloudy above
         "prob_thresh": 65,  # BACKUP: cloudy below
     },
@@ -43,7 +42,7 @@ DEFAULT_MASK_PARAMS: Dict[str, Dict] = {
         "local_sga_range": (0.0, 30.0),  # deg
         "local_sgi_range": (-0.30, 1.0),  # NDI
     },
-    "min_viable_mask_fraction": 0.005,  # UNUSED?!
+    "min_valid_pct": 0.4,
 }
 
 
