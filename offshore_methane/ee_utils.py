@@ -16,6 +16,7 @@ import requests
 from requests.exceptions import ConnectionError, HTTPError
 
 import offshore_methane.config as cfg
+from offshore_methane.gcp_utils import gsutil_cmd
 
 ee.Initialize()  # single global EE session
 
@@ -265,7 +266,7 @@ def export_image(
         gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
         already = (
             subprocess.run(
-                ["gsutil", "ls", gcs_path],
+                [gsutil_cmd(), "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ).returncode
@@ -349,7 +350,7 @@ def export_polygons(
         gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}_{suffix}.geojson"
         already = (
             subprocess.run(
-                ["gsutil", "ls", gcs_path],
+                [gsutil_cmd(), "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ).returncode
@@ -452,5 +453,5 @@ def get_wind_layers(img: ee.Image, time_window: int = 3) -> ee.Image:
 
 
 # %%
-quick_view("20170705T164319_20170705T165225_T15RXL")
+# quick_view("20170705T164319_20170705T165225_T15RXL")
 # %%

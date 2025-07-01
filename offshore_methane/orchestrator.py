@@ -13,6 +13,7 @@ import shutil  # needed for local clean-ups
 import subprocess  # needed for gsutil clean-ups
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import ee
@@ -24,7 +25,7 @@ from offshore_methane.ee_utils import (
     export_polygons,
     sentinel2_system_indexes,
 )
-from offshore_methane.masking import build_mask_for_MBSP  # mask-coverage test
+from offshore_methane.masking import build_mask_for_C
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
 
@@ -66,18 +67,29 @@ def _cleanup_sid_assets(sid: str) -> None:
             print(f"  ↻ removed local directory {local_dir}")
 
 
+def add_days_to_date(date_str: str, days: int, fmt: str = "%Y-%m-%d") -> str:
+    """
+    Converts a date string to a datetime object, adds specified days, and returns a string.
+    """
+    dt = datetime.strptime(date_str, fmt)
+    new_dt = dt + timedelta(days=days)
+    return new_dt.strftime(fmt)
+
+
 # ------------------------------------------------------------------
 #  Site iterator
 # ------------------------------------------------------------------
 def iter_sites():
-    if cfg.SITES_CSV.is_file():
+    if cfg.SITES_TO_PROCESS and cfg.SITES_CSV.is_file():
         with open(cfg.SITES_CSV, newline="") as f:
-            for row in csv.DictReader(f):
+            for i, row in enumerate(csv.DictReader(f)):
+                if i not in cfg.SITES_TO_PROCESS:
+                    continue
                 yield {
                     "lon": float(row["lon"]),
                     "lat": float(row["lat"]),
                     "start": row.get("start", cfg.START),
-                    "end": row.get("end", cfg.END),
+                    "end": add_days_to_date(row.get("end", cfg.END), 1),
                 }
     else:
         print(f"⚠  {cfg.SITES_CSV} not found - processing single hard-coded site")
@@ -85,7 +97,7 @@ def iter_sites():
             lon=cfg.CENTRE_LON,
             lat=cfg.CENTRE_LAT,
             start=cfg.START,
-            end=cfg.END,
+            end=add_days_to_date(cfg.END, 1),
         )
 
 
@@ -109,19 +121,6 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     if s2 is None:
         print("  ⚠ EE image not found")
         return tasks
-
-    # ----------- mask-coverage gate ------------------
-    # Build MBSP-style mask and measure how much of the LOCAL RADIUS is retained
-    mask_img = build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS)
-    local_roi = centre_pt.buffer(cfg.MASK_PARAMS["dist"]["local_radius_m"])
-    coverage = mask_img.reduceRegion(
-        ee.Reducer.mean(), local_roi, scale=20, bestEffort=True
-    ).get("mask")
-    cov_val = (coverage.getInfo() if coverage is not None else 0.0) or 0.0
-    print(f"  Clear Pixels {cov_val * 100:.1f}% for {sid}")
-    if cov_val < cfg.MASK_PARAMS["min_valid_pct"]:
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
-        return tasks  # abort this product completely
 
     # ----------- SGA asset ---------------------
     try:
@@ -154,6 +153,15 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
             s2, sga_img, centre_pt, cfg.MASK_PARAMS["local_sga_range"]
         )
 
+    # ----------- Pixel mask-coverage gate ------------------
+    # Make sure we're not exporting after throwing away all the pixels
+    _, kept_c = build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS)
+    print(f"  Clear Pixels {kept_c.multiply(100).getInfo():.1f}% for {sid}")
+    if kept_c.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
+        print("  ⚠ C mask mostly empty - skipping export")
+        _cleanup_sid_assets(sid)  # remove any stale artefacts
+        return tasks  # abort this product completely
+
     # ---------------- Speckle filter -----------
     if cfg.SPECKLE_FILTER_MODE == "adaptive" and cfg.SPECKLE_RADIUS_PX > 0:
         R_img = logistic_speckle(
@@ -170,30 +178,6 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         )
     else:
         R_img = ee.Image(R_img).clip(export_roi).toFloat()
-
-    # ---------------- Check for dynamic range ------------
-    stats = R_img.reduceRegion(
-        reducer=ee.Reducer.minMax().combine(  # min & max
-            ee.Reducer.variance(),  # + variance
-            sharedInputs=True,
-        ),
-        geometry=export_roi,
-        scale=20,
-        bestEffort=True,
-    )
-
-    # no pixels inside ROI → stats is empty
-    if stats.size().eq(0).getInfo():
-        print("  ⚠ MBSP region empty - skipping export")
-        _cleanup_sid_assets(sid)
-        return tasks
-
-    # constant image → variance ≈ 0
-    mb_var = ee.Number(stats.get("MBSP_variance"))
-    if mb_var.lte(1e-8).getInfo():  # tweak threshold if needed
-        print(f"  ⚠ MBSP flat (var={mb_var.getInfo():.3e}) - skipping export")
-        _cleanup_sid_assets(sid)
-        return tasks
 
     # ---------------- Thumbnail ----------------
     if cfg.SHOW_THUMB:

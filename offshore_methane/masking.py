@@ -10,7 +10,7 @@ where *1* keeps a pixel and *0* discards it.
 from __future__ import annotations
 
 import math
-from typing import Dict
+from typing import Dict, Optional
 
 import ee
 import geemap
@@ -76,6 +76,16 @@ def _single_band(bmask: ee.Image) -> ee.Image:
     return bmask.reduce(ee.Reducer.min()).rename("mask")
 
 
+# helper to count ON-pixels (True == 1) inside region
+def _count(img_bin, region, scale):
+    return ee.Number(
+        img_bin.unmask(0)
+        .reduceRegion(ee.Reducer.sum(), region, scale=scale, maxPixels=1e9)
+        .values()
+        .get(0)
+    )
+
+
 # ---------------------------------------------------------------------
 #  Sub-mask builders
 # ---------------------------------------------------------------------
@@ -139,11 +149,45 @@ def cloud_mask(img: ee.Image, p: Dict) -> ee.Image:
     return mask.rename("mask")
 
 
-def outlier_mask(img: ee.Image, p: Dict) -> ee.Image:
+def outlier_mask(
+    img: ee.Image,
+    p: Dict,
+    valid_mask: Optional[ee.Image] = None,
+) -> ee.Image:
+    """
+    Percentile-based outlier rejection that is *aware* of the pixels which have
+    already passed previous filters.
+
+    Parameters
+    ----------
+    img : ee.Image
+        The original, *unmasked* image.
+    p   : Dict
+        Parameter dictionary (same as before).
+    valid_mask : ee.Image, optional
+        Boolean (0/1) mask representing the pixels that have survived all
+        filters applied **prior** to this function.  When *None*, the function
+        falls back to the image’s native mask, preserving the old behaviour.
+
+    Returns
+    -------
+    ee.Image
+        Single-band mask (“mask”) that is **both**
+        • computed *from* the current valid pixels, *and*
+        • restricted *to* those same pixels.
+    """
+    # Pixels considered valid so far
+    current_mask = (
+        valid_mask if valid_mask is not None else img.mask().reduce(ee.Reducer.min())
+    )
+
+    # Compute statistics only over those pixels
+    masked_img = img.updateMask(current_mask)
+
     bands = p["outlier"]["bands"]
-    stats = img.select(bands).reduceRegion(
-        ee.Reducer.percentile([p["outlier"]["p_low"], p["outlier"]["p_high"]]),
-        img.geometry(),
+    stats = masked_img.select(bands).reduceRegion(
+        reducer=ee.Reducer.percentile([p["outlier"]["p_low"], p["outlier"]["p_high"]]),
+        geometry=masked_img.geometry(),
         scale=20,
         bestEffort=True,
     )
@@ -151,10 +195,11 @@ def outlier_mask(img: ee.Image, p: Dict) -> ee.Image:
     def band_mask(b: str) -> ee.Image:
         lo = ee.Number(stats.get(f"{b}_p{p['outlier']['p_low']}"))
         hi = ee.Number(stats.get(f"{b}_p{p['outlier']['p_high']}"))
-        return img.select(b).gte(lo).And(img.select(b).lte(hi))
+        return masked_img.select(b).gte(lo).And(masked_img.select(b).lte(hi))
 
     stacked = ee.ImageCollection([band_mask(b) for b in bands]).toBands()
-    return _single_band(stacked)
+    # Ensure we never *revive* pixels that were already invalid
+    return _single_band(stacked).And(current_mask).rename("mask")
 
 
 def ndwi_mask(img: ee.Image, p: Dict) -> ee.Image:
@@ -239,7 +284,7 @@ def downwind_mask(
         dx_dy = _lonlat_dx_dy(centre)
         dot = dx_dy.select("dx").multiply(ux).add(dx_dy.select("dy").multiply(uy))
 
-        mask = dot.lte(0)  # downwind: non-negative dot‐product
+        mask = dot.lte(0)  # downwind: non-negative dot-product
         return mask.Not() if invert else mask
 
     return (
@@ -262,47 +307,125 @@ def build_mask_for_C(
     img: ee.Image,
     centre: ee.Geometry,
     p: Dict = cfg.MASK_PARAMS,
-) -> ee.Image:
+    compute_stats: bool = False,  # ← set True to print %-removed per filter
+    scale: int = 20,  # resolution (m) used for the per-pixel counts
+) -> tuple[ee.Image, ee.Number]:
+    """Build the composite quality mask and (optionally) print how much each
+    individual filter removes relative to the geom_mask base.
+
+    Setting `compute_stats=True` adds < 2 server calls: one for the base
+    pixel-count and one per filter, so runtime impact is minimal for
+    debugging but should be kept False in production.
+    """
     from offshore_methane.ee_utils import get_wind_layers
 
+    # ────────────────────────────────────────────────────
     wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
-    mask = (
-        geom_mask(centre, p["dist"]["local_radius_m"], inside=True)
-        .And(saturation_mask(img, p))
-        .And(cloud_mask(img, p))
-        .And(outlier_mask(img, p))
-        .And(ndwi_mask(img, p))
-        .And(windspeed_mask(wind_layers, p))
-        .And(sga_mask(img, p))
-        .And(sgi_mask(img, p))
-        .And(  # ignore downwind half disk (must be upwind or outside plume radius)
-            ee.Image(downwind_mask(wind_layers, centre, invert=True)).Or(
-                geom_mask(centre, p["dist"]["plume_radius_m"], inside=False)
-            )
+
+    base = geom_mask(centre, p["dist"]["local_radius_m"], inside=True).And(
+        (ee.Image(downwind_mask(wind_layers, centre, invert=True))).Or(
+            geom_mask(centre, p["dist"]["plume_radius_m"], inside=False)
         )
     )
-    return mask.rename("mask")
+    data_ok = (
+        img.select(p["outlier"]["bands"]).mask().reduce(ee.Reducer.min()).rename("mask")
+    )
+    base = base.And(data_ok)
+
+    # keep filters in an OrderedDict so we can iterate deterministically
+    filters = {
+        "outlier": outlier_mask(img, p, valid_mask=base),
+        "saturation": saturation_mask(img, p),
+        "cloud": cloud_mask(img, p),
+        "ndwi": ndwi_mask(img, p),
+        "windspeed": windspeed_mask(wind_layers, p),
+        "sga": sga_mask(img, p),
+        "sgi": sgi_mask(img, p),
+    }
+
+    # ── build the final mask (logical AND of everything) ─────────────────────────
+    mask = base
+    for m in filters.values():
+        mask = mask.And(m)
+    mask = mask.rename("mask")
+
+    # ── optional debug stats ─────────────────────────────────────────────────────
+    region = centre.buffer(p["dist"]["local_radius_m"]).bounds()
+    total = _count(base, region, scale)  # pixels allowed by geom_mask
+    if compute_stats:
+        print("Percentage of pixels removed w.r.t. geom_mask:")
+        for name, f in filters.items():
+            remaining = _count(base.And(f), region, scale)
+            removed_pct = (
+                total.subtract(remaining).divide(total).multiply(100).getInfo()
+            )
+            print(f"  {name:<30s}: {removed_pct:6.2f}%")
+
+    kept_frac = _count(mask, region, scale).divide(total)
+    return mask, kept_frac
 
 
 def build_mask_for_MBSP(
-    img: ee.Image, centre: ee.Geometry, p: Dict = cfg.MASK_PARAMS
-) -> ee.Image:
+    img: ee.Image,
+    centre: ee.Geometry,
+    p: Dict = cfg.MASK_PARAMS,
+    compute_stats: bool = False,  # print per-filter percentages if True
+    scale: int = 20,  # pixel resolution (m) for the stats
+) -> tuple[ee.Image, ee.Number]:
+    """MBSP composite mask, now mirroring build_mask_for_C.
+
+    * `base` geometry: export-radius intersected with the *actual*
+      down-wind sector (no inversion like build_mask_for_C).
+    * Pixel-quality filters applied in a deterministic order.
+    * Optional per-filter removal statistics vs. the geom-mask base.
+    """
     from offshore_methane.ee_utils import get_wind_layers
 
+    # ────────────────────────────────────────────────────
     wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
-    mask = (
-        saturation_mask(img, p)
-        # Add some more masks:
-        .And(cloud_mask(img, p))
-        .And(ndwi_mask(img, p))
-        .And(windspeed_mask(wind_layers, p))
-        .And(downwind_mask(wind_layers, centre))
-        .And(geom_mask(centre, p["dist"]["export_radius_m"], inside=True))
+
+    # base = geometry ⨅ down-wind sector
+    base = geom_mask(centre, p["dist"]["export_radius_m"], inside=True).And(
+        downwind_mask(wind_layers, centre)
     )
-    return mask.rename("mask")
+    data_ok = (
+        img.select(p["outlier"]["bands"]).mask().reduce(ee.Reducer.min()).rename("mask")
+    )
+    base = base.And(data_ok)
+
+    # Ordered list of pixel-quality filters (keep MBSP-specific subset)
+    filters = {
+        "saturation": saturation_mask(img, p),
+        "cloud": cloud_mask(img, p),
+        "ndwi": ndwi_mask(img, p),
+        "windspeed": windspeed_mask(wind_layers, p),
+    }
+
+    # ── build the final mask ───────────────────────────────────────────
+    mask = base
+    for f in filters.values():
+        mask = mask.And(f)
+    mask = mask.rename("mask")
+
+    # ── optional per-filter statistics ────────────────────────────────
+    region = centre.buffer(p["dist"]["local_radius_m"]).bounds()
+    total = _count(base, region, scale)  # pixels allowed by geom_mask
+    if compute_stats:
+        print("Percentage of pixels removed w.r.t. geom_mask:")
+        for name, f in filters.items():
+            remaining = _count(base.And(f), region, scale)
+            removed_pct = (
+                total.subtract(remaining).divide(total).multiply(100).getInfo()
+            )
+            print(f"  {name:<30s}: {removed_pct:6.2f}%")
+
+    kept_frac = _count(mask, region, scale).divide(total)
+    return mask, kept_frac
 
 
-def view_mask(sid: str) -> geemap.Map:
+def view_mask(
+    sid: str, centre_lon: float, centre_lat: float, compute_stats: bool = False
+) -> geemap.Map:
     """
     Overlay `build_mask_for_C` (red) and `build_mask_for_MBSP` (green)
     on a Sentinel-2 true-colour image in an interactive geemap.Map.
@@ -323,9 +446,8 @@ def view_mask(sid: str) -> geemap.Map:
     img = ee.Image(f"COPERNICUS/S2_HARMONIZED/{sid}")
     if img is None:
         raise ValueError(f"Sentinel-2 image {sid!r} not found.")
-    CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002
 
-    centre = ee.Geometry.Point([CENTRE_LON, CENTRE_LAT])
+    centre = ee.Geometry.Point([centre_lon, centre_lat])
 
     # 2️⃣ True-colour backdrop (stretch a touch for contrast)
     rgb = (
@@ -345,8 +467,14 @@ def view_mask(sid: str) -> geemap.Map:
     img = img.addBands(sgi.rename("SGI"))
 
     # 3️⃣ Build masks, turn into single-colour rasters
-    mask_c = build_mask_for_C(img, centre, cfg.MASK_PARAMS).selfMask()
-    mask_m = build_mask_for_MBSP(img, centre, cfg.MASK_PARAMS).selfMask()
+    mask_c, kept_c = build_mask_for_C(img, centre, cfg.MASK_PARAMS, compute_stats)
+    mask_m, kept_m = build_mask_for_MBSP(img, centre, cfg.MASK_PARAMS, compute_stats)
+
+    print(f"Mask C kept {kept_c.multiply(100).getInfo():.2f}%")
+    print(f"Mask MBSP kept {kept_m.multiply(100).getInfo():.2f}%")
+
+    mask_c = mask_c.selfMask()
+    mask_m = mask_m.selfMask()
 
     vis_c = mask_c.visualize(palette=["#FF0000"])  # red
     vis_m = mask_m.visualize(palette=["#00FF00"])  # green
@@ -365,5 +493,15 @@ def view_mask(sid: str) -> geemap.Map:
 
 
 # %%
-view_mask("20170705T164319_20170705T165225_T15RXL")
+view_mask(
+    "20170705T164319_20170705T165225_T15RXL",
+    -90.96802087968751,
+    27.29220815000002,
+    True,
+)
+# view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
+# view_mask(
+#     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
+# )
+
 # %%
