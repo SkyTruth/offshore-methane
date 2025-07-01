@@ -4,11 +4,11 @@ This repository hosts experimental code and notebooks for SkyTruth's offshore me
 
 ## Project Structure
 
-- `offshore_methane/` – Python modules and utilities.
-- `notebooks/` – Exploratory Jupyter notebooks.
-- `data/` – Input data or small examples.
-- `docs/` – Additional documentation and references.
-- `tests/` – Automated tests.
+- `offshore_methane/` - Python modules and utilities.
+- `notebooks/` - Exploratory Jupyter notebooks.
+- `data/` - Input data or small examples.
+- `docs/` - Additional documentation and references.
+- `tests/` - Automated tests.
 
 ## Setup
 

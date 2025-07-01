@@ -83,7 +83,7 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         "dtype": "float32",
         "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
         "transform": tr,
-        # --- COG‑compliant settings ----------------------------------
+        # --- COG-compliant settings ----------------------------------
         "tiled": True,  # GeoTIFF is now tiled
         "blockxsize": 16,  # must be multiple of 16
         "blockysize": 16,

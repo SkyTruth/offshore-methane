@@ -2,7 +2,7 @@
 """
 All interaction with the Copernicus Dataspace ecosystem lives here.
 The module can now be imported even when CDSE credentials are absent.
-Network‑touching helpers lazily add / refresh the bearer token when
+Network-touching helpers lazily add / refresh the bearer token when
 credentials are available, and raise a clear error otherwise.
 """
 
@@ -49,12 +49,12 @@ def _cdse_token(user: str, pw: str, client: str = "cdse-public") -> str:
 
 
 def _ensure_token() -> None:
-    """Attach a fresh bearer token to the module‑wide session if possible."""
+    """Attach a fresh bearer token to the module-wide session if possible."""
     if "Authorization" in _session.headers:
         return  # already have one
     if not _AUTH_AVAILABLE:
         raise RuntimeError(
-            "CDSE credentials not configured – set CDSE_USERNAME / CDSE_PASSWORD "
+            "CDSE credentials not configured - set CDSE_USERNAME / CDSE_PASSWORD "
             "in the environment or a .env file to use remote CDSE features."
         )
     _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
@@ -71,10 +71,10 @@ _SYSTEM_INDEX_RE = re.compile(
 
 
 def parse_sid(sid: str) -> dict:
-    """Parse a Sentinel‑2 GEE system:index into its components."""
+    """Parse a Sentinel-2 GEE system:index into its components."""
     m = _SYSTEM_INDEX_RE.match(sid)
     if not m:
-        raise ValueError(f"Unrecognised Sentinel‑2 system:index: {sid}")
+        raise ValueError(f"Unrecognised Sentinel-2 system:index: {sid}")
     d = m.groupdict()
     d["date"] = d["start"][:8]
     return d
@@ -86,13 +86,13 @@ def _list_nodes(uri: str) -> list[dict]:
         return js["value"]
     if "result" in js:  # /Products('uuid')/Nodes
         return js["result"]
-    if "d" in js and "results" in js["d"]:  # SAP‑ish
+    if "d" in js and "results" in js["d"]:  # SAP-ish
         return js["d"]["results"]
     return []
 
 
 def _cdse_uuid(sid: str, *, prefer_l2a: bool = False):
-    """Map a GEE Sentinel‑2 system:index to its CDSE UUID."""
+    """Map a GEE Sentinel-2 system:index to its CDSE UUID."""
     p = parse_sid(sid)
     ts = p["start"]
     tile = p["tile"]
@@ -147,7 +147,7 @@ def download_xml(sid: str, xml_path: Path):
 
 
 # ------------------------------------------------------------------
-#  Robust GET helper – transparently refreshes (or acquires) the token
+#  Robust GET helper - transparently refreshes (or acquires) the token
 # ------------------------------------------------------------------
 
 
@@ -156,7 +156,7 @@ def _get(uri: str, **kw) -> requests.Response:
     try:
         _ensure_token()
     except RuntimeError:
-        # No creds: proceed without token – some endpoints are public.
+        # No creds: proceed without token - some endpoints are public.
         pass
 
     r = _session.get(uri, timeout=30, **kw)

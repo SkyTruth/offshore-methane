@@ -52,7 +52,7 @@ MASK_PARAMS = {
         "prob_thresh": 65,  # BACKUP: cloudy below
     },
     "wind": {
-        "max_wind_10m": 9,  # m s‑1, ERA5 / CFSv2 upper limit
+        "max_wind_10m": 9,  # m s-1, ERA5 / CFSv2 upper limit
         "time_window": 3,
     },
     "outlier": {
