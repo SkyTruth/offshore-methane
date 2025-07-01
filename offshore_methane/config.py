@@ -7,7 +7,10 @@ from pathlib import Path
 DAYS_BEFORE_START = 5
 DAYS_AFTER_END = 5
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
-START, END = "2017-07-04", "2017-07-06"  # Known pollution event # PROTOTYPICAL
+START, END = (
+    "2017-07-05",  # Inclusive
+    "2017-07-05",  # Inclusive
+)  # Known pollution event  # PROTOTYPICAL
 # START, END = "2016-01-01", "2016-12-01"  # Known pollution event # PROTOTYPICAL
 # CENTRE_LON, CENTRE_LAT = 101.30972804846851, 9.12181368179713  # VENTING?
 # START, END = "2024-11-26", "2024-12-18"  # Known pollution event # VENTING?

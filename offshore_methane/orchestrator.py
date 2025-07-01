@@ -86,12 +86,8 @@ def iter_sites():
                 yield {
                     "lon": float(row["lon"]),
                     "lat": float(row["lat"]),
-                    "start": add_days_to_date(
-                        row.get("start", cfg.START), -cfg.DAYS_BEFORE_START
-                    ),
-                    "end": add_days_to_date(
-                        row.get("end", cfg.END), cfg.DAYS_AFTER_END
-                    ),
+                    "start": row.get("start", cfg.START),
+                    "end": add_days_to_date(row.get("end", cfg.END), 1),
                 }
     else:
         print(f"⚠  {cfg.SITES_CSV} not found - processing single hard-coded site")
@@ -99,7 +95,7 @@ def iter_sites():
             lon=cfg.CENTRE_LON,
             lat=cfg.CENTRE_LAT,
             start=cfg.START,
-            end=cfg.END,
+            end=add_days_to_date(cfg.END, 1),
         )
 
 
