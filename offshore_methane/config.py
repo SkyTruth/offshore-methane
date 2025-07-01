@@ -41,6 +41,7 @@ EXPORT_PARAMS = {
 #  Other files
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")
+SITES_TO_PROCESS = range(0, 2)
 
 # ------------------------------------------------------------------
 #  Masking parameters
@@ -62,8 +63,8 @@ MASK_PARAMS = {
     },
     "outlier": {
         "bands": ["B11", "B12"],
-        "p_low": 2,
-        "p_high": 98,
+        "p_low": 10,
+        "p_high": 100,
         "saturation": 10_000,
     },
     "ndwi": {"threshold": 0.0},

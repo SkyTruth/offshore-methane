@@ -95,12 +95,14 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     """
 
     # First calculate the C factor
-    C_masked_img = image.updateMask(build_mask_for_C(image, centre, cfg.MASK_PARAMS))
+    C_masked_img, _ = build_mask_for_C(image, centre, cfg.MASK_PARAMS)
+    C_masked_img = image.updateMask(C_masked_img)
     num = (
         C_masked_img.select("B11")
         .multiply(C_masked_img.select("B12"))
         .reduceRegion(ee.Reducer.sum(), C_masked_img.geometry(), 20, bestEffort=True)
     )
+
     den = (
         C_masked_img.select("B12")
         .pow(2)
@@ -109,9 +111,9 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     C_factor = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
 
     # Then calculate the MBSP
-    MBSP_masked_img = image.updateMask(
-        build_mask_for_MBSP(image, centre, cfg.MASK_PARAMS)
-    )
+    MBSP_masked_img, _ = build_mask_for_MBSP(image, centre, cfg.MASK_PARAMS)
+    MBSP_masked_img = image.updateMask(MBSP_masked_img)
+
     MBSP_masked_result = (
         MBSP_masked_img.select("B12")
         .multiply(C_factor)
