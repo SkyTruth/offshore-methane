@@ -1,3 +1,4 @@
+# %%
 # ee_utils.py
 """
 Thin wrappers around the Earth-Engine Python client.
@@ -448,3 +449,8 @@ def get_wind_layers(img: ee.Image, time_window: int = 3) -> ee.Image:
     )
 
     return speed.addBands(direction).copyProperties(met, ["system:time_start"])
+
+
+# %%
+quick_view("20170705T164319_20170705T165225_T15RXL")
+# %%

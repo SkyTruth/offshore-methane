@@ -297,6 +297,7 @@ def build_mask_for_MBSP(
         .And(ndwi_mask(img, p))
         .And(windspeed_mask(wind_layers, p))
         .And(downwind_mask(wind_layers, centre))
+        .And(geom_mask(centre, p["dist"]["export_radius_m"], inside=True))
     )
     return mask.rename("mask")
 
