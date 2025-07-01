@@ -171,6 +171,30 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     else:
         R_img = ee.Image(R_img).clip(export_roi).toFloat()
 
+    # ---------------- Check for dynamic range ------------
+    stats = R_img.reduceRegion(
+        reducer=ee.Reducer.minMax().combine(  # min & max
+            ee.Reducer.variance(),  # + variance
+            sharedInputs=True,
+        ),
+        geometry=export_roi,
+        scale=20,
+        bestEffort=True,
+    )
+
+    # no pixels inside ROI → stats is empty
+    if stats.size().eq(0).getInfo():
+        print("  ⚠ MBSP region empty - skipping export")
+        _cleanup_sid_assets(sid)
+        return tasks
+
+    # constant image → variance ≈ 0
+    mb_var = ee.Number(stats.get("MBSP_variance"))
+    if mb_var.lte(1e-8).getInfo():  # tweak threshold if needed
+        print(f"  ⚠ MBSP flat (var={mb_var.getInfo():.3e}) - skipping export")
+        _cleanup_sid_assets(sid)
+        return tasks
+
     # ---------------- Thumbnail ----------------
     if cfg.SHOW_THUMB:
         url = R_img.visualize(
