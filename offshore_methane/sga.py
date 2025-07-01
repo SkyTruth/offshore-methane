@@ -6,7 +6,6 @@ either GCS or EE assets.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -162,13 +161,9 @@ def ensure_sga_asset(
 
     # ------------------------------------------------------- preferred = bucket, fast path
     gcs_url = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
-    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
-    if not gsutil_cmd:
-        raise RuntimeError("gsutil not found on system PATH.")
-
     gcs_exists = (
         subprocess.run(
-            [gsutil_cmd, "ls", gcs_url],
+            [gsutil_cmd(), "ls", gcs_url],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode
@@ -215,7 +210,7 @@ def ensure_sga_asset(
 
         # tidy up staged object if we uploaded it just now
         if overwrite or not gcs_exists:
-            subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
+            subprocess.run([gsutil_cmd(), "rm", gcs_url], stdout=subprocess.DEVNULL)
 
         return asset_id, exported
 
