@@ -25,6 +25,8 @@ def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
     Optionally, zoom to a given region (ee.Geometry).
     Allows custom bands and autoscaled visualization.
     """
+    system_index = system_index[:38]
+
     # Find the image by system:index
     coll = ee.ImageCollection("COPERNICUS/S2_HARMONIZED").filter(
         ee.Filter.eq("system:index", system_index)
