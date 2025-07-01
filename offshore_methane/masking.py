@@ -16,34 +16,13 @@ import ee
 import geemap
 import numpy as np
 
+import offshore_methane.config as cfg
+
 # ---------------------------------------------------------------------
 #  Module-level constants (avoid recomputing in map() lambdas)
 # ---------------------------------------------------------------------
 _DEG2RAD = math.pi / 180.0
 _EARTH_R = 6_371_000  # m - WGS-84 authalic radius
-
-DEFAULT_MASK_PARAMS: Dict[str, Dict] = {
-    "dist": {"local_radius_m": 5_000, "plume_radius_m": 1_000},
-    "cloud": {
-        "scene_cloud_pct": 50,  # metadata
-        "cs_thresh": 0.65,  # cloudy above
-        "prob_thresh": 65,  # BACKUP: cloudy below
-    },
-    "wind": {"max_wind_10m": 9},  # m s‑1, ERA5 / CFSv2 upper limit
-    "outlier": {
-        "bands": ["B11", "B12"],
-        "p_low": 2,
-        "p_high": 98,
-        "saturation": 10_000,
-    },
-    "ndwi": {"threshold": 0.0},
-    "sunglint": {
-        "scene_sga_range": (0.0, 40.0),  # deg
-        "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.30, 1.0),  # NDI
-    },
-    "min_valid_pct": 0.4,
-}
 
 
 # ---------------------------------------------------------------------
@@ -79,11 +58,13 @@ def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
     )
 
     # keep images that *lack* metadata
-    return img.set(
-        "SGA_OK",
-        ee.Algorithms.If(
-            img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
-        ),
+    return ee.Image(
+        img.set(
+            "SGA_OK",
+            ee.Algorithms.If(
+                img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
+            ),
+        )
     )
 
 
@@ -95,16 +76,19 @@ def _single_band(bmask: ee.Image) -> ee.Image:
     return bmask.reduce(ee.Reducer.min()).rename("mask")
 
 
-def _geom_mask(centre: ee.Geometry, radius_m: float) -> ee.Image:
-    """Disk mask = 1 inside radius, masked outside."""
-    return ee.Image.constant(1).clip(centre.buffer(radius_m)).rename("mask")
-
-
 # ---------------------------------------------------------------------
 #  Sub-mask builders
 # ---------------------------------------------------------------------
-def geom_mask(img: ee.Image, centre: ee.Geometry, p: Dict) -> ee.Image:  # noqa: D401
-    return _geom_mask(centre, p["dist"]["local_radius_m"])
+def geom_mask(centre: ee.Geometry, radius_m: float, inside: bool) -> ee.Image:
+    """
+    1 → pixels *inside* the radius (default) or *outside* when inside=False.
+    Returns a single-band image called “mask”.
+    """
+    dx_dy = _lonlat_dx_dy(centre)
+    r2 = radius_m**2
+    dist2 = dx_dy.select("dx").pow(2).add(dx_dy.select("dy").pow(2))
+    mask = dist2.lte(r2) if inside else dist2.gt(r2)
+    return mask.rename("mask")
 
 
 def saturation_mask(img: ee.Image, p: Dict) -> ee.Image:
@@ -186,101 +170,88 @@ def sgi_mask(img: ee.Image, p: Dict) -> ee.Image:
     return img.select("SGI").gt(p["sunglint"]["local_sgi_range"][0]).rename("mask")
 
 
-def wind_mask(
-    img: ee.Image,
-    centre: ee.Geometry,
-    radius_m: float,
-    p: Dict,
-    inside: bool = True,
-    downwind: bool = True,
+def _lonlat_dx_dy(centre: ee.Geometry) -> ee.Image:
+    """Return per-pixel Δx, Δy [m] from *centre* in an EPSG:4326 grid."""
+    lonlat = ee.Image.pixelLonLat()
+    lon0 = ee.Number(centre.coordinates().get(0))
+    lat0 = ee.Number(centre.coordinates().get(1))
+
+    dx = (
+        lonlat.select("longitude")
+        .subtract(lon0)
+        .multiply(_DEG2RAD)
+        .multiply(_EARTH_R)
+        .multiply(lonlat.select("latitude").multiply(_DEG2RAD).cos())
+    )
+    dy = lonlat.select("latitude").subtract(lat0).multiply(_DEG2RAD).multiply(_EARTH_R)
+    return dx.addBands(dy).rename(["dx", "dy"])
+
+
+def windspeed_mask(
+    wind_layers: ee.Image,
+    p: dict,
     invert: bool = False,
-    time_window: int = 3,
 ) -> ee.Image:
     """
-    Returns 1 for pixels *not* in the down-wind half-disk, 0 otherwise.
-    And where wind speed is less than max_wind_10m.
+    Mask pixels where wind speed is < p['wind']['max_wind_10m'] (default logic).
 
-    Robust to:
-      • No CFSv2 slice within ±time_window h
-      • Reduction over the slice returning nulls
-
-    Fallback is an all-ones mask so downstream ops never break.
+    Robust: fallback to all-ones image on missing data.
     """
-    t0 = ee.Date(img.get("system:time_start"))
-    met = (
-        ee.ImageCollection("NOAA/CFSV2/FOR6H")
-        .filterDate(t0.advance(-time_window, "hour"), t0.advance(time_window, "hour"))
-        .first()
+    try:
+        speed = wind_layers.select("wind_speed")
+    except Exception:
+        return ee.Image.constant(1).rename("mask")
+    speed_ok = (
+        speed.gt(p["wind"]["max_wind_10m"])
+        if invert
+        else speed.lt(p["wind"]["max_wind_10m"])
     )
 
-    # helper → compute mask given a valid met image
-    def _make_mask(met_img):
-        # Reduce over a disk
-        met_hi = met_img.resample("bilinear").reproject(crs="EPSG:4326", scale=1000)
-        stats = met_hi.select(
-            [
-                "u-component_of_wind_height_above_ground",
-                "v-component_of_wind_height_above_ground",
-            ]
-        ).reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=centre.buffer(radius_m),
-            scale=20_000,
-            bestEffort=True,
-        )
+    return speed_ok.rename("mask")
 
-        def _build(u, v):
-            mag = u.hypot(v).max(1e-6)
-            ux, uy = u.divide(mag), v.divide(mag)
 
-            lonlat = ee.Image.pixelLonLat()
-            lon0 = ee.Number(centre.coordinates().get(0))
-            lat0 = ee.Number(centre.coordinates().get(1))
+def downwind_mask(
+    wind_layers: ee.Image,
+    centre: ee.Geometry,
+    invert: bool = False,
+) -> ee.Image:
+    """
+    1 → pixel lies in the half-plane *downwind* of *centre*, as defined by the
+    **velocity vector at that point** (no radius constraint).
+    Set `invert=True` to select the *upwind* half-plane instead.
 
-            dx = (
-                lonlat.select("longitude")
-                .subtract(lon0)
-                .multiply(_DEG2RAD)
-                .multiply(_EARTH_R)
-                .multiply(lonlat.select("latitude").multiply(_DEG2RAD).cos())
-            )
-            dy = (
-                lonlat.select("latitude")
-                .subtract(lat0)
-                .multiply(_DEG2RAD)
-                .multiply(_EARTH_R)
-            )
+    Robustness: if `wind_dir` at the centre is missing/null, returns an
+    all-ones mask so downstream operations continue gracefully.
+    """
+    # wind direction (degrees) exactly at the centre
+    dir_stat = wind_layers.select("wind_dir").reduceRegion(
+        reducer=ee.Reducer.first(),  # same as sampling a point
+        geometry=centre,
+        scale=20_000,
+        bestEffort=True,
+    )
+    dir_deg = ee.Number(dir_stat.get("wind_dir"))
 
-            r2 = radius_m**2
-            in_out = (
-                dx.pow(2).add(dy.pow(2)).lte(r2)
-                if inside
-                else dx.pow(2).add(dy.pow(2)).gt(r2)
-            )
-            up_down = (
-                dx.multiply(ux).add(dy.multiply(uy)).gte(0)
-                if downwind
-                else dx.multiply(ux).add(dy.multiply(uy)).lt(0)
-            )
+    def _build_mask(direction_deg: ee.Number) -> ee.Image:
+        theta = direction_deg.multiply(_DEG2RAD)
+        ux, uy = theta.cos(), theta.sin()  # unit vector of the wind
 
-            mask = in_out.And(up_down)
-            if invert:
-                mask = mask.Not()
+        dx_dy = _lonlat_dx_dy(centre)
+        dot = dx_dy.select("dx").multiply(ux).add(dx_dy.select("dy").multiply(uy))
 
-            return mask.And(mag.lt(p["wind"]["max_wind_10m"])).rename("mask")
+        mask = dot.lte(0)  # downwind: non-negative dot‐product
+        return mask.Not() if invert else mask
 
-        return ee.Image(
-            _build(
-                ee.Number(stats.get("u-component_of_wind_height_above_ground")),
-                ee.Number(stats.get("v-component_of_wind_height_above_ground")),
+    return (
+        ee.Image(
+            ee.Algorithms.If(
+                dir_deg,  # truthy only if a numeric value exists
+                _build_mask(dir_deg),
+                ee.Image.constant(1),
             )
         )
-
-    # ------------------------------------------------------------------
-    # choose met-branch or fall back
-    # ------------------------------------------------------------------
-    return ee.Image(
-        ee.Algorithms.If(met, _make_mask(met), ee.Image.constant(1).rename("mask"))
+        .rename("mask")
+        .copyProperties(wind_layers, wind_layers.propertyNames())
     )
 
 
@@ -290,48 +261,42 @@ def wind_mask(
 def build_mask_for_C(
     img: ee.Image,
     centre: ee.Geometry,
-    p: Dict = DEFAULT_MASK_PARAMS,
+    p: Dict = cfg.MASK_PARAMS,
 ) -> ee.Image:
+    from offshore_methane.ee_utils import get_wind_layers
+
+    wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
     mask = (
-        geom_mask(img, centre, p)
+        geom_mask(centre, p["dist"]["local_radius_m"], inside=True)
         .And(saturation_mask(img, p))
         .And(cloud_mask(img, p))
         .And(outlier_mask(img, p))
         .And(ndwi_mask(img, p))
-        .And(
-            wind_mask(
-                img,
-                centre,
-                p["dist"]["plume_radius_m"],
-                p,
-                inside=True,
-                downwind=True,
-                invert=True,
-            )
-        )
+        .And(windspeed_mask(wind_layers, p))
         .And(sga_mask(img, p))
         .And(sgi_mask(img, p))
+        .And(  # ignore downwind half disk (must be upwind or outside plume radius)
+            ee.Image(downwind_mask(wind_layers, centre, invert=True)).Or(
+                geom_mask(centre, p["dist"]["plume_radius_m"], inside=False)
+            )
+        )
     )
     return mask.rename("mask")
 
 
 def build_mask_for_MBSP(
-    img: ee.Image, centre: ee.Geometry, p: Dict = DEFAULT_MASK_PARAMS
+    img: ee.Image, centre: ee.Geometry, p: Dict = cfg.MASK_PARAMS
 ) -> ee.Image:
+    from offshore_methane.ee_utils import get_wind_layers
+
+    wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
     mask = (
         saturation_mask(img, p)
+        # Add some more masks:
         .And(cloud_mask(img, p))
         .And(ndwi_mask(img, p))
-        .And(
-            wind_mask(
-                img,
-                centre,
-                p["dist"]["local_radius_m"],
-                p,
-                inside=True,
-                downwind=True,
-            )
-        )
+        .And(windspeed_mask(wind_layers, p))
+        .And(downwind_mask(wind_layers, centre))
     )
     return mask.rename("mask")
 
@@ -379,14 +344,17 @@ def view_mask(sid: str) -> geemap.Map:
     img = img.addBands(sgi.rename("SGI"))
 
     # 3️⃣ Build masks, turn into single-colour rasters
-    mask_c = build_mask_for_C(img, centre, DEFAULT_MASK_PARAMS).selfMask()
-    mask_m = build_mask_for_MBSP(img, centre, DEFAULT_MASK_PARAMS).selfMask()
+    mask_c = build_mask_for_C(img, centre, cfg.MASK_PARAMS).selfMask()
+    mask_m = build_mask_for_MBSP(img, centre, cfg.MASK_PARAMS).selfMask()
 
     vis_c = mask_c.visualize(palette=["#FF0000"])  # red
     vis_m = mask_m.visualize(palette=["#00FF00"])  # green
 
     # 4️⃣ Assemble map
-    lon, lat = centre.coordinates().getInfo()
+    coords = centre.coordinates().getInfo()
+    if coords is None:
+        raise RuntimeError("Could not retrieve centre coordinates")
+    lon, lat = coords
     m = geemap.Map(center=[lat, lon], zoom=11)
     m.addLayer(rgb, {}, "True colour")
     m.addLayer(vis_c, {"opacity": 0.6}, "Mask C (red)")
@@ -397,5 +365,4 @@ def view_mask(sid: str) -> geemap.Map:
 
 # %%
 view_mask("20170705T164319_20170705T165225_T15RXL")
-
 # %%

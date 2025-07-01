@@ -6,11 +6,8 @@ MBSP implementations, unchanged from your monolith.
 
 import ee
 
-from offshore_methane.masking import (
-    DEFAULT_MASK_PARAMS,
-    build_mask_for_C,
-    build_mask_for_MBSP,
-)
+import offshore_methane.config as cfg
+from offshore_methane.masking import build_mask_for_C, build_mask_for_MBSP
 
 
 # ------------------------------------------------------------------
@@ -98,9 +95,7 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     """
 
     # First calculate the C factor
-    C_masked_img = image.updateMask(
-        build_mask_for_C(image, centre, DEFAULT_MASK_PARAMS)
-    )
+    C_masked_img = image.updateMask(build_mask_for_C(image, centre, cfg.MASK_PARAMS))
     num = (
         C_masked_img.select("B11")
         .multiply(C_masked_img.select("B12"))
@@ -115,7 +110,7 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
 
     # Then calculate the MBSP
     MBSP_masked_img = image.updateMask(
-        build_mask_for_MBSP(image, centre, DEFAULT_MASK_PARAMS)
+        build_mask_for_MBSP(image, centre, cfg.MASK_PARAMS)
     )
     MBSP_masked_result = (
         MBSP_masked_img.select("B12")

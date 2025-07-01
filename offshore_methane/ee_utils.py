@@ -4,6 +4,7 @@ Thin wrappers around the Earth-Engine Python client.
 """
 
 import json
+import math
 import subprocess
 import time
 from pathlib import Path
@@ -11,9 +12,9 @@ from pathlib import Path
 import ee
 import geemap
 import requests
+from requests.exceptions import ConnectionError, HTTPError
 
-from offshore_methane.masking import DEFAULT_MASK_PARAMS as MP
-from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
+import offshore_methane.config as cfg
 
 ee.Initialize()  # single global EE session
 
@@ -69,14 +70,15 @@ def sentinel2_system_indexes(
     point: ee.Geometry,
     start: str,
     end: str,
-    sga_range: tuple[float, float] = (0.0, 25.0),
 ) -> list[str]:
+    from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
+
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
-        .filter(scene_cloud_filter(MP))
-        .map(lambda img: scene_sga_filter(img, MP))
+        .filter(scene_cloud_filter(cfg.MASK_PARAMS))
+        .map(lambda img: scene_sga_filter(img, cfg.MASK_PARAMS))
         .filter(ee.Filter.eq("SGA_OK", 1))
     )
 
@@ -122,16 +124,52 @@ def ee_asset_ready(asset_id: str) -> bool:
 # ------------------------------------------------------------------
 #  Simple URL→file helper used by local exports
 # ------------------------------------------------------------------
-def _download_url(url: str, dest: Path, chunk: int = 1 << 20) -> None:
+def _download_url(url, dest, chunk=8192, *, max_retries=5, backoff=1.5):
     """
-    Stream `url` to `dest`, creating parent folders if needed.
+    Stream-download a signed EE URL with automatic exponential-backoff retries.
+
+    Parameters
+    ----------
+    url : str
+        Signed Earth-Engine download URL.
+    dest : pathlib.Path
+        Output file path.
+    chunk : int
+        Bytes per streamed block.
+    max_retries : int
+        Attempts before giving up.
+    backoff : float
+        Initial sleep (s); doubled each retry.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(dest, "wb") as fh:
-            for block in r.iter_content(chunk):
-                fh.write(block)
+
+    attempt = 0
+    while True:
+        try:
+            with requests.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(dest, "wb") as fh:
+                    for block in r.iter_content(chunk):
+                        if block:  # ignore keep-alives
+                            fh.write(block)
+            return  # success
+        except HTTPError as exc:
+            code = exc.response.status_code if exc.response else None
+            attempt += 1
+            if attempt > max_retries or code not in (429, 500, 502, 503, 504):
+                raise  # unrecoverable
+            sleep = backoff * (2 ** (attempt - 1))
+            print(f"  ↻ HTTP {code}, retry {attempt}/{max_retries} in {sleep:.1f}s")
+            time.sleep(sleep)
+        except ConnectionError:
+            attempt += 1
+            if attempt > max_retries:
+                raise
+            sleep = backoff * (2 ** (attempt - 1))
+            print(
+                f"  ↻ connection error, retry {attempt}/{max_retries} in {sleep:.1f}s"
+            )
+            time.sleep(sleep)
 
 
 # ------------------------------------------------------------------
@@ -352,3 +390,59 @@ def export_polygons(
     if task:
         task.start()
     return task, exported
+
+
+def get_wind_layers(img: ee.Image, time_window: int = 3) -> ee.Image:
+    """
+    Compute wind speed (m s-1) and direction (degrees) at the timestamp of *img*
+    using NOAA/CFSV2/FOR6H re-analysis.
+
+    Parameters
+    ----------
+    img : ee.Image
+        Any EE image that carries a “system:time_start” property.
+    time_window : int, optional
+        Hours before/after *img*’s timestamp to search for the closest
+        forecast record (default: 3 h).
+
+    Returns
+    -------
+    ee.Image
+        Two-band image:
+          • wind_speed (m s-1)
+          • wind_dir   (degrees, 0 = east, counter-clockwise positive)
+    """
+    # Timestamp of the reference image
+    t0 = ee.Date(img.get("system:time_start"))
+
+    # Grab the CFSv2 record closest in time to t0
+    met = (
+        ee.ImageCollection("NOAA/CFSV2/FOR6H")
+        .filterDate(t0.advance(-time_window, "hour"), t0.advance(time_window, "hour"))
+        .sort("system:time_start")
+        .first()
+    )
+
+    if met is None:
+        raise ValueError("No CFSv2 image found in the requested window.")
+
+    # Re-project to ~1 km for smoother spatial gradients
+    met = met.resample("bilinear").reproject(crs="EPSG:4326", scale=1_000)
+
+    # Wind components (10 m above ground)
+    u = met.select("u-component_of_wind_height_above_ground")
+    v = met.select("v-component_of_wind_height_above_ground")
+
+    # Magnitude
+    speed = u.hypot(v).rename("wind_speed")
+
+    # Direction (0° = east, counter-clockwise +)
+    direction = (
+        v.atan2(u)  # radians
+        .multiply(180 / math.pi)  # → degrees
+        .add(360)
+        .mod(360)
+        .rename("wind_dir")
+    )
+
+    return speed.addBands(direction).copyProperties(met, ["system:time_start"])

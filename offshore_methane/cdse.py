@@ -23,8 +23,8 @@ _CATALOG = "https://catalogue.dataspace.copernicus.eu/odata/v1"
 _DL_BASE = "https://download.dataspace.copernicus.eu/odata/v1/Products"
 
 load_dotenv("../.env")  # CDSE creds
-CDSE_USER = os.getenv("CDSE_USERNAME")
-CDSE_PW = os.getenv("CDSE_PASSWORD")
+CDSE_USER = os.getenv("CDSE_USERNAME") or ""
+CDSE_PW = os.getenv("CDSE_PASSWORD") or ""
 _AUTH_AVAILABLE = bool(CDSE_USER and CDSE_PW)
 
 # ------------------------------------------------------------------
