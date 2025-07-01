@@ -18,6 +18,7 @@ from rasterio.transform import from_origin
 
 from offshore_methane.cdse import download_xml
 from offshore_methane.ee_utils import ee_asset_ready
+from offshore_methane.gcp_utils import gsutil_cmd
 
 
 # ---------------------------------------------------------------------
@@ -126,14 +127,9 @@ def gcs_stage(local_path: Path, sid: str, datatype: str, bucket: str) -> str:
         raise FileNotFoundError(f"Local file does not exist: {local_path}")
 
     dst = f"gs://{bucket}/{sid}/{local_path.name}"
-
-    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
-    if gsutil_cmd is None:
-        raise RuntimeError("gsutil not found on system PATH.")
-
     try:
         subprocess.run(
-            [gsutil_cmd, "cp", str(local_path.resolve()), dst],
+            [gsutil_cmd(), "cp", str(local_path.resolve()), dst],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
