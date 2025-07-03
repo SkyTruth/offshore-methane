@@ -132,4 +132,3 @@ def generate_sunglint_worldRaster(start_date):
     task_min.start()
     task_max.start()
     print(f"Export tasks started: {base_name_min} and {base_name_max}")
-
