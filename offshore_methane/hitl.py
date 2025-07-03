@@ -6,6 +6,7 @@ import geemap
 from google.cloud import storage
 import ipywidgets as widgets
 from IPython.display import display
+import matplotlib.pyplot as plt
 
 ee.Initialize()
 
@@ -43,60 +44,83 @@ def save_drawn_feature_to_gcs(
 
 # === Reviewer Interface ===
 def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
-    index = widgets.IntSlider(
-        value=0, min=0, max=len(detections) - 1, description="Scene:"
+    scene_selector = widgets.Dropdown(
+        options=[(f"{sid} @ {coords}", (sid, coords)) for sid, coords in detections],
+        description="Scene:",
+        layout=widgets.Layout(width="auto"),
     )
+    load_btn = widgets.Button(description="Load Scene")  # <- NEW
     save_btn = widgets.Button(description="Save Plume")
     no_plume_btn = widgets.Button(description="Save as No Plume")
-
     status = widgets.Label()
-
     out = widgets.Output()
+    current_map = None  # for later access
 
-    current_map = None  # So we can access it later
-
-    def display_scene(idx):
+    def display_scene(scene):
         nonlocal current_map
-        system_index, coords = detections[idx]
+        system_index, coords = scene
         current_map = display_s2_with_geojson_from_gcs(
-            system_index, coords, bucket_name="offshore_methane"
+            system_index, coords, bucket_name=bucket_name
         )
         current_map.add_draw_control()
         out.clear_output()
         with out:
             display(current_map)
 
-    def on_index_change(change):
-        display_scene(change["new"])
-        status.value = ""
+    def on_load_clicked(b):  # <- NEW
+        display_scene(scene_selector.value)
+        status.value = f"✔️ Loaded scene: {scene_selector.value[0]}"
 
     def on_save_clicked(b):
-        system_index, coords = detections[index.value]
+        system_index, coords = scene_selector.value
         if not current_map.user_roi:
             status.value = "❗ Draw a geometry before saving."
             return
         geometry = current_map.user_roi
         geometry_geojson = geometry.getInfo()
-        save_drawn_feature_to_gcs(
-            geometry_geojson, system_index, bucket_name="offshore_methane"
-        )
+        save_drawn_feature_to_gcs(geometry_geojson, system_index, bucket_name)
         status.value = f"✔️ Saved plume for {system_index}"
 
     def on_no_plume_clicked(b):
-        system_index, coords = detections[index.value]
-        empty_geojson = []
+        system_index, coords = scene_selector.value
+        empty_geojson = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": None,
+                    "properties": {"system_index": system_index},
+                }
+            ],
+        }
         save_drawn_feature_to_gcs(empty_geojson, system_index, bucket_name)
         status.value = f"✔️ Marked {system_index} as no plume"
 
-    # Bind events
-    index.observe(on_index_change, names="value")
+    # Event bindings
+    load_btn.on_click(on_load_clicked)
     save_btn.on_click(on_save_clicked)
     no_plume_btn.on_click(on_no_plume_clicked)
 
-    # Initial display
-    display(widgets.HBox([index, save_btn, no_plume_btn]), status)
-    display_scene(index.value)
+    # Display initial UI
+    display(widgets.HBox([scene_selector, load_btn]))
+    display(widgets.HBox([save_btn, no_plume_btn]))
+    display(status)
     display(out)
+
+
+# === GCS Data Helper ===
+def deduplicate_by_date_and_coords(detections):
+    seen = set()
+    unique = []
+
+    for system_index, coords in detections:
+        date = system_index.split("_")[0]  # Extract date part like '20210507T162901'
+        key = (date, coords)
+        if key not in seen:
+            unique.append((system_index, coords))
+            seen.add(key)
+
+    return unique
 
 
 def list_unreviewed_detections_from_gcs(bucket_name):
@@ -248,10 +272,9 @@ def display_s2_with_geojson_from_gcs(
 
 # %%
 list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
-# display_s2_with_geojson_from_gcs(list_of_sids[0], "offshore_methane")
-start_hitl_review_loop(list_of_detections)
+list_deduplicate = deduplicate_by_date_and_coords(list_of_detections)
+start_hitl_review_loop(list_deduplicate)
 
 # %%
-
 
 # %%
