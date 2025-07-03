@@ -118,6 +118,7 @@ def ensure_sga_asset(
     # Set up GCS client/bucket
     client = storage.Client()  # Uses default credentials
     bucket_obj = client.bucket(bucket)
+    #  Set up a blob object for GCS
     blob = bucket_obj.blob(remote_path)
 
     if not blob.exists(client):  # Pass client for a single round-trip
