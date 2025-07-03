@@ -77,7 +77,61 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 ## Configuration
 
-`config.py` centralises all tunable parameters – date ranges, mask thresholds, export locations, MBSP constants and more. Editing this file is the typical way to customise runs. Example fields include `MASK_PARAMS`, `EXPORT_PARAMS`, and `SITES_CSV` which lists event locations.
+`config.py` centralises all tunable parameters – date ranges, mask thresholds, export locations and algorithm switches. The table below summarises how each variable is used in the codebase and the impact of tweaking it.
+
+### Scene and AOI
+
+| Name | Used in | Effect |
+| --- | --- | --- |
+| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `SITES_CSV` is missing. |
+| `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel‑2 search. |
+| `DAYS_BEFORE_START`, `DAYS_AFTER_END` | *(reserved)* | Intended to expand the search window; currently unused. |
+
+### Algorithm options
+
+| Name | Used in | Effect when changed |
+| --- | --- | --- |
+| `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle‑reduction strategy. |
+| `SPECKLE_RADIUS_PX` | `orchestrator.process_product` | Kernel size for median or adaptive speckle filtering. |
+| `LOGISTIC_SIGMA0`, `LOGISTIC_K` | `algos.logistic_speckle` | Shape the logistic weighting for adaptive filtering. Higher `LOGISTIC_K` sharpens the transition; `LOGISTIC_SIGMA0` shifts it. |
+| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex and simple MBSP implementations. |
+| `PLUME_P1`, `PLUME_P2`, `PLUME_P3` | `algos.plume_polygons_three_p` | Confidence thresholds for plume polygon detection. |
+| `SHOW_THUMB` | `orchestrator.process_product` | If true, displays a diagnostic MBSP thumbnail URL. |
+| `MAX_WORKERS` | `orchestrator.main` | Number of parallel threads used for EE exports. |
+
+### Export parameters
+
+The `EXPORT_PARAMS` dictionary routes output either to local disk, a Cloud Storage bucket or an EE asset collection.
+
+| Key | Used in | Meaning |
+| --- | --- | --- |
+| `bucket` | `ee_utils.export_image`/`export_polygons` | Destination GCS bucket. |
+| `ee_asset_folder` | same | Base EE folder for exported assets. |
+| `preferred_location` | `orchestrator._cleanup_sid_assets`, `ee_utils.*` | Selects `"local"`, `"bucket"` or `"ee_asset_folder"` as the export backend. |
+| `overwrite` | same | If `False`, skip exports when a file/asset already exists. |
+
+### Site control
+
+| Name | Used in | Effect |
+| --- | --- | --- |
+| `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
+| `SITES_TO_PROCESS` | same | Subset of rows to process (indexes). |
+
+### Masking parameters
+
+The nested `MASK_PARAMS` dictionary drives pixel masking in `masking.py` and is also consulted by `ee_utils.sentinel2_system_indexes` when searching for scenes.
+
+| Key | Sub‑keys | Purpose |
+| --- | --- | --- |
+| `dist` | `export_radius_m`, `local_radius_m`, `plume_radius_m` | Radii for the export ROI, local mask stats and plume polygon search. |
+| `cloud` | `scene_cloud_pct`, `cs_thresh`, `prob_thresh` | Scene‑level filter on `CLOUDY_PIXEL_PERCENTAGE` and per‑pixel cloud/ shadow thresholds. |
+| `wind` | `max_wind_10m`, `time_window` | Limits on wind speed and temporal window for re‑analysis data. |
+| `outlier` | `bands`, `p_low`, `p_high`, `saturation` | Controls percentile‑based outlier masking and saturation cutoff. |
+| `ndwi` | `threshold` | Water mask; higher thresholds retain only open water. |
+| `sunglint` | `scene_sga_range`, `local_sga_range`, `local_sgi_range` | Sun‑glint angle gates used when filtering scenes and building the MBSP mask. |
+| `min_valid_pct` | — | Minimum fraction of clear pixels needed before export. |
+
+Changing these values alters the pixel selection process; for instance increasing `cloud.cs_thresh` makes the cloud mask stricter, while enlarging `dist.export_radius_m` expands the export extent.
 
 ## Additional resources
 
