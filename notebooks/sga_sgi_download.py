@@ -1,7 +1,6 @@
 # %%
 import ee
 import pandas as pd
-import geopandas as gpd
 from google.cloud import storage
 from offshore_methane.masking import (
     saturation_mask,
@@ -10,8 +9,8 @@ from offshore_methane.masking import (
     ndwi_mask,
     sga_mask,
     sgi_mask,
-    DEFAULT_MASK_PARAMS,
 )
+from offshore_methane.config import MASK_PARAMS as DEFAULT_MASK_PARAMS
 from tqdm import tqdm
 
 ee.Initialize()

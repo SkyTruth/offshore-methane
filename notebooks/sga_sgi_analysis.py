@@ -2,8 +2,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import geopandas as gpd
-from shapely.geometry import Point
 
 sgi_sga_pd = pd.read_csv(r"..\SkyTruth\methane\sgi_sga_mask_sampled.csv")
 
