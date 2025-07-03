@@ -15,6 +15,7 @@ from typing import Dict, Optional
 import ee
 import geemap
 import numpy as np
+from IPython.display import display
 
 import offshore_methane.config as cfg
 
@@ -167,7 +168,7 @@ def outlier_mask(
     valid_mask : ee.Image, optional
         Boolean (0/1) mask representing the pixels that have survived all
         filters applied **prior** to this function.  When *None*, the function
-        falls back to the image’s native mask, preserving the old behaviour.
+        falls back to the image's native mask, preserving the old behaviour.
 
     Returns
     -------
@@ -425,7 +426,7 @@ def build_mask_for_MBSP(
 
 def view_mask(
     sid: str, centre_lon: float, centre_lat: float, compute_stats: bool = False
-) -> geemap.Map:
+) -> None:
     """
     Overlay `build_mask_for_C` (red) and `build_mask_for_MBSP` (green)
     on a Sentinel-2 true-colour image in an interactive geemap.Map.
@@ -489,19 +490,26 @@ def view_mask(
     m.addLayer(vis_c, {"opacity": 0.6}, "Mask C (red)")
     m.addLayer(vis_m, {"opacity": 0.6}, "Mask MBSP (green)")
     m.addLayerControl()
-    return m
+    display(m)
 
 
 # %%
-view_mask(
-    "20170705T164319_20170705T165225_T15RXL",
-    -90.96802087968751,
-    27.29220815000002,
-    True,
-)
-# view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
-# view_mask(
-#     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
-# )
+def main():
+    # view_mask(
+    #     "20170705T164319_20170705T165225_T15RXL",
+    #     -90.96802087968751,
+    #     27.29220815000002,
+    #     True,
+    # )
+    # view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
+    # view_mask(
+    #     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
+    # )
+
+    view_mask("20240501T162901_20240501T163950_T15QWB", -92.23731, 19.56605)
+
+
+if __name__ == "__main__":
+    main()
 
 # %%

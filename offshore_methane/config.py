@@ -4,8 +4,9 @@ from pathlib import Path
 # ------------------------------------------------------------------
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
-DAYS_BEFORE_START = 5
-DAYS_AFTER_END = 5
+SITES_CSV = Path("../data/sites.csv")
+SITES_TO_PROCESS = range(221, 225)
+
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
 START, END = (
     "2017-07-05",  # Inclusive
@@ -20,7 +21,7 @@ START, END = (
 # ------------------------------------------------------------------
 # 0 ⇒ no speckle filtering, 1  ⇒  3 × 3 median window (≈ 20 m), 2 ⇒ 5 × 5
 SPECKLE_RADIUS_PX = 10  # size of the square window
-SPECKLE_FILTER_MODE = "adaptive"  # "none" | "median" | "adaptive"
+SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
 # Logistic curve controls for adaptive speckle filtering
 LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
@@ -36,12 +37,6 @@ EXPORT_PARAMS = {
     "preferred_location": "local",  # "local", "bucket", "ee_asset_folder"
     "overwrite": True,  # overwrite existing files
 }
-
-# ------------------------------------------------------------------
-#  Other files
-# ------------------------------------------------------------------
-SITES_CSV = Path("../data/sites.csv")
-SITES_TO_PROCESS = range(0, 2)
 
 # ------------------------------------------------------------------
 #  Masking parameters
@@ -63,7 +58,7 @@ MASK_PARAMS = {
     },
     "outlier": {
         "bands": ["B11", "B12"],
-        "p_low": 10,
+        "p_low": 2,
         "p_high": 100,
         "saturation": 10_000,
     },

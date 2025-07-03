@@ -25,7 +25,7 @@ from offshore_methane.ee_utils import (
     export_polygons,
     sentinel2_system_indexes,
 )
-from offshore_methane.masking import build_mask_for_C
+from offshore_methane.masking import build_mask_for_C, build_mask_for_MBSP
 from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
 
@@ -145,22 +145,30 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     sgi = s2.normalizedDifference(["B12", "B_vis"])
     s2 = s2.addBands(sgi.rename("SGI"))
 
+    # ----------- Generate masks ------------------
+    # Make sure we're not exporting after throwing away all the pixels
+    mask_c, kept_c = build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS)
+    print(f"  {kept_c.multiply(100).getInfo():.1f}% Clear Pixels for {sid}")
+    if kept_c.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
+        print("  ⚠ C mask mostly empty - skipping export")
+        build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS, True)
+        _cleanup_sid_assets(sid)  # remove any stale artefacts
+        return tasks  # abort this product completely
+
+    mask_mbsp, kept_mbsp = build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS)
+    if kept_mbsp.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
+        build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS, True)
+        print("  ⚠ MBSP mask mostly empty - skipping export")
+        _cleanup_sid_assets(sid)  # remove any stale artefacts
+        return tasks  # abort this product completely
+
     # ---------------- MBSP computation ---------
     if cfg.USE_SIMPLE_MBSP:
-        R_img = mbsp_simple_ee(s2, centre_pt)
+        R_img = mbsp_simple_ee(s2, mask_c, mask_mbsp)
     else:
         R_img = mbsp_complex_ee(
             s2, sga_img, centre_pt, cfg.MASK_PARAMS["local_sga_range"]
         )
-
-    # ----------- Pixel mask-coverage gate ------------------
-    # Make sure we're not exporting after throwing away all the pixels
-    _, kept_c = build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS)
-    print(f"  Clear Pixels {kept_c.multiply(100).getInfo():.1f}% for {sid}")
-    if kept_c.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
-        print("  ⚠ C mask mostly empty - skipping export")
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
-        return tasks  # abort this product completely
 
     # ---------------- Speckle filter -----------
     if cfg.SPECKLE_FILTER_MODE == "adaptive" and cfg.SPECKLE_RADIUS_PX > 0:
