@@ -6,7 +6,6 @@ either GCS or EE assets.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -19,6 +18,7 @@ from rasterio.transform import from_origin
 
 from offshore_methane.cdse import download_xml
 from offshore_methane.ee_utils import ee_asset_ready
+from offshore_methane.gcp_utils import gsutil_cmd
 
 
 # ---------------------------------------------------------------------
@@ -84,7 +84,7 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         "dtype": "float32",
         "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
         "transform": tr,
-        # --- COG‑compliant settings ----------------------------------
+        # --- COG-compliant settings ----------------------------------
         "tiled": True,  # GeoTIFF is now tiled
         "blockxsize": 16,  # must be multiple of 16
         "blockysize": 16,
@@ -161,14 +161,9 @@ def gcs_stage(local_path: Path, sid: str, datatype: str, bucket: str) -> str:
         raise FileNotFoundError(f"Local file does not exist: {local_path}")
 
     dst = f"gs://{bucket}/{sid}/{local_path.name}"
-
-    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
-    if gsutil_cmd is None:
-        raise RuntimeError("gsutil not found on system PATH.")
-
     try:
         subprocess.run(
-            [gsutil_cmd, "cp", str(local_path.resolve()), dst],
+            [gsutil_cmd(), "cp", str(local_path.resolve()), dst],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -203,7 +198,7 @@ def ensure_sga_asset(
     gcs_url = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
     gcs_exists = (
         subprocess.run(
-            ["gsutil", "ls", gcs_url],
+            [gsutil_cmd(), "ls", gcs_url],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode
@@ -250,7 +245,7 @@ def ensure_sga_asset(
 
         # tidy up staged object if we uploaded it just now
         if overwrite or not gcs_exists:
-            subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
+            subprocess.run([gsutil_cmd(), "rm", gcs_url], stdout=subprocess.DEVNULL)
 
         return asset_id, exported
 
