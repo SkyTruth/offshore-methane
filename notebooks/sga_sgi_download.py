@@ -171,9 +171,7 @@ list_of_sid = list(set([sid for sid, _ in list_of_ids]))
 # %%
 # sampled_pd = sample_multiple_system_indexes(list_of_sid[0:2])
 sampled_pd = sample_multiple_system_indexes(list_of_sid)
-sampled_pd.to_csv(
-    r"C:\Users\ebeva\SkyTruth\methane\sgi_sga_mask_sampled.csv", index=False
-)
+sampled_pd.to_csv(r"..\SkyTruth\methane\sgi_sga_mask_sampled.csv", index=False)
 
 # %%
 import geemap

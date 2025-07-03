@@ -3,10 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import geopandas as gpd
-import geodatasets
 from shapely.geometry import Point
 
-sgi_sga_pd = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\sgi_sga_mask_sampled.csv")
+sgi_sga_pd = pd.read_csv(r"..\SkyTruth\methane\sgi_sga_mask_sampled.csv")
 
 
 # %%
@@ -51,17 +50,6 @@ sgi_sga_all_mask = sgi_sga_pd[
 plot_sgi_sga(sgi_sga_all_mask, x_field="SGA", y_field="SGI", color_field="system_index")
 
 # %%
-# gdf = gpd.GeoDataFrame(
-#     sgi_sga_all_mask,
-#     geometry=gpd.points_from_xy(sgi_sga_all_mask.lon, sgi_sga_all_mask.lat),
-#     crs="EPSG:4326",
-# )
-
-# # Load world land polygons
-# world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
-# mask = ~gdf.within(world.unary_union)
-# gdf_water = gdf[mask]
-# %%
 sga_pixels_arr = sgi_sga_all_mask["SGA"].values
 sgi_pixels_arr = sgi_sga_all_mask["SGI"].values
 
@@ -76,3 +64,4 @@ plt.scatter(sga_pixels_arr, sgi_pixels_arr, alpha=0.005)
 plt.scatter(np.linspace(5, 45), p(np.linspace(5, 45)))
 
 # %%
+plt.scatter(sga_pixels_arr, sgi_pixels_arr - p(sga_pixels_arr), alpha=0.1)
