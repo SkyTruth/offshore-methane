@@ -83,9 +83,10 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 | Name | Used in | Effect |
 | --- | --- | --- |
+| `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
+| `SITES_TO_PROCESS` | `orchestrator.iter_sites` | Subset of rows to process (indexes). |
 | `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `SITES_CSV` is missing. |
 | `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel‑2 search. |
-| `DAYS_BEFORE_START`, `DAYS_AFTER_END` | *(reserved)* | Intended to expand the search window; currently unused. |
 
 ### Algorithm options
 
@@ -94,8 +95,8 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 | `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle‑reduction strategy. |
 | `SPECKLE_RADIUS_PX` | `orchestrator.process_product` | Kernel size for median or adaptive speckle filtering. |
 | `LOGISTIC_SIGMA0`, `LOGISTIC_K` | `algos.logistic_speckle` | Shape the logistic weighting for adaptive filtering. Higher `LOGISTIC_K` sharpens the transition; `LOGISTIC_SIGMA0` shifts it. |
-| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex and simple MBSP implementations. |
-| `PLUME_P1`, `PLUME_P2`, `PLUME_P3` | `algos.plume_polygons_three_p` | Confidence thresholds for plume polygon detection. |
+| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex (unimplemented) and simple MBSP implementations. |
+| `PLUME_P1`, `PLUME_P2`, `PLUME_P3` | `algos.plume_polygons_three_p` | Monotonic confidence thresholds for plume polygon detection. |
 | `SHOW_THUMB` | `orchestrator.process_product` | If true, displays a diagnostic MBSP thumbnail URL. |
 | `MAX_WORKERS` | `orchestrator.main` | Number of parallel threads used for EE exports. |
 
@@ -109,13 +110,6 @@ The `EXPORT_PARAMS` dictionary routes output either to local disk, a Cloud Stora
 | `ee_asset_folder` | same | Base EE folder for exported assets. |
 | `preferred_location` | `orchestrator._cleanup_sid_assets`, `ee_utils.*` | Selects `"local"`, `"bucket"` or `"ee_asset_folder"` as the export backend. |
 | `overwrite` | same | If `False`, skip exports when a file/asset already exists. |
-
-### Site control
-
-| Name | Used in | Effect |
-| --- | --- | --- |
-| `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
-| `SITES_TO_PROCESS` | same | Subset of rows to process (indexes). |
 
 ### Masking parameters
 
