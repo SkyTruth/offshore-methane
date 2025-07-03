@@ -1,11 +1,8 @@
 # %%
 import ee
 import pandas as pd
-import random
-from shapely.geometry import Point
 import geopandas as gpd
 from google.cloud import storage
-import matplotlib.pyplot as plt
 from offshore_methane.masking import (
     saturation_mask,
     cloud_mask,
@@ -13,8 +10,6 @@ from offshore_methane.masking import (
     ndwi_mask,
     sga_mask,
     sgi_mask,
-    build_mask_for_C,
-    build_mask_for_MBSP,
     DEFAULT_MASK_PARAMS,
 )
 from tqdm import tqdm
@@ -97,7 +92,7 @@ def sample_image(system_index: tuple, n_points: int = 500):
     ).rename("SGA")
     img = img.addBands(sga)
 
-    centre = img.geometry().centroid()
+    # centre = img.geometry().centroid()
 
     # ---- Add masks ----
     p = DEFAULT_MASK_PARAMS
@@ -173,27 +168,4 @@ list_of_sid = list(set([sid for sid, _ in list_of_ids]))
 sampled_pd = sample_multiple_system_indexes(list_of_sid)
 sampled_pd.to_csv(r"..\SkyTruth\methane\sgi_sga_mask_sampled.csv", index=False)
 
-# %%
-import geemap
-
-df, img = sample_image(list_of_sid[0], n_points=500)
-geo_df = gpd.GeoDataFrame(
-    df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326"
-)
-geo_df_geemap = geemap.geopandas_to_ee(geo_df)
-Map = geemap.Map()
-Map.addLayer(img, {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}, "S2 Image")
-Map.addLayer(img.select("SGA"), {"min": 0, "max": 40}, "SGA")
-Map.addLayer(img.select("SGI"), {"min": -1, "max": 1}, "SGI")
-# Map.addLayer(img.select("mask_c"), {}, "mask_c")
-# Map.addLayer(img.select("mask_mbsp"), {}, "mask_mbsp")
-Map.addLayer(img.select("saturation_mask"), {}, "Saturation Mask")
-Map.addLayer(img.select("cloud_mask"), {}, "Cloud Mask")
-Map.addLayer(img.select("outlier_mask"), {}, "Outlier Mask")
-Map.addLayer(img.select("ndwi_mask"), {}, "NDWI Mask")
-Map.addLayer(img.select("sga_mask"), {}, "SGA Mask")
-Map.addLayer(img.select("sgi_mask"), {}, "SGI Mask")
-Map.addLayer(geo_df_geemap, {"color": "red", "pointSize": 3}, "Sample Points")
-Map.centerObject(img.geometry())
-Map
 # %%
