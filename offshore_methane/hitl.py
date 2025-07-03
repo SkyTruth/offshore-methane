@@ -68,8 +68,11 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
             display(current_map)
 
     def on_load_clicked(b):  # <- NEW
-        display_scene(scene_selector.value)
-        status.value = f"✔️ Loaded scene: {scene_selector.value[0]}"
+        try:
+            display_scene(scene_selector.value)
+            status.value = f"✔️ Loaded scene: {scene_selector.value[0]}"
+        except Exception as e:
+            status.value = f"❗ Error loading scene: {e}"
 
     def on_save_clicked(b):
         system_index, coords = scene_selector.value
