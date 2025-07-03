@@ -6,9 +6,6 @@ MBSP implementations, unchanged from your monolith.
 
 import ee
 
-import offshore_methane.config as cfg
-from offshore_methane.masking import build_mask_for_C, build_mask_for_MBSP
-
 
 # ------------------------------------------------------------------
 def mbsp_complex_ee(
@@ -89,14 +86,13 @@ def mbsp_complex_ee(
 
 
 # ------------------------------------------------------------------
-def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
+def mbsp_simple_ee(image: ee.Image, mask_c: ee.Image, mask_mbsp: ee.Image) -> ee.Image:
     """
     Fractional-slope MBSP (single zero-intercept regression).
     """
 
     # First calculate the C factor
-    C_masked_img, _ = build_mask_for_C(image, centre, cfg.MASK_PARAMS)
-    C_masked_img = image.updateMask(C_masked_img)
+    C_masked_img = image.updateMask(mask_c)
     num = (
         C_masked_img.select("B11")
         .multiply(C_masked_img.select("B12"))
@@ -111,8 +107,7 @@ def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
     C_factor = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
 
     # Then calculate the MBSP
-    MBSP_masked_img, _ = build_mask_for_MBSP(image, centre, cfg.MASK_PARAMS)
-    MBSP_masked_img = image.updateMask(MBSP_masked_img)
+    MBSP_masked_img = image.updateMask(mask_mbsp)
 
     MBSP_masked_result = (
         MBSP_masked_img.select("B12")
