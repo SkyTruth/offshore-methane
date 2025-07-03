@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 # Initialize the Earth Engine API
 ee.Initialize()
 
+
 # === GCS Save Helper ===
 def save_drawn_feature_to_gcs(
     geometry,
@@ -46,6 +47,7 @@ def save_drawn_feature_to_gcs(
 
     blob.upload_from_string(json.dumps(geojson), content_type="application/geo+json")
     print(f"✔️ Saved plume annotation to: gs://{bucket_name}/{hitl_prefix}/{filename}")
+
 
 # === Reviewer Interface ===
 def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
@@ -120,6 +122,7 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
     display(status)
     display(out)
 
+
 # === GCS Data Helper ===
 def deduplicate_by_date_and_coords(detections):
     """
@@ -143,6 +146,7 @@ def deduplicate_by_date_and_coords(detections):
 
     return unique
 
+
 def list_unreviewed_detections_from_gcs(bucket_name):
     """
     Return a list of (system_index, coordinates) tuples for detections
@@ -159,6 +163,7 @@ def list_unreviewed_detections_from_gcs(bucket_name):
     all_unreviewed = []
 
     from collections import defaultdict
+
     detections = defaultdict(list)
     hitl_files = set()
 
@@ -183,6 +188,7 @@ def list_unreviewed_detections_from_gcs(bucket_name):
                 all_unreviewed.append((system_index, coords))
 
     return sorted(all_unreviewed)
+
 
 def display_s2_with_geojson_from_gcs(
     system_index, coords, bucket_name="offshore_methane", vectors_prefix="vectors"
@@ -213,8 +219,11 @@ def display_s2_with_geojson_from_gcs(
     fc = geemap.geojson_to_ee(geojson)
     aoi = fc.geometry()
 
-    s2_image = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-        .filter(ee.Filter.eq("system:index", system_index)).first()
+    s2_image = (
+        ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+        .filter(ee.Filter.eq("system:index", system_index))
+        .first()
+    )
 
     if s2_image is None:
         print(f"No Sentinel-2 image found with system:index = {system_index}")
@@ -240,12 +249,22 @@ def display_s2_with_geojson_from_gcs(
     corrected_img = linearFit(s2_image)
     Map = geemap.Map()
     Map.centerObject(fc, 15)
-    Map.addLayer(s2_image, {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}, f"RGB {system_index}")
+    Map.addLayer(
+        s2_image,
+        {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000},
+        f"RGB {system_index}",
+    )
     Map.addLayer(corrected_img.select("B11"), {"min": 0, "max": 3000}, "B11")
-    Map.addLayer(corrected_img.select("B12_corrected"), {"min": 0, "max": 3000}, "B12 * c_fit")
+    Map.addLayer(
+        corrected_img.select("B12_corrected"), {"min": 0, "max": 3000}, "B12 * c_fit"
+    )
 
-    mbsp = ee.Image.loadGeoTIFF(f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif")
-    Map.addLayer(mbsp, {"min": -0.1, "max": 0.1, "palette": ["red", "white", "blue"]}, "MBSP")
+    mbsp = ee.Image.loadGeoTIFF(
+        f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
+    )
+    Map.addLayer(
+        mbsp, {"min": -0.1, "max": 0.1, "palette": ["red", "white", "blue"]}, "MBSP"
+    )
 
     hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
     hitl_blob = bucket.blob(hitl_blob_path)
@@ -258,6 +277,7 @@ def display_s2_with_geojson_from_gcs(
 
     Map.addLayer(fc, {}, f"MBSPs_{system_index}")
     return Map
+
 
 # %%
 list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
