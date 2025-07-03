@@ -30,6 +30,9 @@ from offshore_methane.mbsp import mbsp_complex_ee, mbsp_simple_ee
 from offshore_methane.sga import ensure_sga_asset
 
 
+# ------------------------------------------------------------------
+#  Helpers
+# ------------------------------------------------------------------
 def _cleanup_sid_assets(sid: str) -> None:
     """
     Delete any previously-exported artefacts (raster, vectors, SGA, XML …)
@@ -76,28 +79,72 @@ def add_days_to_date(date_str: str, days: int, fmt: str = "%Y-%m-%d") -> str:
     return new_dt.strftime(fmt)
 
 
+def _update_sites_csv(updates: dict[int, str]) -> None:
+    """
+    Persist discovered system_index values back to sites.csv.
+
+    parameters
+    ----------
+    updates : dict
+        Maps row index → semicolon-delimited system_index string.
+    """
+    if not updates or not cfg.SITES_CSV.is_file():
+        return
+
+    with open(cfg.SITES_CSV, newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    # Ensure column exists
+    fieldnames = list(rows[0].keys())
+    if "system_index" not in fieldnames:
+        fieldnames.append("system_index")
+
+    for idx, value in updates.items():
+        if 0 <= idx < len(rows):
+            rows[idx]["system_index"] = value
+
+    with open(cfg.SITES_CSV, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"↻ updated {cfg.SITES_CSV} with system_index for {len(updates)} site(s)")
+
+
 # ------------------------------------------------------------------
 #  Site iterator
 # ------------------------------------------------------------------
 def iter_sites():
+    """
+    Iterate over rows in sites.csv (or fallback to single site).
+    Yields dicts containing location, date bounds, optional system_index,
+    and the row index for later CSV updates.
+    """
     if cfg.SITES_TO_PROCESS and cfg.SITES_CSV.is_file():
         with open(cfg.SITES_CSV, newline="") as f:
-            for i, row in enumerate(csv.DictReader(f)):
-                if i not in cfg.SITES_TO_PROCESS:
-                    continue
-                yield {
-                    "lon": float(row["lon"]),
-                    "lat": float(row["lat"]),
-                    "start": row.get("start", cfg.START),
-                    "end": add_days_to_date(row.get("end", cfg.END), 1),
-                }
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        for i, row in enumerate(rows):
+            if i not in cfg.SITES_TO_PROCESS:
+                continue
+            yield {
+                "row_index": i,
+                "lon": float(row["lon"]),
+                "lat": float(row["lat"]),
+                "start": row.get("start", cfg.START),
+                "end": add_days_to_date(row.get("end", cfg.END), 1),
+                "system_index": row.get("system_index", "").strip(),
+            }
     else:
         print(f"⚠  {cfg.SITES_CSV} not found - processing single hard-coded site")
         yield dict(
+            row_index=-1,
             lon=cfg.CENTRE_LON,
             lat=cfg.CENTRE_LAT,
             start=cfg.START,
             end=add_days_to_date(cfg.END, 1),
+            system_index="",
         )
 
 
@@ -127,7 +174,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         sga_src, sga_new = ensure_sga_asset(sid, **cfg.EXPORT_PARAMS)
     except Exception as e:
         print(f"  ✗ error computing SGA grid for {sid}: {e}")
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
+        _cleanup_sid_assets(sid)
         return tasks
 
     sga_img = (
@@ -136,31 +183,28 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         else ee.Image(sga_src)
     )
 
-    # Add SGA to image as a new band called "SGA"
+    # Add SGA, SGI, etc.
     s2 = s2.addBands(sga_img.rename("SGA"))
-
-    # Add SGI to image as a new band called "SGI"
     b_vis = s2.select("B2").add(s2.select("B3")).add(s2.select("B4")).divide(3)
     s2 = s2.addBands(b_vis.rename("B_vis"))
     sgi = s2.normalizedDifference(["B12", "B_vis"])
     s2 = s2.addBands(sgi.rename("SGI"))
 
     # ----------- Generate masks ------------------
-    # Make sure we're not exporting after throwing away all the pixels
     mask_c, kept_c = build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS)
     print(f"  {kept_c.multiply(100).getInfo():.1f}% Clear Pixels for {sid}")
     if kept_c.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
         print("  ⚠ C mask mostly empty - skipping export")
-        build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS, True)
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
-        return tasks  # abort this product completely
+        # build_mask_for_C(s2, centre_pt, cfg.MASK_PARAMS, True)
+        _cleanup_sid_assets(sid)
+        return tasks
 
     mask_mbsp, kept_mbsp = build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS)
     if kept_mbsp.getInfo() < cfg.MASK_PARAMS["min_valid_pct"]:
-        build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS, True)
         print("  ⚠ MBSP mask mostly empty - skipping export")
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
-        return tasks  # abort this product completely
+        # build_mask_for_MBSP(s2, centre_pt, cfg.MASK_PARAMS, True) # Uncomment to debug
+        _cleanup_sid_assets(sid)
+        return tasks
 
     # ---------------- MBSP computation ---------
     if cfg.USE_SIMPLE_MBSP:
@@ -200,8 +244,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         rast_task, rast_new = export_image(R_img, sid, export_roi, **cfg.EXPORT_PARAMS)
     except Exception as exc:
         print(f"  ✗ raster export failed for {sid}: {exc}")
-        _cleanup_sid_assets(sid)  # remove any stale artefacts
-        return tasks  # abort this product gracefully
+        _cleanup_sid_assets(sid)
+        return tasks
     if rast_task:
         tasks.append(rast_task)
         print(f"  ⧗ raster task {rast_task.id} started")
@@ -231,18 +275,25 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 def main():
     start_time = time.time()
     active: list[ee.batch.Task] = []
+    csv_updates: dict[int, str] = {}
 
     with ThreadPoolExecutor(max_workers=cfg.MAX_WORKERS) as pool:
         futures = []
         for site in iter_sites():
-            centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
-
-            # -------- product search ----------
-            products = sentinel2_system_indexes(
-                centre_pt,
-                str(site["start"]),
-                str(site["end"]),
-            )
+            # Decide where to get product IDs
+            if site["system_index"]:
+                products = [
+                    s.strip() for s in site["system_index"].split(";") if s.strip()
+                ]
+            else:
+                centre_pt = ee.Geometry.Point([site["lon"], site["lat"]])
+                products = sentinel2_system_indexes(
+                    centre_pt,
+                    str(site["start"]),
+                    str(site["end"]),
+                )
+                if products:
+                    csv_updates[int(site["row_index"])] = ";".join(products)
 
             if not products:
                 print(f"No products for {site}")
@@ -254,6 +305,9 @@ def main():
 
         for fut in as_completed(futures):
             active.extend(fut.result())
+
+    # Update CSV with any newly-discovered system_index values
+    _update_sites_csv(csv_updates)
 
     # -------- monitor outstanding tasks --------
     print("Waiting for EE exports …")

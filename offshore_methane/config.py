@@ -5,7 +5,7 @@ from pathlib import Path
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")
-SITES_TO_PROCESS = range(221, 225)
+SITES_TO_PROCESS = range(0, 47)  # 1 header and 46 S2 images
 
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
 START, END = (
