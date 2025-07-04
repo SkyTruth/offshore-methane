@@ -386,8 +386,8 @@ def build_mask_for_MBSP(
     wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
 
     # base = geometry ⨅ down-wind sector
-    base = geom_mask(centre, p["dist"]["export_radius_m"], inside=True).And(
-        downwind_mask(wind_layers, centre)
+    base = (
+        geom_mask(centre, p["dist"]["export_radius_m"], inside=True)
     )
     data_ok = (
         img.select(p["outlier"]["bands"]).mask().reduce(ee.Reducer.min()).rename("mask")
@@ -493,20 +493,20 @@ def view_mask(
     display(m)
 
 
-# %%
 def main():
-    # view_mask(
-    #     "20170705T164319_20170705T165225_T15RXL",
-    #     -90.96802087968751,
-    #     27.29220815000002,
-    #     True,
-    # )
+    view_mask(
+        "20170705T164319_20170705T165225_T15RXL",
+        -90.96802087968751,
+        27.29220815000002,
+        True,
+    )
     # view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
     # view_mask(
     #     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
     # )
 
-    view_mask("20240501T162901_20240501T163950_T15QWB", -92.23731, 19.56605)
+    # view_mask("20240501T162901_20240501T163950_T15QWB", -92.23731, 19.56605)
+    # view_mask("20220915T032521_20220915T033822_T48NTP", 102.988, 7.59238)
 
 
 if __name__ == "__main__":

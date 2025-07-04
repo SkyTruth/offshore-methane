@@ -26,7 +26,7 @@ SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
 LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
 
-USE_SIMPLE_MBSP = True
+MBSP_ALG = "sgx"  # "simple" | "complex" | "sgx"
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
 SHOW_THUMB = False  # QA only - keep False in bulk
