@@ -26,7 +26,7 @@ SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
 LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
 
-MBSP_ALG = "sgx"  # "simple" | "complex" | "sgx"
+MBSP_ALG = "simple"  # "simple" | "complex" | "sgx"
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
 SHOW_THUMB = False  # QA only - keep False in bulk
@@ -66,7 +66,7 @@ MASK_PARAMS = {
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.30, 1.0),  # NDI
+        "local_sgi_range": (-0.50, 1.0),  # NDI
     },
     "min_valid_pct": 0.4,
 }

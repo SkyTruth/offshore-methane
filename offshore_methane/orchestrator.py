@@ -26,7 +26,7 @@ from offshore_methane.ee_utils import (
     sentinel2_system_indexes,
 )
 from offshore_methane.masking import build_mask_for_C, build_mask_for_MBSP
-from offshore_methane.mbsp import mbsp_complex_ee, mbsp_sgx, mbsp_simple_ee
+from offshore_methane.mbsp import mbsp_complex, mbsp_sgx, mbsp_simple
 from offshore_methane.sga import ensure_sga_asset
 
 
@@ -208,13 +208,11 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 
     # ---------------- MBSP computation ---------
     if cfg.MBSP_ALG == "simple":
-        R_img = mbsp_simple_ee(s2, mask_c, mask_mbsp)
-    elif cfg.MBSP_ALG == "complex":
-        R_img = mbsp_complex_ee(
-            s2, sga_img, centre_pt, cfg.MASK_PARAMS["local_sga_range"]
-        )
+        R_img = mbsp_simple(s2, mask_c, mask_mbsp)
     elif cfg.MBSP_ALG == "sgx":
-        R_img = mbsp_sgx(s2, mask_mbsp, cfg.MASK_PARAMS["local_sga_range"])
+        R_img = mbsp_sgx(s2, mask_c, mask_mbsp)
+    elif cfg.MBSP_ALG == "complex":
+        R_img = mbsp_complex(s2, sga_img, centre_pt, cfg.MASK_PARAMS["local_sga_range"])
 
     # ---------------- Speckle filter -----------
     if cfg.SPECKLE_FILTER_MODE == "adaptive" and cfg.SPECKLE_RADIUS_PX > 0:
