@@ -15,8 +15,10 @@ import rasterio
 from lxml import etree
 from rasterio.transform import from_origin
 
-from offshore_methane.cdse import download_xml
-from offshore_methane.ee_utils import ee_asset_exists
+import offshore_methane.config as cfg
+from offshore_methane.cdse import download_xml_cdse
+from offshore_methane.ee_utils import ee_asset_ready, process_sid_into_gcs_xml_address
+from offshore_methane.gcp_utils import download_xml_gcs, gsutil_cmd
 
 
 # ---------------------------------------------------------------------
@@ -28,7 +30,13 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     oriented for Earth-Engine ingestion.
     """
     xml_path = tif_path.with_suffix(".xml")
-    download_xml(sid, xml_path)  # @Brendan which is cheaper and faster? GCS vs CDSE
+    if cfg.XML_SOURCE == "cdse":
+        download_xml_cdse(sid, xml_path)
+    elif cfg.XML_SOURCE == "gcp":
+        gcs_path = process_sid_into_gcs_xml_address(sid)
+        download_xml_gcs(gcs_path, xml_path)
+    else:
+        raise ValueError(f"Invalid XML source: {cfg.XML_SOURCE}")
     root = etree.parse(str(xml_path))
 
     # ----- helpers ---------------------------------------------------
@@ -82,7 +90,7 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         "dtype": "float32",
         "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
         "transform": tr,
-        # --- COG‑compliant settings ----------------------------------
+        # --- COG-compliant settings ----------------------------------
         "tiled": True,  # GeoTIFF is now tiled
         "blockxsize": 16,  # must be multiple of 16
         "blockysize": 16,
@@ -109,16 +117,32 @@ def _is_cog(tif: Path) -> bool:
         return False
 
 
-def gcs_stage(local_path: Path, bucket: str) -> str:
+def gcs_stage(local_path: Path, sid: str, datatype: str, bucket: str) -> str:
     """
-    Upload *local_path* to GCS bucket (if not present) and return gs:// URL.
+    Upload a local file to GCS using gsutil, safely across OSes.
+
+    Args:
+        local_path (Path): Path to the local file to upload.
+        bucket (str): GCS bucket name (without gs://).
+        subfolder (str): Subfolder in the bucket. Default is "sga".
+
+    Returns:
+        str: The gs:// URL to the uploaded file.
     """
-    dst = f"gs://{bucket}/sga/{local_path.name}"
-    subprocess.run(
-        ["gsutil", "cp", str(local_path.resolve()), dst],  # drop the “-n” (no‑clobber)
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
+    if not local_path.exists():
+        raise FileNotFoundError(f"Local file does not exist: {local_path}")
+
+    dst = f"gs://{bucket}/{sid}/{local_path.name}"
+    try:
+        subprocess.run(
+            [gsutil_cmd(), "cp", str(local_path.resolve()), dst],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"gsutil cp failed:\n{e.stderr.decode()}")
+
     return dst
 
 
@@ -127,40 +151,74 @@ def ensure_sga_asset(
     ee_asset_folder: str,
     bucket: str,
     local_path: Path = Path("../data"),
-    preferred_location: str = None,
+    preferred_location: str | None = None,
     **kwargs,
-) -> str:
+) -> tuple[str, bool]:
     """
-    Guarantee that the coarse-grid SGA for *sid* is available
-    as either an EE asset or a staged GeoTIFF in GCS.
+    Return (location, exported)
 
-    Returns the EE asset ID (if asset uploads are enabled) *otherwise*
-    the gs:// URL.
+    exported == True  ⇢ we created / overwrote something in this call
+    exported == False ⇢ all artefacts were already present & ready
     """
-    prefixed = f"SGA_{sid}"
-    asset_id = f"{ee_asset_folder}/{prefixed}"
-    if preferred_location == "ee_asset_folder" and ee_asset_exists(asset_id):
-        return asset_id
+    datatype = "SGA"
+    asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
+    exported = False
 
-    tif_path = local_path / "sga" / f"{prefixed}.tif"
-    if not tif_path.is_file():
+    # ------------------------------------------------------- preferred = bucket, fast path
+    gcs_url = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+    gcs_exists = (
+        subprocess.run(
+            [gsutil_cmd(), "ls", gcs_url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+    if preferred_location == "bucket" and gcs_exists and not overwrite:
+        return gcs_url, False  # nothing to do
+
+    # ------------------------------------------------------- EE asset ready, fast return
+    if (
+        preferred_location == "ee_asset_folder"
+        and not overwrite
+        and ee_asset_ready(asset_id)
+    ):
+        return asset_id, False
+
+    # ------------------------------------------------------- ensure local GeoTIFF
+    tif_path = local_path / sid / f"{sid}_{datatype}.tif"
+    tif_path.parent.mkdir(parents=True, exist_ok=True)
+    if overwrite or not tif_path.is_file():
         print(f"  ↻ computing *coarse* SGA grid for {sid}")
         compute_sga_coarse(sid, tif_path)
+        exported = True
 
-    gcs_url = gcs_stage(tif_path, bucket)
+    # ------------------------------------------------------- stage to GCS if needed
+    if overwrite or not gcs_exists:
+        gcs_url = gcs_stage(tif_path, sid, datatype, bucket)
+        exported = True
 
+    # ------------------------------------------------------- optional EE asset ingest
     if preferred_location == "ee_asset_folder":
-        # @Brendan it would be SOO nice if we could just use this from GCS instead of doing asset upload... ALSO check for anywhere else we're doing an asset upload and think through how to do better.
-        print(f"  ↑ ingesting as EE asset {asset_id}")
-        subprocess.run(
-            ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
-            check=True,
-        )
+        if overwrite or not ee_asset_ready(asset_id):
+            print(f"  ↑ ingesting as EE asset {asset_id}")
+            subprocess.run(
+                ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
+                check=True,
+            )
+            start = time.time()
+            while not ee_asset_ready(asset_id):
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"Timed out waiting for EE asset {asset_id}")
+                time.sleep(5)
+            exported = True
 
-        while not ee_asset_exists(asset_id):
-            time.sleep(1)
+        # tidy up staged object if we uploaded it just now
+        if overwrite or not gcs_exists:
+            subprocess.run([gsutil_cmd(), "rm", gcs_url], stdout=subprocess.DEVNULL)
 
-        subprocess.run(["gsutil", "rm", gcs_url], stdout=subprocess.DEVNULL)
-        return asset_id
+        return asset_id, exported
 
-    return gcs_url
+    return gcs_url, exported
