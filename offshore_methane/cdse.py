@@ -139,7 +139,7 @@ def download_object(url: str, out_path: Path):
     tmp.rename(out_path)
 
 
-def download_xml(sid: str, xml_path: Path):
+def download_xml_cdse(sid: str, xml_path: Path):
     """Download MTD_TL.xml for *system_index* unless it already exists on disk."""
     if xml_path.is_file():
         return
