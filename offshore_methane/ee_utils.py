@@ -1,11 +1,22 @@
+# %%
 # ee_utils.py
 """
 Thin wrappers around the Earth-Engine Python client.
 """
 
+import json
+import math
+import subprocess
+import time
+from pathlib import Path
+
 import ee
 import geemap
-import numpy as np
+import requests
+from requests.exceptions import ConnectionError, HTTPError
+
+import offshore_methane.config as cfg
+from offshore_methane.gcp_utils import gsutil_cmd
 
 ee.Initialize()  # single global EE session
 
@@ -16,6 +27,8 @@ def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
     Optionally, zoom to a given region (ee.Geometry).
     Allows custom bands and autoscaled visualization.
     """
+    system_index = system_index[:38]
+
     # Find the image by system:index
     coll = ee.ImageCollection("COPERNICUS/S2_HARMONIZED").filter(
         ee.Filter.eq("system:index", system_index)
@@ -61,229 +74,384 @@ def sentinel2_system_indexes(
     point: ee.Geometry,
     start: str,
     end: str,
-    cloud_pct: int,
-    sga_range: tuple[float, float] = (0.0, 25.0),
 ) -> list[str]:
+    from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
+
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_pct))
-        .map(lambda img: add_sga_ok(img, sga_range))
+        .filter(scene_cloud_filter(cfg.MASK_PARAMS))
+        .map(lambda img: scene_sga_filter(img, cfg.MASK_PARAMS))
         .filter(ee.Filter.eq("SGA_OK", 1))
     )
 
     return sorted(set(coll.aggregate_array("system:index").getInfo()))
 
 
-def ee_asset_exists(asset_id: str) -> bool:
+def _ee_asset_info(asset_id: str) -> dict | None:
+    """
+    Return the parsed JSON from `earthengine asset info <id>` or None
+    if the asset does not exist (return-code ≠ 0).
+    """
+    res = subprocess.run(
+        ["earthengine", "asset", "info", asset_id],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0:
+        return None
     try:
-        ee.Image(asset_id).getInfo()
-        return True
-    except Exception:
+        return json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def ee_asset_exists(asset_id: str) -> bool:
+    """True if *any* EE asset with that ID exists (Image, Table, …)."""
+    return _ee_asset_info(asset_id) is not None
+
+
+def ee_asset_ready(asset_id: str) -> bool:
+    """
+    Ready ⇔ asset exists *and* (for Images) has non-empty 'bands'.
+    For non-image assets we treat mere existence as 'ready'.
+    """
+    info = _ee_asset_info(asset_id)
+    if not info:
         return False
+    if info.get("type") == "Image":
+        return bool(info.get("bands"))
+    return True
+
+
+# ------------------------------------------------------------------
+#  Simple URL→file helper used by local exports
+# ------------------------------------------------------------------
+def _download_url(url, dest, chunk=8192, *, max_retries=5, backoff=1.5):
+    """
+    Stream-download a signed EE URL with automatic exponential-backoff retries.
+
+    Parameters
+    ----------
+    url : str
+        Signed Earth-Engine download URL.
+    dest : pathlib.Path
+        Output file path.
+    chunk : int
+        Bytes per streamed block.
+    max_retries : int
+        Attempts before giving up.
+    backoff : float
+        Initial sleep (s); doubled each retry.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    attempt = 0
+    while True:
+        try:
+            with requests.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(dest, "wb") as fh:
+                    for block in r.iter_content(chunk):
+                        if block:  # ignore keep-alives
+                            fh.write(block)
+            return  # success
+        except HTTPError as exc:
+            code = exc.response.status_code if exc.response else None
+            attempt += 1
+            if attempt > max_retries or code not in (429, 500, 502, 503, 504):
+                raise  # unrecoverable
+            sleep = backoff * (2 ** (attempt - 1))
+            print(f"  ↻ HTTP {code}, retry {attempt}/{max_retries} in {sleep:.1f}s")
+            time.sleep(sleep)
+        except ConnectionError:
+            attempt += 1
+            if attempt > max_retries:
+                raise
+            sleep = backoff * (2 ** (attempt - 1))
+            print(
+                f"  ↻ connection error, retry {attempt}/{max_retries} in {sleep:.1f}s"
+            )
+            time.sleep(sleep)
 
 
 # ------------------------------------------------------------------
 #  Uniform wrappers around EE batch export APIs.
 # ------------------------------------------------------------------
+def _prepare_asset(
+    asset_id: str,
+    *,
+    overwrite: bool = False,
+    timeout: int = 300,
+    datatype: str = "asset",
+) -> bool:
+    """
+    Decide whether the caller should start a new export for *asset_id*.
+
+    Returns
+    -------
+    bool
+        True  → caller must export (asset missing or we deleted it for overwrite)
+        False → caller should SKIP (asset is already ready / became ready)
+
+    Behaviour
+    ---------
+    • overwrite = True
+        - if the asset exists (ready or ingesting) → delete it, return True
+        - if it doesn't exist                           → return True
+    • overwrite = False
+        - if the asset is ready                        → return False
+        - if ingesting → wait ≤ timeout until ready    → return False
+        - if missing                                   → return True
+    """
+    # ------------------------------------------------------------------ overwrite branch
+    if overwrite and ee_asset_exists(asset_id):
+        print(f"  ↻ deleting existing {datatype} asset → {asset_id}")
+        try:
+            ee.data.deleteAsset(asset_id)
+        except Exception as exc:
+            # EE occasionally throws 404 if asset vanished in the meantime
+            if "Asset not found" not in str(exc):
+                raise
+        # ensure eventual-consistency before we re-export
+        t0 = time.time()
+        while ee_asset_exists(asset_id):
+            if time.time() - t0 > 30:  # safety: 30 s should be plenty
+                raise RuntimeError(f"Timed out deleting {asset_id}")
+            time.sleep(2)
+        return True  # caller must export afresh
+
+    # -------------------------------------------------------------- non-overwrite branch
+    if not ee_asset_exists(asset_id):
+        return True  # missing → export required
+
+    if ee_asset_ready(asset_id):
+        print(f"  ✓ {datatype} asset exists → {asset_id} (skipped)")
+        return False  # already good
+
+    # asset exists but still ingesting
+    print(f"  … waiting for {datatype} asset ingestion → {asset_id}")
+    t0 = time.time()
+    while not ee_asset_ready(asset_id):
+        if time.time() - t0 > timeout:
+            raise TimeoutError(
+                f"{datatype} asset {asset_id} still ingesting after {timeout}s"
+            )
+        time.sleep(5)
+    print(f"  ✓ {datatype} asset now ready → {asset_id} (skipped)")
+    return False
+
+
 def export_image(
     image: ee.Image,
-    description: str,
+    sid: str,
     region: ee.Geometry,
     preferred_location: str,
     bucket: str,
     ee_asset_folder: str,
     **kwargs,
-):
+) -> tuple[ee.batch.Task | None, bool]:
+    """
+    Returns (task_or_None, exported_bool)
+    """
+    datatype = "MBSP"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
     roi = region.bounds().coordinates().getInfo()
-    task = None
+    task, exported = None, False
 
     if preferred_location == "bucket":
-        utm = image.select("MBSP").projection()
+        # Skip if object exists and overwrite is False
+        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+        already = (
+            subprocess.run(
+                [gsutil_cmd(), "ls", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        if already and not overwrite:
+            print(f"  ✓ raster exists → {gcs_path} (skipped)")
+            return None, False
+
+        utm = image.select(datatype).projection()
         task = ee.batch.Export.image.toCloudStorage(
             image=image,
-            description=description,
+            description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"MBSP/{description}",
+            fileNamePrefix=f"{sid}/{sid}_{datatype}",
             region=roi,
             scale=20,
             crs=utm,
             maxPixels=1 << 36,
         )
+        exported = True
+
     elif preferred_location == "ee_asset_folder":
-        utm = image.select("MBSP").projection()
-        task = ee.batch.Export.image.toAsset(
-            image=image,
-            description=description,
-            assetId=f"{ee_asset_folder}/{description}",
-            region=roi,
-            scale=20,
-            crs=utm,
-            maxPixels=1 << 36,
-            pyramidingPolicy={"MBSP": "sample"},
+        asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
+        if _prepare_asset(
+            asset_id, overwrite=overwrite, timeout=timeout, datatype="raster"
+        ):
+            utm = image.select(datatype).projection()
+            task = ee.batch.Export.image.toAsset(
+                image=image,
+                description=f"{sid}_{datatype}",
+                assetId=asset_id,
+                region=roi,
+                scale=20,
+                crs=utm,
+                maxPixels=1 << 36,
+                pyramidingPolicy={datatype: "sample"},
+            )
+            exported = True
+
+    else:  # preferred_location == "local"
+        out_path = Path("../data") / sid / f"{sid}_{datatype}.tif"
+        if out_path.is_file() and not overwrite:
+            print(f"  ✓ raster exists → {out_path} (skipped)")
+            return None, False
+        url = image.clip(region).getDownloadURL(
+            {
+                "scale": 20,
+                "region": roi,
+                "crs": image.select(datatype).projection(),
+                "format": "GEO_TIFF",
+            }
         )
+        print(f"  ↓ raster → {out_path}")
+        _download_url(url, out_path)
+        exported = True
+
     if task:
         task.start()
-    return task
+    return task, exported
 
 
 def export_polygons(
     fc: ee.FeatureCollection,
-    description: str,
+    sid: str,
+    suffix: str,
     preferred_location: str,
     bucket: str,
     ee_asset_folder: str,
     **kwargs,
-):
-    task = None
+) -> tuple[ee.batch.Task | None, bool]:
+    """
+    Returns (task_or_None, exported_bool)
+    """
+    datatype = "VEC"
+    overwrite: bool = kwargs.get("overwrite", False)
+    timeout: int = kwargs.get("timeout", 300)
+    task, exported = None, False
 
     if preferred_location == "bucket":
+        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}_{suffix}.geojson"
+        already = (
+            subprocess.run(
+                [gsutil_cmd(), "ls", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
+        if already and not overwrite:
+            print(f"  ✓ vectors exist → {gcs_path} (skipped)")
+            return None, False
+
         task = ee.batch.Export.table.toCloudStorage(
             collection=fc,
-            description=f"{description}_vect",
+            description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"vectors/{description}",
+            fileNamePrefix=f"{sid}/{sid}_{datatype}_{suffix}",
             fileFormat="GeoJSON",
         )
+        exported = True
+
     elif preferred_location == "ee_asset_folder":
-        task = ee.batch.Export.table.toAsset(
-            collection=fc,
-            description=f"{description}_vect",
-            assetId=f"{ee_asset_folder}/{description}_vect",
-        )
+        asset_id = f"{ee_asset_folder}/{sid}_{datatype}_{suffix}"
+        if _prepare_asset(
+            asset_id, overwrite=overwrite, timeout=timeout, datatype="vector"
+        ):
+            task = ee.batch.Export.table.toAsset(
+                collection=fc,
+                description=f"{sid}_{datatype}",
+                assetId=asset_id,
+            )
+            exported = True
+
+    else:  # preferred_location == "local"
+        out_path = Path("../data") / sid / f"{sid}_{datatype}_{suffix}.geojson"
+        if out_path.is_file() and not overwrite:
+            print(f"  ✓ vectors exist → {out_path} (skipped)")
+            return None, False
+        url = fc.getDownloadURL(filetype="geojson")
+        print(f"  ↓ vectors → {out_path}")
+        _download_url(url, out_path)
+        exported = True
+
     if task:
         task.start()
-    return task
+    return task, exported
 
 
-# ------------------------------------------------------------------
-#  Scene-level & local cloud / glint rejection tests.
-# ------------------------------------------------------------------
-def _qa60_cloud_mask(img: ee.Image) -> ee.Image:
-    qa = img.select("QA60")
-    cloudy = qa.bitwiseAnd(1 << 10).Or(qa.bitwiseAnd(1 << 11))
-    return img.updateMask(cloudy.Not())
+def get_wind_layers(img: ee.Image, time_window: int = 3) -> ee.Image:
+    """
+    Compute wind speed (m s-1) and direction (degrees) at the timestamp of *img*
+    using NOAA/CFSV2/FOR6H re-analysis.
 
+    Parameters
+    ----------
+    img : ee.Image
+        Any EE image that carries a “system:time_start” property.
+    time_window : int, optional
+        Hours before/after *img*’s timestamp to search for the closest
+        forecast record (default: 3 h).
 
-# ------------------------------------------------------------------
-#  Scene-level sun-glint (metadata only – cheap)
-# ------------------------------------------------------------------
-def add_sga_ok(img: ee.Image, sga_range: tuple[float, float] = (0.0, 25.0)) -> ee.Image:
-    """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
-    # metadata → Numbers
-    sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
-    saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
-    vza = ee.Number(img.get("MEAN_INCIDENCE_ZENITH_ANGLE_B11"))
-    vaa = ee.Number(img.get("MEAN_INCIDENCE_AZIMUTH_ANGLE_B11"))
+    Returns
+    -------
+    ee.Image
+        Two-band image:
+          • wind_speed (m s-1)
+          • wind_dir   (degrees, 0 = east, counter-clockwise positive)
+    """
+    # Timestamp of the reference image
+    t0 = ee.Date(img.get("system:time_start"))
 
-    # radians
-    rad = ee.Number(np.pi).divide(180)
-    sza_r = sza.multiply(rad)
-    vza_r = vza.multiply(rad)
-    dphi_r = saa.subtract(vaa).abs().multiply(rad)
-
-    cos_sga = (
-        sza_r.cos()
-        .multiply(vza_r.cos())
-        .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
-    )
-    sga_deg = cos_sga.acos().multiply(180 / np.pi)
-
-    ok = sga_deg.gt(sga_range[0]).And(sga_deg.lt(sga_range[1]))
-
-    # keep images that *lack* metadata
-    return img.set(
-        "SGA_OK",
-        ee.Algorithms.If(
-            img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
-        ),
-    )
-
-
-# ------------------------------------------------------------------
-#  Local (5 km) tests – require pixels/coarse SGA grid
-# ------------------------------------------------------------------
-def _wind_test(s2, centre, aoi_radius_m, max_wind_10m):
-    acq_time = ee.Date(s2.get("system:time_start"))
-    img = (
+    # Grab the CFSv2 record closest in time to t0
+    met = (
         ee.ImageCollection("NOAA/CFSV2/FOR6H")
-        .filterDate(
-            acq_time.advance(-3, "hour"),  # ±1 h catches the nearest 00:30 stamp
-            acq_time.advance(3, "hour"),
-        )
+        .filterDate(t0.advance(-time_window, "hour"), t0.advance(time_window, "hour"))
+        .sort("system:time_start")
         .first()
     )
 
-    u = img.select(
-        "u-component_of_wind_height_above_ground"
-    )  # or CFSv2 band names if you chose that
-    v = img.select("v-component_of_wind_height_above_ground")
-    w = u.hypot(v).rename("wind10")
+    if met is None:
+        raise ValueError("No CFSv2 image found in the requested window.")
 
-    local_mean = (
-        w.reduceRegion(
-            ee.Reducer.mean(), centre.buffer(aoi_radius_m), 20_000, bestEffort=True
-        )
-        .values()
-        .get(0)
+    # Re-project to ~1 km for smoother spatial gradients
+    met = met.resample("bilinear").reproject(crs="EPSG:4326", scale=1_000)
+
+    # Wind components (10 m above ground)
+    u = met.select("u-component_of_wind_height_above_ground")
+    v = met.select("v-component_of_wind_height_above_ground")
+
+    # Magnitude
+    speed = u.hypot(v).rename("wind_speed")
+
+    # Direction (0° = east, counter-clockwise +)
+    direction = (
+        v.atan2(u)  # radians
+        .multiply(180 / math.pi)  # → degrees
+        .add(360)
+        .mod(360)
+        .rename("wind_dir")
     )
 
-    return ee.Algorithms.If(
-        local_mean, ee.Number(local_mean).lte(max_wind_10m), ee.Number(1)
-    )
+    return speed.addBands(direction).copyProperties(met, ["system:time_start"])
 
 
-def _cloud_test(s2, centre, aoi_radius_m, local_max_cloud):
-    cloud_frac = (
-        _qa60_cloud_mask(s2)
-        .Not()
-        .reduceRegion(
-            ee.Reducer.mean(),
-            centre.buffer(aoi_radius_m),
-            60,
-            bestEffort=True,
-        )
-        .values()
-        .get(0)
-    )
-    return ee.Number(cloud_frac).multiply(100).lte(local_max_cloud)
-
-
-def _glint_test(sga_img, centre, aoi_radius_m, local_sga_range):
-    sga_mean = (
-        sga_img.reduceRegion(
-            ee.Reducer.mean(), centre.buffer(aoi_radius_m), 5000, bestEffort=True
-        )
-        .values()
-        .get(0)
-    )
-
-    return (
-        ee.Number(sga_mean)
-        .gt(local_sga_range[0])
-        .And(ee.Number(sga_mean).lt(local_sga_range[1]))
-    )
-
-
-def product_ok(
-    s2: ee.Image,
-    sga_img: ee.Image,
-    centre: ee.Geometry,
-    aoi_radius_m: int,
-    local_max_cloud: int,
-    local_sga_range: tuple[float, float],
-    max_wind_10m: float,
-) -> ee.ComputedObject:
-    """
-    True/False quality gate for a Sentinel-2 product:
-        • cloud fraction inside AOI ≤ local_max_cloud
-        • mean SGA inside AOI within local_sga_range
-        • CFSv2 10 m wind (local) ≤ max_wind_10m
-    """
-    # ---------- combined verdict -----------------------------------------
-    return (
-        _cloud_test(s2, centre, aoi_radius_m, local_max_cloud)
-        .And(_glint_test(sga_img, centre, aoi_radius_m, local_sga_range))
-        .And(_wind_test(s2, centre, aoi_radius_m, max_wind_10m))
-    )
+# %%
+# quick_view("20170705T164319_20170705T165225_T15RXL")
+# %%

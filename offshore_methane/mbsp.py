@@ -86,29 +86,38 @@ def mbsp_complex_ee(
 
 
 # ------------------------------------------------------------------
-def mbsp_simple_ee(image: ee.Image, centre: ee.Geometry) -> ee.Image:
+def mbsp_simple_ee(image: ee.Image, mask_c: ee.Image, mask_mbsp: ee.Image) -> ee.Image:
     """
     Fractional-slope MBSP (single zero-intercept regression).
     """
-    region = centre.buffer(50_000)  # @Ethan is this right? Improved mask?
-    num = (
-        image.select("B11")
-        .multiply(image.select("B12"))
-        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
-    )
-    den = (
-        image.select("B12")
-        .pow(2)
-        .reduceRegion(ee.Reducer.sum(), region, 20, bestEffort=True)
-    )
-    slope = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
 
-    R = (
-        image.select("B12")
-        .multiply(slope)
-        .subtract(image.select("B11"))
-        .divide(image.select("B11"))
-        .rename("MBSP")
-        .set({"slope": slope})
+    # First calculate the C factor
+    C_masked_img = image.updateMask(mask_c)
+    num = (
+        C_masked_img.select("B11")
+        .multiply(C_masked_img.select("B12"))
+        .reduceRegion(ee.Reducer.sum(), C_masked_img.geometry(), 20, bestEffort=True)
     )
-    return R.copyProperties(image, ["system:index", "system:time_start"])
+
+    den = (
+        C_masked_img.select("B12")
+        .pow(2)
+        .reduceRegion(ee.Reducer.sum(), C_masked_img.geometry(), 20, bestEffort=True)
+    )
+    C_factor = ee.Number(num.get("B11")).divide(ee.Number(den.get("B12")))
+
+    # Then calculate the MBSP
+    MBSP_masked_img = image.updateMask(mask_mbsp)
+
+    MBSP_masked_result = (
+        MBSP_masked_img.select("B12")
+        .multiply(C_factor)
+        .subtract(MBSP_masked_img.select("B11"))
+        .divide(MBSP_masked_img.select("B11"))
+        .rename("MBSP")
+        .set({"C_factor": C_factor})
+    )
+
+    return MBSP_masked_result.copyProperties(
+        image, ["system:index", "system:time_start"]
+    )
