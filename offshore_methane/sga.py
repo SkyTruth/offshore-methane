@@ -25,7 +25,7 @@ from offshore_methane.gcp_utils import gsutil_cmd
 # ---------------------------------------------------------------------
 def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     """
-    Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
+    Save the un-interpolated 23x23 SGA grid (5 km px) as GeoTIFF
     oriented for Earth-Engine ingestion.
     """
     xml_path = tif_path.with_suffix(".xml")
@@ -70,7 +70,7 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         np.flipud(sga_grid.T), k=-1
     )  # @Brendan WTF is jona doing here? Should I really be rotating and flipping arbitrarily to make it "look right"?
 
-    # geotransform: 5 km pixels
+    # geotransform: 5 km pixels
     ulx = float(root.findtext(".//Geoposition/ULX"))
     uly = float(root.findtext(".//Geoposition/ULY"))
     tr = from_origin(ulx, uly, 5000.0, 5000.0)

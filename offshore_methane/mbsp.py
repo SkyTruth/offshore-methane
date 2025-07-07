@@ -4,7 +4,6 @@ Both the complex (SGI + coarse SGA) and simple (Varon 21 fractional-slope)
 MBSP implementations, unchanged from your monolith.
 """
 
-
 import ee
 
 
@@ -181,3 +180,113 @@ def mbsp_sgx(image: ee.Image, mask_c: ee.Image, mask_mbsp: ee.Image) -> ee.Image
     )
 
     return mbsp.copyProperties(image, ["system:index", "system:time_start"])
+
+
+# ------------------------------------------------------------------
+def snr_boost(
+    image: ee.Image,
+    mbsp_img: ee.Image,
+    local_sga_range: tuple[float, float],
+    window: int = 3,
+    alpha: float = 1000.0,
+    percentile_norm: float = 98.0,
+) -> ee.Image:
+    """
+    Estimate per-pixel SNR quality for MBSP methane detection and weight the MBSP field.
+
+    Parameters
+    ----------
+    image : ee.Image
+        Sentinel-2 granule containing TOA bands (must include B2, B3, B4, B8, B11, B12)
+        and a per-pixel sun-glint-angle band (default name 'SGA').
+    mbsp_img : ee.Image
+        Image that already contains a 'MBSP' band (fractional methane absorption).
+    window : int, optional
+        Size (in *pixels*) of the square neighbourhood for uniformity adjustment.
+        Default = 3 (i.e. 3 x 3 window).
+    alpha : float, optional
+        Maximum fractional boost applied to water pixels under full glint.
+        alpha = 1 ⇒ a 100 % boost (factor 2) when glint weight = 1.
+    sga_cutoff : float, optional
+        SGA (degrees) above which the geometric glint weight becomes 0.
+    percentile_norm : float, optional
+        High-percentile used to rescale quality raster to 0-1.
+
+    Returns
+    -------
+    ee.Image
+        Two-band image:
+          • 'SNR_Q'   - quality raster (0-1)
+          • 'MBSP_snr'- MBSP values weighted by SNR_Q
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Basic reflectance signal (RS) - average of SWIR bands
+    B11 = image.select("B11")
+    B12 = image.select("B12")
+    rs = B11.add(B12).multiply(0.5)  # mean SWIR reflectance
+
+    # ------------------------------------------------------------------
+    # 3. Sun-Glint Index (SGI) using B8 and a visible composite B_vis
+    #    If the image already has 'B_vis', use it; else make it from B2,B3,B4
+    b_vis = image.select(["B2", "B3", "B4"]).reduce(ee.Reducer.mean()).rename("B_vis")
+    nir = image.select("B8")
+    sgi = nir.subtract(b_vis).divide(nir.add(b_vis).add(1e-6)).rename("SGI")
+
+    # Empirical SGI weight in [0,1]   (map SGI = −1 → 0  ;  SGI = +1 → 1)
+    w_sgi = sgi.add(1).multiply(0.5).clamp(0, 1)
+
+    # ------------------------------------------------------------------
+    # 4. Geometric sun-glint weight from SGA
+    sga = image.select("SGA")
+    w_sga = sga.multiply(-1.0 / local_sga_range[1]).add(1).clamp(0, 1)  # linear 0-1
+
+    # Combined glint weight - max of the two factors
+    w_glint = w_sgi.max(w_sga)
+
+    # ------------------------------------------------------------------
+    # 5. Boost reflectance signal for water pixels under glint
+    rs_boosted = rs.multiply(ee.Image(1).add(w_glint.multiply(alpha)))  # (1 + α W) * RS
+
+    # ------------------------------------------------------------------
+    # 6. Uniformity (texture) adjustment - coefficient of variation over window
+    # Build kernel in *pixels* (Sentinel-2 SWIR is 20 m/pixel)
+    half = window // 2
+    # ker = ee.Kernel.square(half, "pixels", normalize=False)
+    ker = ee.Kernel.circle(half, "pixels", normalize=False)
+
+    local_mean = rs_boosted.reduceNeighborhood(ee.Reducer.mean(), kernel=ker)
+    local_std = rs_boosted.reduceNeighborhood(ee.Reducer.stdDev(), kernel=ker)
+    cv = local_std.divide(local_mean.add(1e-6))  # coefficient of variation
+    w_tex = cv.add(1).pow(-1)  # = 1 / (1 + cv)  in [0,1]
+
+    # ------------------------------------------------------------------
+    # 7. Raw quality raster (before global scaling)
+    q_raw = rs_boosted.multiply(w_tex)
+
+    # ------------------------------------------------------------------
+    # 8. Scale quality raster to 0-1 using high percentile of the clear scene
+    #    (avoid bright clouds dominating the scale)
+    q_percentile = (
+        q_raw.reduceRegion(
+            ee.Reducer.percentile([percentile_norm]),
+            geometry=image.geometry(),
+            scale=20,
+            bestEffort=True,
+            maxPixels=1e8,
+        )
+        .values()
+        .get(0)
+    )
+    norm = ee.Number(q_percentile).max(1e-3)  # guard against 0
+    snr_q = q_raw.divide(norm).clamp(0, 1).rename("SNR_Q")
+
+    # ------------------------------------------------------------------
+    # 9. Apply quality raster to MBSP field
+    mbsp_weighted = ee.Image(mbsp_img).select("MBSP").multiply(snr_q).rename("MBSP")
+
+    # ------------------------------------------------------------------
+    # 10. Return two-band result
+    # out = snr_q.addBands(mbsp_weighted)
+    out = mbsp_weighted
+    return out.copyProperties(image, ["system:index", "system:time_start"])

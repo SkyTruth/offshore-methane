@@ -19,7 +19,7 @@ START, END = (
 # ------------------------------------------------------------------
 #  Algorithm switches / constants
 # ------------------------------------------------------------------
-# 0 ⇒ no speckle filtering, 1  ⇒  3 × 3 median window (≈ 20 m), 2 ⇒ 5 × 5
+# 0 ⇒ no speckle filtering, 1  ⇒  3 x 3 median window (≈ 20 m), 2 ⇒ 5 x 5
 SPECKLE_RADIUS_PX = 10  # size of the square window
 SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
 # Logistic curve controls for adaptive speckle filtering
@@ -27,6 +27,7 @@ LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
 
 MBSP_ALG = "simple"  # "simple" | "complex" | "sgx"
+SNR_BOOST = True
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
 SHOW_THUMB = False  # QA only - keep False in bulk
@@ -53,7 +54,7 @@ MASK_PARAMS = {
         "prob_thresh": 65,  # BACKUP: cloudy below
     },
     "wind": {
-        "max_wind_10m": 9,  # m s-1, ERA5 / CFSv2 upper limit
+        "max_wind_10m": 9,  # m s-1, ERA5 / CFSv2 upper limit
         "time_window": 3,
     },
     "outlier": {
