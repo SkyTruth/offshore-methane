@@ -1,12 +1,11 @@
 # %%
-import os
 import json
+
 import ee
 import geemap
-from google.cloud import storage
 import ipywidgets as widgets
+from google.cloud import storage
 from IPython.display import display
-import matplotlib.pyplot as plt
 
 # Initialize the Earth Engine API
 ee.Initialize()
@@ -70,12 +69,17 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
     out = widgets.Output()
     current_map = None
 
-    def display_scene(scene):
+    def display_scene(system_index, coords):
         nonlocal current_map
-        system_index, coords = scene
+        if current_map is not None:
+            current_map.close()
+
         current_map = display_s2_with_geojson_from_gcs(
             system_index, coords, bucket_name=bucket_name
         )
+        if current_map is None:
+            status.value = "❗ No scene loaded."
+            return
         current_map.add_draw_control()
         out.clear_output()
         with out:
@@ -83,13 +87,17 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
 
     def on_load_clicked(b):
         try:
-            display_scene(scene_selector.value)
-            status.value = f"✔️ Loaded scene: {scene_selector.value[0]}"
+            system_index, coords = scene_selector.value
+            display_scene(system_index, coords)
+            status.value = f"✔️ Loaded scene: {system_index}"
         except Exception as e:
             status.value = f"❗ Error loading scene: {e}"
 
     def on_save_clicked(b):
         system_index, coords = scene_selector.value
+        if current_map is None:
+            status.value = "❗ No scene loaded."
+            return
         if not current_map.user_roi:
             status.value = "❗ Draw a geometry before saving."
             return
@@ -247,23 +255,29 @@ def display_s2_with_geojson_from_gcs(
         return img.addBands(corrected_b12).set({"c_fit": b0, "coef_list": coefList})
 
     corrected_img = linearFit(s2_image)
-    Map = geemap.Map()
-    Map.centerObject(fc, 15)
+    lon, lat = map(float, coords.split("_"))
+    Map = geemap.Map(center=[lat, lon], zoom=15)
+    point = ee.Geometry.Point(lon, lat)
     Map.addLayer(
         s2_image,
         {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000},
         f"RGB {system_index}",
     )
-    Map.addLayer(corrected_img.select("B11"), {"min": 0, "max": 3000}, "B11")
+    B11_max = (
+        corrected_img.select("B11")
+        .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
+        .getInfo()["B11"]
+    )
+    Map.addLayer(corrected_img.select("B11"), {"min": 0, "max": B11_max}, "B11")
     Map.addLayer(
-        corrected_img.select("B12_corrected"), {"min": 0, "max": 3000}, "B12 * c_fit"
+        corrected_img.select("B12_corrected"), {"min": 0, "max": B11_max}, "B12 * c_fit"
     )
 
     mbsp = ee.Image.loadGeoTIFF(
         f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
     )
     Map.addLayer(
-        mbsp, {"min": -0.1, "max": 0.1, "palette": ["red", "white", "blue"]}, "MBSP"
+        mbsp, {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}, "MBSP"
     )
 
     hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
@@ -275,7 +289,8 @@ def display_s2_with_geojson_from_gcs(
             hitl_fc = geemap.geojson_to_ee(hitl_geojson)
             Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
 
-    Map.addLayer(fc, {}, f"MBSPs_{system_index}")
+    Map.addLayer(fc, {}, "Vector")
+    Map.addLayer(point, {"color": "red"}, "Target")
     return Map
 
 
