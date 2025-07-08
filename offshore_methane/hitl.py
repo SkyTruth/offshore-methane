@@ -51,9 +51,7 @@ def save_drawn_feature_to_gcs(
 
 # === Reviewer Interface ===
 def start_hitl_review_loop(
-    detections,
-    bucket_name="offshore_methane",
-    save_thumbnail_folder="../data/thumbnails",
+    detections, bucket_name="offshore_methane", save_thumbnail=False
 ):
     """
     Launch an interactive review interface for HITL plume annotation.
@@ -62,6 +60,8 @@ def start_hitl_review_loop(
         detections (List[Tuple[str, str]]): List of (system_index, coords) tuples.
         bucket_name (str): GCS bucket name.
     """
+    save_thumbnail_folder = "../data/thumbnails" if save_thumbnail else None
+
     scene_selector = widgets.Dropdown(
         options=[(f"{sid} @ {coords}", (sid, coords)) for sid, coords in detections],
         description="Scene:",
@@ -318,11 +318,16 @@ def display_s2_with_geojson_from_gcs(
         .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
         .getInfo()["B11"]
     )
+    flare_threshold = 1500
 
     rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
     swir_vis = {"min": 0, "max": B11_max}
     mbsp_vis = {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}
-    yellow_vis = {"palette": ["yellow", "red"], "min": 2500, "max": 5000}
+    yellow_vis = {
+        "palette": ["yellow", "red"],
+        "min": flare_threshold,
+        "max": flare_threshold * 2,
+    }
     fc_vis = {"color": "green", "width": 2}
 
     corrected_img = linearFit(s2_image)
@@ -353,8 +358,21 @@ def display_s2_with_geojson_from_gcs(
     Map.addLayer(fc, {}, "Vector")
     Map.addLayer(point, {"color": "red"}, "Target")
 
-    masked_image = s2_image.select("B12").updateMask(s2_image.select("B12").gte(2500))
-    Map.addLayer(masked_image.visualize(**yellow_vis), {}, "Flare B12>2500", False)
+    b8a = s2_image.select("B8A")  # 0.86 µm (narrow NIR)
+    b11 = s2_image.select("B11")  # 1.61 µm (SWIR-1)
+    b12 = s2_image.select("B12")  # 2.19 µm (SWIR-2)
+
+    delta_sw = b12.subtract(b11)  # B12 – B11
+    tai = delta_sw.divide(b8a)  # (B12 – B11) / B8A
+
+    flare_mask = (
+        tai.gte(0.45)  # ① TAI ≥ 0.45
+        .And(delta_sw.gte(b11.subtract(b8a)))  # ② ΔSWIR ≥ ΔNIR-SWIR
+        .And(b12.gte(flare_threshold))  # ③ keep very hot pixels (original gate)
+    )
+
+    flare_mask_layer = s2_image.select("B12").updateMask(flare_mask)
+    Map.addLayer(flare_mask_layer, yellow_vis, "Flaring", False)
 
     if save_thumbnail_folder is not None:
         # Create thumbnails for each band and the blended image
