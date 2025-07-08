@@ -403,19 +403,18 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-# list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
-# list_deduplicate = deduplicate_by_date_and_coords(list_of_detections)
-# start_hitl_review_loop(list_deduplicate)
+list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
+scenes = deduplicate_by_date_and_coords(list_of_detections)
 
-list_custom = [
-    ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
-    ("20230716T162841_20230716T164533_T15QWB", "-92.237_19.566"),
-    ("20240421T162841_20240421T164310_T15QWB", "-92.237_19.566"),
-    ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
-    ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
-]
+# scenes = [
+#     ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
+#     ("20230716T162841_20230716T164533_T15QWB", "-92.237_19.566"),
+#     ("20240421T162841_20240421T164310_T15QWB", "-92.237_19.566"),
+#     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
+#     ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
+# ]
 
 
-start_hitl_review_loop(list_custom)
+start_hitl_review_loop(scenes)
 
 # %%
