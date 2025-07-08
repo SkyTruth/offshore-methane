@@ -1,5 +1,6 @@
 # %%
 import json
+import os
 
 import ee
 import geemap
@@ -49,7 +50,9 @@ def save_drawn_feature_to_gcs(
 
 
 # === Reviewer Interface ===
-def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
+def start_hitl_review_loop(
+    detections, bucket_name="offshore_methane", save_thumbnail=False
+):
     """
     Launch an interactive review interface for HITL plume annotation.
 
@@ -57,6 +60,8 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
         detections (List[Tuple[str, str]]): List of (system_index, coords) tuples.
         bucket_name (str): GCS bucket name.
     """
+    save_thumbnail_folder = "../data/thumbnails" if save_thumbnail else None
+
     scene_selector = widgets.Dropdown(
         options=[(f"{sid} @ {coords}", (sid, coords)) for sid, coords in detections],
         description="Scene:",
@@ -75,7 +80,10 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
             current_map.close()
 
         current_map = display_s2_with_geojson_from_gcs(
-            system_index, coords, bucket_name=bucket_name
+            system_index,
+            coords,
+            bucket_name=bucket_name,
+            save_thumbnail_folder=save_thumbnail_folder,
         )
         if current_map is None:
             status.value = "❗ No scene loaded."
@@ -198,8 +206,60 @@ def list_unreviewed_detections_from_gcs(bucket_name):
     return sorted(all_unreviewed)
 
 
+class ThumbnailCreator:
+    def __init__(
+        self,
+        system_index,
+        region,
+        dimensions=512,
+        format="png",
+        save_thumbnail_folder="thumbnails",
+    ):
+        self.system_index = system_index
+        self.region = region
+        self.dimensions = dimensions
+        self.format = format
+        self.save_folder = save_thumbnail_folder
+
+    def create_thumbnail(self, image, postfix, vis_params=None):
+        """
+        Save a PNG thumbnail of an EE Image (already visualised) without relying on
+        geemap.get_image_thumbnail(), which is currently broken because it passes an
+        invalid `region` kw-arg to ee.Image.visualize().
+
+        The logic is:
+        1. Clip the image to the AOI so we don’t need a `region` kw-arg.
+        2. Convert it to an RGB image with .visualize(**vis_params).
+        3. Ask Earth Engine for a thumbnail URL and stream it to disk.
+        """
+        if not os.path.exists(self.save_folder):
+            os.makedirs(self.save_folder)
+
+        out_path = os.path.join(self.save_folder, f"{self.system_index}_{postfix}.png")
+
+        # 1) Spatial subset
+        clipped = image.clip(self.region)
+
+        # 2) Apply visualisation parameters (can be empty)
+        vis_image = clipped.visualize(**(vis_params or {}))
+
+        # 3) Build thumbnail request and download
+        params = {
+            "dimensions": str(self.dimensions),  # e.g. "512"
+            "format": self.format,  # e.g. "png"
+        }
+        thumb_url = vis_image.getThumbURL(params)
+
+        import urllib.request
+
+        urllib.request.urlretrieve(thumb_url, out_path)
+
+
 def display_s2_with_geojson_from_gcs(
-    system_index, coords, bucket_name="offshore_methane", vectors_prefix="vectors"
+    system_index,
+    coords,
+    bucket_name="offshore_methane",
+    save_thumbnail_folder=None,
 ):
     """
     Visualize Sentinel-2 imagery and annotation vectors for a given detection.
@@ -208,7 +268,6 @@ def display_s2_with_geojson_from_gcs(
         system_index (str): Sentinel-2 system:index.
         coords (str): Coordinate identifier.
         bucket_name (str): GCS bucket name.
-        vectors_prefix (str): GCS subfolder for vector annotations.
 
     Returns:
         geemap.Map: Interactive map with layers and annotations.
@@ -254,32 +313,39 @@ def display_s2_with_geojson_from_gcs(
         corrected_b12 = img.select("B12").multiply(b0).rename("B12_corrected")
         return img.addBands(corrected_b12).set({"c_fit": b0, "coef_list": coefList})
 
+    B11_max = (
+        s2_image.select("B11")
+        .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
+        .getInfo()["B11"]
+    )
+    flare_threshold = 1500
+
+    rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
+    swir_vis = {"min": 0, "max": B11_max}
+    mbsp_vis = {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}
+    yellow_vis = {
+        "palette": ["yellow", "red"],
+        "min": flare_threshold,
+        "max": flare_threshold * 2,
+    }
+    fc_vis = {"color": "green", "width": 2}
+
     corrected_img = linearFit(s2_image)
     lon, lat = map(float, coords.split("_"))
     Map = geemap.Map(center=[lat, lon], zoom=15)
     point = ee.Geometry.Point(lon, lat)
     Map.addLayer(
         s2_image,
-        {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000},
+        rgb_vis,
         f"RGB {system_index}",
     )
-    B11_max = (
-        corrected_img.select("B11")
-        .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
-        .getInfo()["B11"]
-    )
-    Map.addLayer(corrected_img.select("B11"), {"min": 0, "max": B11_max}, "B11")
-    Map.addLayer(
-        corrected_img.select("B12_corrected"), {"min": 0, "max": B11_max}, "B12 * c_fit"
-    )
+    Map.addLayer(corrected_img.select("B11"), swir_vis, "B11")
+    Map.addLayer(corrected_img.select("B12_corrected"), swir_vis, "B12 * c_fit")
 
     mbsp = ee.Image.loadGeoTIFF(
         f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
     )
-    Map.addLayer(
-        mbsp, {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}, "MBSP"
-    )
-
+    Map.addLayer(mbsp, mbsp_vis, "MBSP")
     hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
     hitl_blob = bucket.blob(hitl_blob_path)
     if hitl_blob.exists():
@@ -291,12 +357,64 @@ def display_s2_with_geojson_from_gcs(
 
     Map.addLayer(fc, {}, "Vector")
     Map.addLayer(point, {"color": "red"}, "Target")
+
+    b8a = s2_image.select("B8A")  # 0.86 µm (narrow NIR)
+    b11 = s2_image.select("B11")  # 1.61 µm (SWIR-1)
+    b12 = s2_image.select("B12")  # 2.19 µm (SWIR-2)
+
+    delta_sw = b12.subtract(b11)  # B12 – B11
+    tai = delta_sw.divide(b8a)  # (B12 – B11) / B8A
+
+    flare_mask = (
+        tai.gte(0.45)  # ① TAI ≥ 0.45
+        .And(delta_sw.gte(b11.subtract(b8a)))  # ② ΔSWIR ≥ ΔNIR-SWIR
+        .And(b12.gte(flare_threshold))  # ③ keep very hot pixels (original gate)
+    )
+
+    flare_mask_layer = s2_image.select("B12").updateMask(flare_mask)
+    Map.addLayer(flare_mask_layer, yellow_vis, "Flaring", False)
+
+    if save_thumbnail_folder is not None:
+        # Create thumbnails for each band and the blended image
+        thumbnail_creator = ThumbnailCreator(
+            system_index,
+            region=aoi,
+            save_thumbnail_folder=save_thumbnail_folder,
+        )
+        thumbnail_creator.create_thumbnail(s2_image, "rgb", rgb_vis)
+        thumbnail_creator.create_thumbnail(mbsp, "mbsp", mbsp_vis)
+        thumbnail_creator.create_thumbnail(corrected_img.select("B11"), "b11", swir_vis)
+        thumbnail_creator.create_thumbnail(
+            corrected_img.select("B12_corrected"), "b12_corrected", swir_vis
+        )
+
+        # Style the FeatureCollection
+        fc_style = fc.style(**fc_vis).visualize()
+        mbsp_img = mbsp.visualize(**mbsp_vis)
+        blended = mbsp_img.blend(fc_style)
+        thumbnail_creator.create_thumbnail(blended, "blended", vis_params={})
+
+        if "hitl_fc" in locals():
+            fc_style = fc.filterBounds(hitl_fc.geometry()).style(**fc_vis).visualize()
+            mbsp_img = mbsp.visualize(**mbsp_vis)
+            blended = mbsp_img.blend(fc_style)
+            thumbnail_creator.create_thumbnail(blended, "blended_hitl", vis_params={})
     return Map
 
 
 # %%
 list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
-list_deduplicate = deduplicate_by_date_and_coords(list_of_detections)
-start_hitl_review_loop(list_deduplicate)
+scenes = deduplicate_by_date_and_coords(list_of_detections)
+
+# scenes = [
+#     ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
+#     ("20230716T162841_20230716T164533_T15QWB", "-92.237_19.566"),
+#     ("20240421T162841_20240421T164310_T15QWB", "-92.237_19.566"),
+#     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
+#     ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
+# ]
+
+
+start_hitl_review_loop(scenes)
 
 # %%
