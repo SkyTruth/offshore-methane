@@ -31,6 +31,7 @@ PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
 SHOW_THUMB = False  # QA only - keep False in bulk
 MAX_WORKERS = 32  # parallel threads
+XML_SOURCE = "gcp"  # "cdse" | "gcp"
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
