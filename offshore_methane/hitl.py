@@ -312,8 +312,12 @@ def display_s2_with_geojson_from_gcs(
         if hitl_geojson["features"][0]["geometry"]:
             hitl_fc = geemap.geojson_to_ee(hitl_geojson)
             Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
-
     Map.addLayer(fc, {}, f"MBSPs_{system_index}")
+
+    masked_image = s2_image.select("B12").updateMask(s2_image.select("B12").gte(2500))
+    yellow_vis = {"palette": ["#FFFF00"], "opacity": 0.6, "min": 0, "max": 5000}
+    Map.addLayer(masked_image.visualize(**yellow_vis), {}, "Flare B12>1500", False)
+
     if save_thumbnail_folder is not None:
         # Create thumbnails for each band and the blended image
         thumbnail_creator = ThumbnailCreator(
