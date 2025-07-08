@@ -50,7 +50,9 @@ def save_drawn_feature_to_gcs(
 
 
 # === Reviewer Interface ===
-def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
+def start_hitl_review_loop(
+    detections, bucket_name="offshore_methane", save_thumbnail_folder=None
+):
     """
     Launch an interactive review interface for HITL plume annotation.
 
@@ -74,7 +76,10 @@ def start_hitl_review_loop(detections, bucket_name="offshore_methane"):
         nonlocal current_map
         system_index, coords = scene
         current_map = display_s2_with_geojson_from_gcs(
-            system_index, coords, bucket_name=bucket_name
+            system_index,
+            coords,
+            bucket_name=bucket_name,
+            save_thumbnail_folder=save_thumbnail_folder,
         )
         current_map.add_draw_control()
         out.clear_output()
@@ -190,8 +195,43 @@ def list_unreviewed_detections_from_gcs(bucket_name):
     return sorted(all_unreviewed)
 
 
+class ThumbnailCreator:
+    def __init__(
+        self,
+        system_index,
+        region,
+        dimensions=512,
+        format="png",
+        save_thumbnail_folder="thumbnails",
+    ):
+        self.system_index = system_index
+        self.region = region
+        self.dimensions = dimensions
+        self.format = format
+        self.save_folder = save_thumbnail_folder
+
+    def create_thumbnail(self, image, postfix, vis_params=None):
+        if not os.path.exists(self.save_folder):
+            os.makedirs(self.save_folder)
+        geemap.get_image_thumbnail(
+            image,
+            region=self.region,
+            out_img=os.path.join(
+                self.save_folder, f"{self.system_index}_{postfix}.png"
+            ),
+            vis_params=vis_params,
+            dimensions=self.dimensions,
+            format=self.format,
+        )
+        # print(f"Thumbnail saved to {out_path}")
+
+
 def display_s2_with_geojson_from_gcs(
-    system_index, coords, bucket_name="offshore_methane", vectors_prefix="vectors"
+    system_index,
+    coords,
+    bucket_name="offshore_methane",
+    vectors_prefix="vectors",
+    save_thumbnail_folder=None,
 ):
     """
     Visualize Sentinel-2 imagery and annotation vectors for a given detection.
@@ -246,26 +286,24 @@ def display_s2_with_geojson_from_gcs(
         corrected_b12 = img.select("B12").multiply(b0).rename("B12_corrected")
         return img.addBands(corrected_b12).set({"c_fit": b0, "coef_list": coefList})
 
+    rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
+    swir_vis = {"min": 0, "max": 3000}
+    mbsp_vis = {"min": -0.1, "max": 0.1, "palette": ["red", "white", "blue"]}
     corrected_img = linearFit(s2_image)
     Map = geemap.Map()
     Map.centerObject(fc, 15)
     Map.addLayer(
         s2_image,
-        {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000},
+        rgb_vis,
         f"RGB {system_index}",
     )
-    Map.addLayer(corrected_img.select("B11"), {"min": 0, "max": 3000}, "B11")
-    Map.addLayer(
-        corrected_img.select("B12_corrected"), {"min": 0, "max": 3000}, "B12 * c_fit"
-    )
+    Map.addLayer(corrected_img.select("B11"), swir_vis, "B11")
+    Map.addLayer(corrected_img.select("B12_corrected"), swir_vis, "B12 * c_fit")
 
     mbsp = ee.Image.loadGeoTIFF(
         f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
     )
-    Map.addLayer(
-        mbsp, {"min": -0.1, "max": 0.1, "palette": ["red", "white", "blue"]}, "MBSP"
-    )
-
+    Map.addLayer(mbsp, mbsp_vis, "MBSP")
     hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
     hitl_blob = bucket.blob(hitl_blob_path)
     if hitl_blob.exists():
@@ -276,6 +314,43 @@ def display_s2_with_geojson_from_gcs(
             Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
 
     Map.addLayer(fc, {}, f"MBSPs_{system_index}")
+    if save_thumbnail_folder is not None:
+        # Create thumbnails for each band and the blended image
+        thumbnail_creator = ThumbnailCreator(
+            system_index,
+            region=aoi,
+            save_thumbnail_folder=save_thumbnail_folder,
+        )
+        thumbnail_creator.create_thumbnail(s2_image, "rgb", rgb_vis)
+        thumbnail_creator.create_thumbnail(mbsp, "mbsp", mbsp_vis)
+        thumbnail_creator.create_thumbnail(corrected_img.select("B11"), "b11", swir_vis)
+        thumbnail_creator.create_thumbnail(
+            corrected_img.select("B12_corrected"), "b12_corrected", swir_vis
+        )
+
+        fc_style = {
+            "color": "00FF00",  # Red color
+            "width": 2,  # Line width
+        }
+
+        # Style the FeatureCollection
+        fc_vis = fc.style(**fc_style).visualize()
+        mbsp_vis = mbsp.visualize(min=-0.1, max=0.1, palette=["red", "white", "blue"])
+        blended = mbsp_vis.blend(fc_vis)
+        thumbnail_creator.create_thumbnail(blended, "blended", vis_params={})
+
+        if "hitl_fc" in locals():
+            fc_style = {
+                "color": "00FF00",  # Red color
+                "width": 2,  # Line width
+            }
+            fc_vis = fc.filterBounds(hitl_fc).style(**fc_style).visualize()
+            mbsp_vis = mbsp.visualize(
+                min=-0.1, max=0.1, palette=["red", "white", "blue"]
+            )
+            blended = mbsp_vis.blend(fc_vis)
+            thumbnail_creator.create_thumbnail(blended, "blended_hitl", vis_params={})
+
     return Map
 
 
@@ -285,7 +360,7 @@ def display_s2_with_geojson_from_gcs(
 
 # %%
 list_custom = [
-    ("20170705T164319_20170705T165225_T15RXL", "-90.968_27.292"),
+    ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
     ("20230716T162841_20230716T164533_T15QWB", "-92.237_19.566"),
     ("20240421T162841_20240421T164310_T15QWB", "-92.237_19.566"),
     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
@@ -293,6 +368,8 @@ list_custom = [
 ]
 
 
-start_hitl_review_loop(list_custom)
+start_hitl_review_loop(
+    list_custom, save_thumbnail_folder=r"C:\Users\ebeva\SkyTruth\methane\saves"
+)
 
 # %%
