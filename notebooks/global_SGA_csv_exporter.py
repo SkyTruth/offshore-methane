@@ -148,7 +148,7 @@ def export_year(year: int) -> None:
 
         _drive_export(
             timeseries_records(month),
-            descr=f"bounds_S2_alpha_timeseries_{year}_{m:02d}",
+            descr=f"S2_tiles_alpha_timeseries_{year}_{m:02d}",
             fmt="CSV",
             selectors=["tile_id", "datetime", "alpha"],
         )
