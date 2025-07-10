@@ -1,5 +1,6 @@
-import ee
 import datetime as dt
+
+import ee
 
 ee.Authenticate()
 ee.Initialize()
@@ -73,7 +74,7 @@ def generate_sunglint_worldRaster(start_date):
         The AOI you already have for ocean pixels.
     """
     # ---------- 1. normalise `start_date` ----------
-    if isinstance(start_date):
+    if isinstance(start_date, str):
         py_date = dt.datetime.strptime(start_date, "%Y-%m-%d")
     elif isinstance(start_date, (dt.datetime, dt.date)):
         py_date = (

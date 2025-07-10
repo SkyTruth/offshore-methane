@@ -362,8 +362,8 @@ def display_s2_with_geojson_from_gcs(
     b11 = s2_image.select("B11")  # 1.61 µm (SWIR-1)
     b12 = s2_image.select("B12")  # 2.19 µm (SWIR-2)
 
-    delta_sw = b12.subtract(b11)  # B12 – B11
-    tai = delta_sw.divide(b8a)  # (B12 – B11) / B8A
+    delta_sw = b12.subtract(b11)  # B12 - B11
+    tai = delta_sw.divide(b8a)  # (B12 - B11) / B8A
 
     flare_mask = (
         tai.gte(0.45)  # ① TAI ≥ 0.45

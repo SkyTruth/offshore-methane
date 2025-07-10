@@ -162,7 +162,7 @@ def _get(uri: str, **kw) -> requests.Response:
     r = _session.get(uri, timeout=30, **kw)
 
     if r.status_code == 403 and _AUTH_AVAILABLE:
-        # maybe token expired (~10 min TTL) → refresh once
+        # maybe token expired (~10 min TTL) → refresh once
         _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
         r = _session.get(uri, timeout=30, **kw)
 
