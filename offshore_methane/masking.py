@@ -386,9 +386,10 @@ def build_mask_for_MBSP(
     wind_layers = ee.Image(get_wind_layers(img, p["wind"]["time_window"]))
 
     # base = geometry ⨅ down-wind sector
-    base = geom_mask(centre, p["dist"]["export_radius_m"], inside=True).And(
-        downwind_mask(wind_layers, centre)
-    )
+    base = geom_mask(centre, p["dist"]["export_radius_m"], inside=True)
+    # .And(
+    #     downwind_mask(wind_layers, centre)
+    # )
     data_ok = (
         img.select(p["outlier"]["bands"]).mask().reduce(ee.Reducer.min()).rename("mask")
     )

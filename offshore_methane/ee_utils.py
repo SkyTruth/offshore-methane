@@ -126,6 +126,27 @@ def ee_asset_ready(asset_id: str) -> bool:
     return True
 
 
+def process_sid_into_gcs_xml_address(sid: str) -> str:
+    """
+    Get the product URI and granule ID for a given system index.
+    """
+    image = ee.Image(f"COPERNICUS/S2_HARMONIZED/{sid}")
+
+    tile_ids = sid.split("_")[2]
+
+    # These will be used to get our product of interest.
+    tile_num = tile_ids[1:3]
+    lat_band = tile_ids[3]
+    grid_square = tile_ids[4:]
+    product_uri = image.get("PRODUCT_ID").getInfo()
+    granule_id = image.get("GRANULE_ID").getInfo()
+
+    # Name of xml product to query, which holds metadata for solar angles.
+    # ex: gcp-public-data-sentinel-2/tiles/15/R/XL/S2B_MSIL1C_20170705T164319_N0205_R126_T15RXL_20170705T165225.SAFE/GRANULE/L1C_T15RXL_A001725_20170705T165225/MTD_TL.xml
+    file_id = f"tiles/{tile_num}/{lat_band}/{grid_square}/{product_uri}.SAFE/GRANULE/{granule_id}/MTD_TL.xml"
+    return file_id
+
+
 # ------------------------------------------------------------------
 #  Simple URL→file helper used by local exports
 # ------------------------------------------------------------------
