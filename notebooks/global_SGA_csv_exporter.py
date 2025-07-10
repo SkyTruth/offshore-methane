@@ -164,7 +164,7 @@ if __name__ == "__main__":
 # %%
 # %%
 
-df_whole = pd.read_csv("~/Downloads/2022 SGA Table.csv", parse_dates=["Datetime"])
+df_whole = pd.read_csv("~/Downloads/2022 SGA Table.csv", parse_dates=["datetime"])
 df = df_whole
 print(df.head(1))
 print(f"Number of captures: {len(df)}")
@@ -174,7 +174,7 @@ print(f"Number of footprints: {len(df['tile_id'].unique())}")
 df.hist(["alpha"], bins=1000)
 
 # %%
-df.hist(["Datetime"], bins=1000)
+df.hist(["datetime"], bins=1000)
 
 # %%
 # Histogram of unique values of tile_id
@@ -182,7 +182,7 @@ df["tile_id"].value_counts().plot(kind="line")
 
 # %%
 # plot alpha vs datetime scatter plot
-df.plot(x="Datetime", y="alpha", kind="scatter", alpha=0.01, s=0.1)
+df.plot(x="datetime", y="alpha", kind="scatter", alpha=0.01, s=0.1)
 
 # %%
 # For all tile_ids on a single plot, plot the datetime of the higest alpha in one color, and the datetime of the lowest in another color
@@ -193,16 +193,16 @@ high_pts = df.loc[idx_max]
 low_pts = df.loc[idx_min]
 
 fig, ax = plt.subplots(figsize=(9, 5))
-# ax.scatter(high_pts['Datetime'], high_pts['alpha'],
+# ax.scatter(high_pts['datetime'], high_pts['alpha'],
 #            s=6,  c='red',   label='Highest alpha per tile')
 ax.scatter(
-    low_pts["Datetime"],
+    low_pts["datetime"],
     low_pts["alpha"],
     label="Lowest alpha per tile",
     alpha=0.5,
     s=0.1,
 )
-ax.set_xlabel("Datetime")
+ax.set_xlabel("datetime")
 ax.set_ylabel("alpha  (deg)")
 ax.legend()
 fig.tight_layout()
@@ -235,7 +235,7 @@ fig, ax = plt.subplots(figsize=(9, 5))
 
 for p, grp in sample_df.groupby(prefix):  # uses SAME prefix variable
     ax.scatter(
-        grp["Datetime"], grp["alpha"], alpha=0.5, s=10, color=colour_map[p], label=p
+        grp["datetime"], grp["alpha"], alpha=0.5, s=10, color=colour_map[p], label=p
     )
 
 # ax.legend(title="prefix",
