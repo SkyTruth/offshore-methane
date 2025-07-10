@@ -139,7 +139,7 @@ def download_object(url: str, out_path: Path):
     tmp.rename(out_path)
 
 
-def download_xml(sid: str, xml_path: Path):
+def download_xml_cdse(sid: str, xml_path: Path):
     """Download MTD_TL.xml for *system_index* unless it already exists on disk."""
     if xml_path.is_file():
         return
@@ -162,7 +162,7 @@ def _get(uri: str, **kw) -> requests.Response:
     r = _session.get(uri, timeout=30, **kw)
 
     if r.status_code == 403 and _AUTH_AVAILABLE:
-        # maybe token expired (~10 min TTL) → refresh once
+        # maybe token expired (~10 min TTL) → refresh once
         _session.headers["Authorization"] = f"Bearer {_cdse_token(CDSE_USER, CDSE_PW)}"
         r = _session.get(uri, timeout=30, **kw)
 

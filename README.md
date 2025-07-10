@@ -1,6 +1,6 @@
 # Offshore Methane Pilot
 
-This repository contains experimental tooling for detecting offshore methane emissions using Sentinel‑2 imagery. The codebase grew out of SkyTruth's research efforts and includes utilities for pixel masking, MBSP raster generation and plume polygon extraction.
+This repository contains experimental tooling for detecting offshore methane emissions using Sentinel-2 imagery. The codebase grew out of SkyTruth's research efforts and includes utilities for pixel masking, MBSP raster generation and plume polygon extraction.
 
 ## Repository layout
 
@@ -14,17 +14,17 @@ This repository contains experimental tooling for detecting offshore methane emi
 
 ### Package modules
 
-- **`algos.py`** – local helpers for turning MBSP rasters into plume polygons (`plume_polygons_three_p`) and the `logistic_speckle` filter.
-- **`cdse.py`** – convenience wrappers around the Copernicus Data Space API used to fetch Sentinel‑2 metadata and products.
-- **`config.py`** – runtime configuration including scene dates, masking parameters and export settings.
-- **`ee_utils.py`** – thin wrappers around the Earth Engine Python API.  Notable functions include `quick_view` for visual inspection, `export_image`/`export_polygons` for batch exports and `sentinel2_system_indexes` for product searches.
-- **`gcp_utils.py`** – utilities for interacting with Google Cloud (locating `gsutil`).
-- **`masking.py`** – pixel‑mask builders used to compute the C‑factor and MBSP masks.  Exposes `build_mask_for_C`, `build_mask_for_MBSP` and an interactive `view_mask` utility.
-- **`mbsp.py`** – implementations of the complex and simple MBSP algorithms.
-- **`orchestrator.py`** – high‑level pipeline that ties everything together: downloading SGA grids, building masks, running MBSP and exporting artefacts in parallel.
-- **`sga.py`** – creation and staging of coarse sun‑glint angle grids (SGA) either locally, in Cloud Storage or as EE assets.
+- **`algos.py`** - local helpers for turning MBSP rasters into plume polygons (`plume_polygons_three_p`) and the `logistic_speckle` filter.
+- **`cdse.py`** - convenience wrappers around the Copernicus Data Space API used to fetch Sentinel-2 metadata and products.
+- **`config.py`** - runtime configuration including scene dates, masking parameters and export settings.
+- **`ee_utils.py`** - thin wrappers around the Earth Engine Python API.  Notable functions include `quick_view` for visual inspection, `export_image`/`export_polygons` for batch exports and `sentinel2_system_indexes` for product searches.
+- **`gcp_utils.py`** - utilities for interacting with Google Cloud (locating `gsutil`).
+- **`masking.py`** - pixel-mask builders used to compute the C-factor and MBSP masks.  Exposes `build_mask_for_C`, `build_mask_for_MBSP` and an interactive `view_mask` utility.
+- **`mbsp.py`** - implementations of the complex and simple MBSP algorithms.
+- **`orchestrator.py`** - high-level pipeline that ties everything together: downloading SGA grids, building masks, running MBSP and exporting artefacts in parallel.
+- **`sga.py`** - creation and staging of coarse sun-glint angle grids (SGA) either locally, in Cloud Storage or as EE assets.
 
-`__init__.py` re‑exports the most frequently used modules so they can be imported directly via `from offshore_methane import mbsp, orchestrator, …`.
+`__init__.py` re-exports the most frequently used modules so they can be imported directly via `from offshore_methane import mbsp, orchestrator, …`.
 
 ## Quick start
 
@@ -45,7 +45,7 @@ pytest
 
 ### 3. Explore imagery
 
-Use `quick_view` to display a Sentinel‑2 scene by system index:
+Use `quick_view` to display a Sentinel-2 scene by system index:
 
 ```python
 from offshore_methane.ee_utils import quick_view
@@ -77,7 +77,7 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 ## Configuration
 
-`config.py` centralises all tunable parameters – date ranges, mask thresholds, export locations and algorithm switches. The table below summarises how each variable is used in the codebase and the impact of tweaking it.
+`config.py` centralises all tunable parameters - date ranges, mask thresholds, export locations and algorithm switches. The table below summarises how each variable is used in the codebase and the impact of tweaking it.
 
 ### Scene and AOI
 
@@ -86,13 +86,13 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 | `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
 | `SITES_TO_PROCESS` | `orchestrator.iter_sites` | Subset of rows to process (indexes). |
 | `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `SITES_CSV` is missing. |
-| `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel‑2 search. |
+| `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel-2 search. |
 
 ### Algorithm options
 
 | Name | Used in | Effect when changed |
 | --- | --- | --- |
-| `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle‑reduction strategy. |
+| `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle-reduction strategy. |
 | `SPECKLE_RADIUS_PX` | `orchestrator.process_product` | Kernel size for median or adaptive speckle filtering. |
 | `LOGISTIC_SIGMA0`, `LOGISTIC_K` | `algos.logistic_speckle` | Shape the logistic weighting for adaptive filtering. Higher `LOGISTIC_K` sharpens the transition; `LOGISTIC_SIGMA0` shifts it. |
 | `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex (unimplemented) and simple MBSP implementations. |
@@ -115,22 +115,22 @@ The `EXPORT_PARAMS` dictionary routes output either to local disk, a Cloud Stora
 
 The nested `MASK_PARAMS` dictionary drives pixel masking in `masking.py` and is also consulted by `ee_utils.sentinel2_system_indexes` when searching for scenes.
 
-| Key | Sub‑keys | Purpose |
+| Key | Sub-keys | Purpose |
 | --- | --- | --- |
 | `dist` | `export_radius_m`, `local_radius_m`, `plume_radius_m` | Radii for the export ROI, local mask stats and plume polygon search. |
-| `cloud` | `scene_cloud_pct`, `cs_thresh`, `prob_thresh` | Scene‑level filter on `CLOUDY_PIXEL_PERCENTAGE` and per‑pixel cloud/ shadow thresholds. |
-| `wind` | `max_wind_10m`, `time_window` | Limits on wind speed and temporal window for re‑analysis data. |
-| `outlier` | `bands`, `p_low`, `p_high`, `saturation` | Controls percentile‑based outlier masking and saturation cutoff. |
+| `cloud` | `scene_cloud_pct`, `cs_thresh`, `prob_thresh` | Scene-level filter on `CLOUDY_PIXEL_PERCENTAGE` and per-pixel cloud/ shadow thresholds. |
+| `wind` | `max_wind_10m`, `time_window` | Limits on wind speed and temporal window for re-analysis data. |
+| `outlier` | `bands`, `p_low`, `p_high`, `saturation` | Controls percentile-based outlier masking and saturation cutoff. |
 | `ndwi` | `threshold` | Water mask; higher thresholds retain only open water. |
-| `sunglint` | `scene_sga_range`, `local_sga_range`, `local_sgi_range` | Sun‑glint angle gates used when filtering scenes and building the MBSP mask. |
+| `sunglint` | `scene_sga_range`, `local_sga_range`, `local_sgi_range` | Sun-glint angle gates used when filtering scenes and building the MBSP mask. |
 | `min_valid_pct` | — | Minimum fraction of clear pixels needed before export. |
 
 Changing these values alters the pixel selection process; for instance increasing `cloud.cs_thresh` makes the cloud mask stricter, while enlarging `dist.export_radius_m` expands the export extent.
 
 ## Additional resources
 
-- [docs/references.md](docs/references.md) – relevant papers and background material.
-- `notebooks/` – exploratory notebooks demonstrating cosine lookups, sunglint correction and a full MBSP demo.
+- [docs/references.md](docs/references.md) - relevant papers and background material.
+- `notebooks/` - exploratory notebooks demonstrating cosine lookups, sunglint correction and a full MBSP demo.
 
 ## Contributing
 
