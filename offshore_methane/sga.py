@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
+import shutil
 
 import numpy as np
 import rasterio
@@ -105,6 +106,40 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
 # ---------------------------------------------------------------------
 #  GCS + EE staging helpers
 # ---------------------------------------------------------------------
+
+
+def safe_gsutil_cp(local_path: Path, bucket: str, subfolder: str = "sga") -> str:
+    """
+    Upload a local file to GCS using gsutil, safely across OSes.
+
+    Args:
+        local_path (Path): Path to the local file to upload.
+        bucket (str): GCS bucket name (without gs://).
+        subfolder (str): Subfolder in the bucket. Default is "sga".
+
+    Returns:
+        str: The gs:// URL to the uploaded file.
+    """
+    if not local_path.exists():
+        raise FileNotFoundError(f"Local file does not exist: {local_path}")
+
+    dst = f"gs://{bucket}/{subfolder}/{local_path.name}"
+
+    gsutil_cmd = shutil.which("gsutil") or shutil.which("gsutil.cmd")
+    if gsutil_cmd is None:
+        raise RuntimeError("gsutil not found on system PATH.")
+
+    try:
+        subprocess.run(
+            [gsutil_cmd, "cp", str(local_path.resolve()), dst],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"gsutil cp failed:\n{e.stderr.decode()}")
+
+    return dst
 
 
 def _is_cog(tif: Path) -> bool:

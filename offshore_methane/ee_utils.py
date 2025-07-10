@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import ee
+import numpy as np
 import geemap
 import requests
 from requests.exceptions import ConnectionError, HTTPError
@@ -49,8 +50,8 @@ def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
     )
 
     # Build min/max lists for visualization
-    min_vals = [stats.get(f"{b}_p10", 0) for b in bands]
-    max_vals = [stats.get(f"{b}_p75", 3000) for b in bands]
+    min_vals = [stats.get(f"{b}_p2", 0) for b in bands]
+    max_vals = [stats.get(f"{b}_p98", 3000) for b in bands]
 
     vis_params = {
         "bands": bands,
