@@ -48,7 +48,7 @@ def main(csv_path="../data/sgi_vs_sga_pixels.csv"):
     y_orig = df["sgi"].values.astype(float)
 
     # ---------- SKIP RANGE 27° - 33° --------------------------------------- #
-    skip_lo, skip_hi = 24.0, 37.0
+    skip_lo, skip_hi = 27.0, 31.0
     keep = ~((x_orig[:, 0] >= skip_lo) & (x_orig[:, 0] <= skip_hi))
     x, y = x_orig[keep], y_orig[keep]
     # ---------------------------------------------------------------------- #
@@ -58,7 +58,7 @@ def main(csv_path="../data/sgi_vs_sga_pixels.csv"):
         PolynomialFeatures(3, include_bias=False), LinearRegression()
     )
     ransac = RANSACRegressor(
-        base_model, min_samples=0.5, residual_threshold=0.08, max_trials=100
+        base_model, min_samples=0.5, residual_threshold=0.05, max_trials=100
     )
     ransac.fit(x, y)
     inlier_mask = ransac.inlier_mask_
