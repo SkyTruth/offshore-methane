@@ -9,6 +9,7 @@ where *1* keeps a pixel and *0* discards it.
 
 from __future__ import annotations
 
+import csv
 import math
 from typing import Dict, Optional
 
@@ -335,7 +336,7 @@ def build_mask_for_C(
 
     # keep filters in an OrderedDict so we can iterate deterministically
     filters = {
-        "outlier": outlier_mask(img, p, valid_mask=base),
+        # "outlier": outlier_mask(img, p, valid_mask=base),
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
         "ndwi": ndwi_mask(img, p),
@@ -496,18 +497,14 @@ def view_mask(
 
 # %%
 def main():
-    # view_mask(
-    #     "20170705T164319_20170705T165225_T15RXL",
-    #     -90.96802087968751,
-    #     27.29220815000002,
-    #     True,
-    # )
-    # view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
-    # view_mask(
-    #     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
-    # )
-
-    view_mask("20240501T162901_20240501T163950_T15QWB", -92.23731, 19.56605)
+    row = 1
+    with open(cfg.SITES_CSV, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    row = rows[row]
+    r1 = row["system_index"].split(";")[0]
+    view_mask(r1, float(row["lon"]), float(row["lat"]), True)
+    print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
 
 
 if __name__ == "__main__":
