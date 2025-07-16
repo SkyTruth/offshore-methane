@@ -1,4 +1,5 @@
 # %%
+import csv
 import json
 import os
 
@@ -8,8 +9,7 @@ import ipywidgets as widgets
 from google.cloud import storage
 from IPython.display import display
 
-# Initialize the Earth Engine API
-ee.Initialize()
+import offshore_methane.config as cfg
 
 
 # === GCS Save Helper ===
@@ -403,8 +403,8 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
-scenes = deduplicate_by_date_and_coords(list_of_detections)
+# list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
+# scenes = deduplicate_by_date_and_coords(list_of_detections)
 
 # scenes = [
 #     ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
@@ -413,6 +413,20 @@ scenes = deduplicate_by_date_and_coords(list_of_detections)
 #     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
 #     ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
 # ]
+row = 1
+sid = ""
+with open(cfg.SITES_CSV, newline="") as f:
+    reader = csv.DictReader(f)
+    rows = list(reader)
+if sid:
+    row = next((row for row in rows if row["system_index"].split(";")[0] == sid), None)
+    if row is None:
+        raise ValueError(f"SID {sid} not found in {cfg.SITES_CSV}")
+else:
+    row = rows[row]
+r1 = row["system_index"].split(";")[0]
+print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
+scenes = [(r1, f"{float(row['lon']):.3f}_{float(row['lat']):.3f}")]
 
 
 start_hitl_review_loop(scenes)

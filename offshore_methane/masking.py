@@ -11,15 +11,16 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 from typing import Dict, Optional
 
 import ee
 import geemap
 import numpy as np
 from IPython.display import display
-from models.sgi_funcs import sgi_hat_img, sgi_std_img
 
 import offshore_methane.config as cfg
+from offshore_methane.models.sgi_funcs import sgi_hat_img, sgi_std_img
 
 # ---------------------------------------------------------------------
 #  Module-level constants (avoid recomputing in map() lambdas)
@@ -378,15 +379,17 @@ def build_mask_for_C(
     region = centre.buffer(p["dist"]["local_radius_m"]).bounds()
     total = _count(base, region, scale)  # pixels allowed by geom_mask
     if compute_stats:
-        stats_reducer = ee.Reducer.minMax()
+        stats_reducer = ee.Reducer.percentile([10, 50, 90], ["p10", "p50", "p90"])
         sga_stats = (
             img.select("SGA").reduceRegion(stats_reducer, region, scale).getInfo()
         )
-        print(f"SGA: min={sga_stats['SGA_min']:.2f}, max={sga_stats['SGA_max']:.2f}")
         sgi_stats = (
             img.select("SGI").reduceRegion(stats_reducer, region, scale).getInfo()
         )
-        print(f"SGI: min={sgi_stats['SGI_min']:.2f}, max={sgi_stats['SGI_max']:.2f}")
+        print(
+            f"SGA 10, 50, 90%: \n{sga_stats['SGA_p10']:.1f}, {sga_stats['SGA_p50']:.1f}, {sga_stats['SGA_p90']:.1f}\n",
+            f"SGI 10, 50, 90%: \n{sgi_stats['SGI_p10']:.2f}, {sgi_stats['SGI_p50']:.2f}, {sgi_stats['SGI_p90']:.2f}",
+        )
 
         print("Percentage of pixels removed w.r.t. geom_mask:")
         for name, f in filters.items():
@@ -512,18 +515,52 @@ def view_mask(
     mask_c = mask_c.selfMask()
     mask_m = mask_m.selfMask()
 
-    vis_c = mask_c.visualize(palette=["#FF0000"])  # red
-    vis_m = mask_m.visualize(palette=["#00FF00"])  # green
-
     # 4️⃣ Assemble map
     coords = centre.coordinates().getInfo()
     if coords is None:
         raise RuntimeError("Could not retrieve centre coordinates")
     lon, lat = coords
-    m = geemap.Map(center=[lat, lon], zoom=11)
+    m = geemap.Map(center=[lat, lon], zoom=14)
     m.addLayer(rgb, {}, "True colour")
-    m.addLayer(vis_c, {"opacity": 0.6}, "Mask C (red)")
-    m.addLayer(vis_m, {"opacity": 0.6}, "Mask MBSP (green)")
+
+    sid_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "data", sid)
+    )
+    mbsp_fp = os.path.join(sid_dir, f"{sid}_MBSP.tif")
+    sga_fp = os.path.join(sid_dir, f"{sid}_SGA.tif")
+
+    if os.path.exists(mbsp_fp):
+        # red = -.1, white = 0, blue = .1
+        m.add_raster(
+            mbsp_fp,
+            layer_name="MBSP",
+            vmin=-0.1,
+            vmax=0.1,
+            palette=["#FF0000", "#FFFFFF", "#0000FF"],
+            zoom_to_layer=False,
+        )
+    if os.path.exists(sga_fp):
+        m.add_raster(
+            sga_fp,
+            layer_name="SGA",
+            vmin=0,
+            vmax=30,
+            palette=["#FFFFFF", "#000000"],
+            visible=False,
+            zoom_to_layer=False,
+        )
+    # lon_fmt = f"{lon:.3f}"
+    # lat_fmt = f"{lat:.3f}"
+    # vec_fp = os.path.join(sid_dir, f"{sid}_VEC_{lon_fmt}_{lat_fmt}.geojson")
+
+    # if os.path.exists(vec_fp):
+    #     m.add_geojson(vec_fp, "Vector", {"color": "black"})
+
+    # addLayer(object, visparams, name, display, opacity)
+    m.addLayer(mask_c, {"palette": ["#FF0000"]}, "Mask C (red)", False)
+    m.addLayer(mask_m, {"palette": ["#00FF00"]}, "Mask MBSP (green)", False)
+    m.addLayer(centre, {"color": "yellow"}, "Target")
+
     m.addLayerControl()
     display(m)
 

@@ -68,7 +68,7 @@ MASK_PARAMS = {
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.50, 1.0),  # NDI
+        "local_sgi_range": (-0.60, 1.0),  # NDI
     },
-    "min_valid_pct": 0.1,
+    "min_valid_pct": 0.2,
 }
