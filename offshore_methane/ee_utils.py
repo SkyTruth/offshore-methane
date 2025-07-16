@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 
 import ee
-import numpy as np
 import geemap
 import requests
 from requests.exceptions import ConnectionError, HTTPError
@@ -185,16 +184,18 @@ def _download_url(url, dest, chunk=8192, *, max_retries=5, backoff=1.5):
             if attempt > max_retries or code not in (429, 500, 502, 503, 504):
                 raise  # unrecoverable
             sleep = backoff * (2 ** (attempt - 1))
-            print(f"  ↻ HTTP {code}, retry {attempt}/{max_retries} in {sleep:.1f}s")
+            if cfg.VERBOSE:
+                print(f"  ↻ HTTP {code}, retry {attempt}/{max_retries} in {sleep:.1f}s")
             time.sleep(sleep)
         except ConnectionError:
             attempt += 1
             if attempt > max_retries:
                 raise
             sleep = backoff * (2 ** (attempt - 1))
-            print(
-                f"  ↻ connection error, retry {attempt}/{max_retries} in {sleep:.1f}s"
-            )
+            if cfg.VERBOSE:
+                print(
+                    f"  ↻ connection error, retry {attempt}/{max_retries} in {sleep:.1f}s"
+                )
             time.sleep(sleep)
 
 
@@ -229,7 +230,8 @@ def _prepare_asset(
     """
     # ------------------------------------------------------------------ overwrite branch
     if overwrite and ee_asset_exists(asset_id):
-        print(f"  ↻ deleting existing {datatype} asset → {asset_id}")
+        if cfg.VERBOSE:
+            print(f"  ↻ deleting existing {datatype} asset → {asset_id}")
         try:
             ee.data.deleteAsset(asset_id)
         except Exception as exc:
@@ -249,11 +251,13 @@ def _prepare_asset(
         return True  # missing → export required
 
     if ee_asset_ready(asset_id):
-        print(f"  ✓ {datatype} asset exists → {asset_id} (skipped)")
+        if cfg.VERBOSE:
+            print(f"  ✓ {datatype} asset exists → {asset_id} (skipped)")
         return False  # already good
 
     # asset exists but still ingesting
-    print(f"  … waiting for {datatype} asset ingestion → {asset_id}")
+    if cfg.VERBOSE:
+        print(f"  … waiting for {datatype} asset ingestion → {asset_id}")
     t0 = time.time()
     while not ee_asset_ready(asset_id):
         if time.time() - t0 > timeout:
@@ -261,7 +265,8 @@ def _prepare_asset(
                 f"{datatype} asset {asset_id} still ingesting after {timeout}s"
             )
         time.sleep(5)
-    print(f"  ✓ {datatype} asset now ready → {asset_id} (skipped)")
+    if cfg.VERBOSE:
+        print(f"  ✓ {datatype} asset now ready → {asset_id} (skipped)")
     return False
 
 
@@ -295,7 +300,8 @@ def export_image(
             == 0
         )
         if already and not overwrite:
-            print(f"  ✓ raster exists → {gcs_path} (skipped)")
+            if cfg.VERBOSE:
+                print(f"  ✓ raster exists → {gcs_path} (skipped)")
             return None, False
 
         utm = image.select(datatype).projection()
@@ -332,7 +338,8 @@ def export_image(
     else:  # preferred_location == "local"
         out_path = Path("../data") / sid / f"{sid}_{datatype}.tif"
         if out_path.is_file() and not overwrite:
-            print(f"  ✓ raster exists → {out_path} (skipped)")
+            if cfg.VERBOSE:
+                print(f"  ✓ raster exists → {out_path} (skipped)")
             return None, False
         url = image.clip(region).getDownloadURL(
             {
@@ -342,7 +349,8 @@ def export_image(
                 "format": "GEO_TIFF",
             }
         )
-        print(f"  ↓ raster → {out_path}")
+        if cfg.VERBOSE:
+            print(f"  ↓ raster → {out_path}")
         _download_url(url, out_path)
         exported = True
 
@@ -379,7 +387,8 @@ def export_polygons(
             == 0
         )
         if already and not overwrite:
-            print(f"  ✓ vectors exist → {gcs_path} (skipped)")
+            if cfg.VERBOSE:
+                print(f"  ✓ vectors exist → {gcs_path} (skipped)")
             return None, False
 
         task = ee.batch.Export.table.toCloudStorage(
@@ -406,10 +415,12 @@ def export_polygons(
     else:  # preferred_location == "local"
         out_path = Path("../data") / sid / f"{sid}_{datatype}_{suffix}.geojson"
         if out_path.is_file() and not overwrite:
-            print(f"  ✓ vectors exist → {out_path} (skipped)")
+            if cfg.VERBOSE:
+                print(f"  ✓ vectors exist → {out_path} (skipped)")
             return None, False
         url = fc.getDownloadURL(filetype="geojson")
-        print(f"  ↓ vectors → {out_path}")
+        if cfg.VERBOSE:
+            print(f"  ↓ vectors → {out_path}")
         _download_url(url, out_path)
         exported = True
 

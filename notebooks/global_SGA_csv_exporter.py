@@ -154,6 +154,7 @@ def export_year(year: int) -> None:
         )
 
 
+# %%
 def main() -> None:
     export_year(2023)  # change / loop as needed
 
@@ -162,9 +163,9 @@ if __name__ == "__main__":
     main()
 
 # %%
-# %%
+year = 2023
 
-df_whole = pd.read_csv("~/Downloads/2022 SGA Table.csv", parse_dates=["datetime"])
+df_whole = pd.read_csv(f"../data/{year} SGA raw.csv", parse_dates=["datetime"])
 df = df_whole
 print(df.head(1))
 print(f"Number of captures: {len(df)}")
@@ -252,6 +253,7 @@ tile_stats = (
     .agg(alpha_min="min", alpha_max="max", alpha_mean="mean", count="count")
     .reset_index()
 )
+tile_stats.to_csv(f"../data/{year} SGA stats.csv", index=False)
 
 # %%
 # cumulative distribution function of alpha_min, alpha_max, alpha_mean

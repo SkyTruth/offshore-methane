@@ -226,7 +226,8 @@ def ensure_sga_asset(
     tif_path = local_path / sid / f"{sid}_{datatype}.tif"
     tif_path.parent.mkdir(parents=True, exist_ok=True)
     if overwrite or not tif_path.is_file():
-        print(f"  ↻ computing *coarse* SGA grid for {sid}")
+        if cfg.VERBOSE:
+            print(f"  ↻ computing *coarse* SGA grid for {sid}")
         compute_sga_coarse(sid, tif_path)
         exported = True
 
@@ -238,7 +239,8 @@ def ensure_sga_asset(
     # ------------------------------------------------------- optional EE asset ingest
     if preferred_location == "ee_asset_folder":
         if overwrite or not ee_asset_ready(asset_id):
-            print(f"  ↑ ingesting as EE asset {asset_id}")
+            if cfg.VERBOSE:
+                print(f"  ↑ ingesting as EE asset {asset_id}")
             subprocess.run(
                 ["earthengine", "upload", "image", f"--asset_id={asset_id}", gcs_url],
                 check=True,

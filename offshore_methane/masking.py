@@ -530,7 +530,7 @@ def view_mask(
 
 # %%
 def main():
-    row = 30
+    row = 1
     sid = ""
     with open(cfg.SITES_CSV, newline="") as f:
         reader = csv.DictReader(f)
