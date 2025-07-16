@@ -9,6 +9,7 @@ where *1* keeps a pixel and *0* discards it.
 
 from __future__ import annotations
 
+import csv
 import math
 from typing import Dict, Optional
 
@@ -94,7 +95,7 @@ def _count(img_bin, region, scale):
 def geom_mask(centre: ee.Geometry, radius_m: float, inside: bool) -> ee.Image:
     """
     1 → pixels *inside* the radius (default) or *outside* when inside=False.
-    Returns a single-band image called “mask”.
+    Returns a single-band image called "mask".
     """
     dx_dy = _lonlat_dx_dy(centre)
     r2 = radius_m**2
@@ -174,7 +175,7 @@ def outlier_mask(
     Returns
     -------
     ee.Image
-        Single-band mask (“mask”) that is **both**
+        Single-band mask ("mask") that is **both**
         • computed *from* the current valid pixels, *and*
         • restricted *to* those same pixels.
     """
@@ -210,14 +211,24 @@ def ndwi_mask(img: ee.Image, p: Dict) -> ee.Image:
 
 
 def sga_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGA").lt(p["sunglint"]["local_sga_range"][1]).rename("mask")
+    return (
+        img.select("SGA")
+        .gt(p["sunglint"]["local_sga_range"][0])
+        .And(img.select("SGA").lt(p["sunglint"]["local_sga_range"][1]))
+        .rename("mask")
+    )
 
 
 def sgi_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGI").gt(p["sunglint"]["local_sgi_range"][0]).rename("mask")
+    return (
+        img.select("SGI")
+        .gt(p["sunglint"]["local_sgi_range"][0])
+        .And(img.select("SGI").lt(p["sunglint"]["local_sgi_range"][1]))
+        .rename("mask")
+    )
 
 
-def sgi_model_mask(img, p):
+def sgx_outlier(img, p):
     alpha = img.select("SGA")
     mean = sgi_hat_img(alpha)
     std = sgi_std_img(alpha)
@@ -347,13 +358,14 @@ def build_mask_for_C(
 
     # keep filters in an OrderedDict so we can iterate deterministically
     filters = {
-        "outlier": outlier_mask(img, p, valid_mask=base),
+        # "outlier": outlier_mask(img, p, valid_mask=base),
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
         "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
         "sga": sga_mask(img, p),
         "sgi": sgi_mask(img, p),
+        "sgx_outlier": sgx_outlier(img, p),
     }
 
     # ── build the final mask (logical AND of everything) ─────────────────────────
@@ -366,6 +378,16 @@ def build_mask_for_C(
     region = centre.buffer(p["dist"]["local_radius_m"]).bounds()
     total = _count(base, region, scale)  # pixels allowed by geom_mask
     if compute_stats:
+        stats_reducer = ee.Reducer.minMax()
+        sga_stats = (
+            img.select("SGA").reduceRegion(stats_reducer, region, scale).getInfo()
+        )
+        print(f"SGA: min={sga_stats['SGA_min']:.2f}, max={sga_stats['SGA_max']:.2f}")
+        sgi_stats = (
+            img.select("SGI").reduceRegion(stats_reducer, region, scale).getInfo()
+        )
+        print(f"SGI: min={sgi_stats['SGI_min']:.2f}, max={sgi_stats['SGI_max']:.2f}")
+
         print("Percentage of pixels removed w.r.t. geom_mask:")
         for name, f in filters.items():
             remaining = _count(base.And(f), region, scale)
@@ -508,18 +530,22 @@ def view_mask(
 
 # %%
 def main():
-    # view_mask(
-    #     "20170705T164319_20170705T165225_T15RXL",
-    #     -90.96802087968751,
-    #     27.29220815000002,
-    #     True,
-    # )
-    # view_mask("20240421T162841_20240421T164310_T15QWB", -92.2367, 19.5658)
-    # view_mask(
-    #     "20240421T162841_20240421T164310_T15QWB", -92.23691, 19.56648, compute_stats=True
-    # )
-
-    view_mask("20240501T162901_20240501T163950_T15QWB", -92.23731, 19.56605)
+    row = 30
+    sid = ""
+    with open(cfg.SITES_CSV, newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if sid:
+        row = next(
+            (row for row in rows if row["system_index"].split(";")[0] == sid), None
+        )
+        if row is None:
+            raise ValueError(f"SID {sid} not found in {cfg.SITES_CSV}")
+    else:
+        row = rows[row]
+    r1 = row["system_index"].split(";")[0]
+    view_mask(r1, float(row["lon"]), float(row["lat"]), True)
+    print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
 
 
 if __name__ == "__main__":

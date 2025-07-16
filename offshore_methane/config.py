@@ -50,7 +50,7 @@ MASK_PARAMS = {
     },
     "cloud": {
         "scene_cloud_pct": 50,  # metadata
-        "cs_thresh": 0.65,  # cloudy above
+        "cs_thresh": 0.7,  # cloudy above
         "prob_thresh": 65,  # BACKUP: cloudy below
     },
     "wind": {
@@ -63,11 +63,11 @@ MASK_PARAMS = {
         "p_high": 100,
         "saturation": 10_000,
     },
-    "ndwi": {"threshold": 0.0},
+    "ndwi": {"threshold": 0.1},
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.30, 1.0),  # NDI
+        "local_sgi_range": (-0.50, 1.0),  # NDI
     },
-    "min_valid_pct": 0.4,
+    "min_valid_pct": 0.1,
 }
