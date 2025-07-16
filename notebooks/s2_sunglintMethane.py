@@ -3,14 +3,15 @@
 import os
 import sys
 
+import ee
+import geemap
+
+from offshore_methane.sunglint import add_sgi, add_sgi_b3
+from offshore_methane.utils import calculateSunglint_alpha
 
 module_path = os.path.abspath(os.path.join("..", "offshore_methane"))
 if module_path not in sys.path:
     sys.path.append(module_path)
-from utils import calculateSunglint_alpha
-from sunglint import add_sgi, add_sgi_b3
-import ee
-import geemap
 
 ee.Authenticate()
 ee.Initialize()
@@ -203,7 +204,7 @@ Map.addLayer(
 
 def make_colorbar(palette, vmin, vmax):
     """
-    Create a colorbar image from 0–1, applying the given palette.
+    Create a colorbar image from 0-1, applying the given palette.
     Returns an ee.Image suitable for a UI thumbnail.
     """
     color_bar = ee.Image.pixelLonLat().select("latitude")

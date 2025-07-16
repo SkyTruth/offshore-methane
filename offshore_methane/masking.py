@@ -16,6 +16,7 @@ import ee
 import geemap
 import numpy as np
 from IPython.display import display
+from models.sgi_funcs import sgi_hat_img, sgi_std_img
 
 import offshore_methane.config as cfg
 
@@ -214,6 +215,17 @@ def sga_mask(img: ee.Image, p: Dict) -> ee.Image:
 
 def sgi_mask(img: ee.Image, p: Dict) -> ee.Image:
     return img.select("SGI").gt(p["sunglint"]["local_sgi_range"][0]).rename("mask")
+
+
+def sgi_model_mask(img, p):
+    alpha = img.select("SGA")
+    mean = sgi_hat_img(alpha)
+    std = sgi_std_img(alpha)
+    return (
+        img.select("SGI")
+        .gte(mean.subtract(std.multiply(3)))
+        .And(img.select("SGI").lte(mean.add(std.multiply(3))))
+    )
 
 
 def _lonlat_dx_dy(centre: ee.Geometry) -> ee.Image:
