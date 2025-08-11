@@ -16,6 +16,7 @@ ee.Initialize()
 def save_drawn_feature_to_gcs(
     geometry,
     system_index,
+    coords,
     bucket_name="offshore_methane",
     hitl_prefix="hitl",
 ):
@@ -31,7 +32,7 @@ def save_drawn_feature_to_gcs(
     client = storage.Client()
     bucket = client.bucket(bucket_name)
 
-    filename = f"{system_index}_HITL.geojson"
+    filename = f"{system_index}_HITL_{coords}.geojson"
     blob = bucket.blob(f"{system_index}/{filename}")
 
     geojson = {
@@ -95,6 +96,7 @@ def start_hitl_review_loop(
 
     def on_load_clicked(b):
         try:
+            global system_index, coords
             system_index, coords = scene_selector.value
             display_scene(system_index, coords)
             status.value = f"✔️ Loaded scene: {system_index}"
@@ -111,22 +113,13 @@ def start_hitl_review_loop(
             return
         geometry = current_map.user_roi
         geometry_geojson = geometry.getInfo()
-        save_drawn_feature_to_gcs(geometry_geojson, system_index, bucket_name)
+        save_drawn_feature_to_gcs(geometry_geojson, system_index, coords, bucket_name)
         status.value = f"✔️ Saved plume for {system_index}"
 
     def on_no_plume_clicked(b):
         system_index, coords = scene_selector.value
-        empty_geojson = {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "geometry": None,
-                    "properties": {"system_index": system_index},
-                }
-            ],
-        }
-        save_drawn_feature_to_gcs(empty_geojson, system_index, bucket_name)
+        empty_geometry = None
+        save_drawn_feature_to_gcs(empty_geometry, system_index, coords, bucket_name)
         status.value = f"✔️ Marked {system_index} as no plume"
 
     load_btn.on_click(on_load_clicked)
@@ -163,13 +156,15 @@ def deduplicate_by_date_and_coords(detections):
     return unique
 
 
-def list_unreviewed_detections_from_gcs(bucket_name):
+def list_detections_from_gcs(bucket_name, include_reviewed=False, only_plumes=False):
     """
     Return a list of (system_index, coordinates) tuples for detections
     missing a HITL annotation in the GCS bucket.
 
     Args:
         bucket_name (str): GCS bucket name.
+        include_reviewed (bool): If True, include detections with HITL review.
+        only_plumes (bool): If True, filter to only plume annotations.
 
     Returns:
         List[Tuple[str, str]]: Unreviewed detections.
@@ -273,11 +268,11 @@ def display_s2_with_geojson_from_gcs(
         geemap.Map: Interactive map with layers and annotations.
     """
     client = storage.Client()
+    global bucket
     bucket = client.bucket(bucket_name)
     filename = f"{system_index}_VEC_{coords}.geojson"
     blob_path = f"{system_index}/{filename}"
     blob = bucket.blob(blob_path)
-
     if not blob.exists():
         print(f"GeoJSON file not found in GCS: {blob_path}")
         return
@@ -308,16 +303,34 @@ def display_s2_with_geojson_from_gcs(
             bestEffort=True,
         )
 
-        coefList = ee.Array(fit.get("coefficients")).toList()
-        b0 = ee.Number(ee.List(coefList.get(0)).get(0))
-        corrected_b12 = img.select("B12").multiply(b0).rename("B12_corrected")
-        return img.addBands(corrected_b12).set({"c_fit": b0, "coef_list": coefList})
+        coef = fit.get("coefficients")
 
+        # If coefficients exist, apply correction
+        def apply_correction():
+            coef_list = ee.Array(coef).toList()
+            b0 = ee.Number(ee.List(coef_list.get(0)).get(0))
+            corrected_b12 = xVar.multiply(b0).rename("B12_corrected")
+            return img.addBands(corrected_b12).set(
+                {"c_fit": b0, "coef_list": coef_list}
+            )
+
+        # If no coefficients, just return unmodified B12
+        def no_correction():
+            return img.addBands(xVar.rename("B12_corrected")).set(
+                {"c_fit": None, "coef_list": None}
+            )
+
+        return ee.Image(ee.Algorithms.If(coef, apply_correction(), no_correction()))
+
+    global B11_max
     B11_max = (
         s2_image.select("B11")
         .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
         .getInfo()["B11"]
     )
+    if B11_max is None:
+        B11_max = 3000  # Default value if max cannot be computed
+
     flare_threshold = 1500
 
     rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
@@ -330,6 +343,7 @@ def display_s2_with_geojson_from_gcs(
     }
     fc_vis = {"color": "green", "width": 2}
 
+    global corrected_img
     corrected_img = linearFit(s2_image)
     lon, lat = map(float, coords.split("_"))
     Map = geemap.Map(center=[lat, lon], zoom=15)
@@ -339,19 +353,19 @@ def display_s2_with_geojson_from_gcs(
         rgb_vis,
         f"RGB {system_index}",
     )
-    Map.addLayer(corrected_img.select("B11"), swir_vis, "B11")
+    Map.addLayer(s2_image.select("B11"), swir_vis, "B11")
     Map.addLayer(corrected_img.select("B12_corrected"), swir_vis, "B12 * c_fit")
 
     mbsp = ee.Image.loadGeoTIFF(
         f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
     )
     Map.addLayer(mbsp, mbsp_vis, "MBSP")
-    hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
+    hitl_blob_path = f"{system_index}/{system_index}_HITL_{coords}.geojson"
     hitl_blob = bucket.blob(hitl_blob_path)
     if hitl_blob.exists():
         hitl_str = hitl_blob.download_as_text()
         hitl_geojson = json.loads(hitl_str)
-        if hitl_geojson["features"][0]["geometry"]:
+        if hitl_geojson["features"][0]["geometry"] is not None:
             hitl_fc = geemap.geojson_to_ee(hitl_geojson)
             Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
 
@@ -403,7 +417,7 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
+list_of_detections = list_detections_from_gcs("offshore_methane")
 scenes = deduplicate_by_date_and_coords(list_of_detections)
 
 # scenes = [
