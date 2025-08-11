@@ -1,12 +1,14 @@
 # %%
 import json
 import os
-
+import geopandas as gpd
 import ee
 import geemap
 import ipywidgets as widgets
 from google.cloud import storage
 from IPython.display import display
+from shapely.geometry import Point
+import pandas as pd
 
 # Initialize the Earth Engine API
 ee.Initialize()
@@ -64,7 +66,13 @@ def start_hitl_review_loop(
     save_thumbnail_folder = "../data/thumbnails" if save_thumbnail else None
 
     scene_selector = widgets.Dropdown(
-        options=[(f"{sid} @ {coords}", (sid, coords)) for sid, coords in detections],
+        options=[
+            (
+                f"{row['system_index']} @ {row['coords']}",
+                (row["system_index"], row["coords"]),
+            )
+            for _, row in detections.iterrows()
+        ],
         description="Scene:",
         layout=widgets.Layout(width="auto"),
     )
@@ -177,6 +185,9 @@ def list_detections_from_gcs(bucket_name, include_reviewed=False, only_plumes=Fa
 
     detections = defaultdict(list)
     hitl_files = set()
+    detections_gdf = gpd.GeoDataFrame(
+        columns=["system_index", "coords", "reviewed", "geometry"]
+    )
 
     for blob in list(bucket.list_blobs()):
         name = blob.name
@@ -195,10 +206,26 @@ def list_detections_from_gcs(bucket_name, include_reviewed=False, only_plumes=Fa
 
     for system_index, coords_list in detections.items():
         for coords in coords_list:
-            if (system_index, coords) not in hitl_files:
-                all_unreviewed.append((system_index, coords))
+            lon, lat = map(float, coords.split("_"))
+            # all_unreviewed.append(
+            #     (system_index, coords, (system_index, coords) in hitl_files)
+            # )
 
-    return sorted(all_unreviewed)
+            reviewed = (system_index, coords) in hitl_files
+            new_row = gpd.GeoDataFrame(
+                [
+                    {
+                        "system_index": system_index,
+                        "coords": coords,
+                        "reviewed": reviewed,
+                        "geometry": Point(lon, lat),
+                    }
+                ],
+                columns=["system_index", "coords", "reviewed", "geometry"],
+            )
+            detections_gdf = pd.concat([detections_gdf, new_row], ignore_index=True)
+
+    return detections_gdf
 
 
 class ThumbnailCreator:
@@ -325,7 +352,7 @@ def display_s2_with_geojson_from_gcs(
     global B11_max
     B11_max = (
         s2_image.select("B11")
-        .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
+        .reduceRegion(reducer=ee.Reducer.max(), bestEffort=True, scale=20)
         .getInfo()["B11"]
     )
     if B11_max is None:
@@ -417,8 +444,8 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-list_of_detections = list_detections_from_gcs("offshore_methane")
-scenes = deduplicate_by_date_and_coords(list_of_detections)
+list_of_detections = list_detections_from_gcs("offshore_methane", include_reviewed=True)
+# scenes = deduplicate_by_date_and_coords(list_of_detections)
 
 # scenes = [
 #     ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
@@ -429,6 +456,6 @@ scenes = deduplicate_by_date_and_coords(list_of_detections)
 # ]
 
 
-start_hitl_review_loop(scenes)
+start_hitl_review_loop(list_of_detections)
 
 # %%
