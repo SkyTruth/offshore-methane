@@ -445,6 +445,10 @@ def display_s2_with_geojson_from_gcs(
 
 # %%
 list_of_detections = list_detections_from_gcs("offshore_methane", include_reviewed=True)
+sites = pd.read_csv("../data/sites.csv")
+sites["coords"] = (
+    sites["lon"].round(3).astype(str) + "_" + sites["lat"].round(3).astype(str)
+)
 # scenes = deduplicate_by_date_and_coords(list_of_detections)
 
 # scenes = [
@@ -457,5 +461,6 @@ list_of_detections = list_detections_from_gcs("offshore_methane", include_review
 
 
 start_hitl_review_loop(list_of_detections)
+# start_hitl_review_loop(sites)
 
 # %%
