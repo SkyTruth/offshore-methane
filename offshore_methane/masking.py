@@ -235,7 +235,7 @@ def sgx_outlier(img, p):
     std = sgi_std_img(alpha)
     return (
         img.select("SGI")
-        .gte(mean.subtract(std.multiply(p["sunglint"]["outlier_std_range"][0])))
+        .gte(mean.add(std.multiply(p["sunglint"]["outlier_std_range"][0])))
         .And(
             img.select("SGI").lte(
                 mean.add(std.multiply(p["sunglint"]["outlier_std_range"][1]))
@@ -575,7 +575,7 @@ def view_mask(
 # %%
 def main():
     row = 1
-    sid = ""
+    sid = "20230427T162831_20230427T164153_T15QWB"
     with open(cfg.SITES_CSV, newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)

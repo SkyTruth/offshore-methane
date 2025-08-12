@@ -5,23 +5,15 @@ from pathlib import Path
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")
-SITES_TO_PROCESS = range(0, 47)  # 1 header and 46 S2 images
-
-CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
-START, END = (
-    "2017-07-05",  # Inclusive
-    "2017-07-05",  # Inclusive
-)  # Known pollution event  # PROTOTYPICAL
-# START, END = "2016-01-01", "2016-12-01"  # Known pollution event # PROTOTYPICAL
-# CENTRE_LON, CENTRE_LAT = 101.30972804846851, 9.12181368179713  # VENTING?
-# START, END = "2024-11-26", "2024-12-18"  # Known pollution event # VENTING?
+# SITES_TO_PROCESS = range(0, 47)  # 1 header and 46 S2 images
+SITES_TO_PROCESS = [42]  # Canonical site
 
 # ------------------------------------------------------------------
 #  Algorithm switches / constants
 # ------------------------------------------------------------------
 # 0 ⇒ no speckle filtering, 1  ⇒  3 × 3 median window (≈ 20 m), 2 ⇒ 5 × 5
-SPECKLE_RADIUS_PX = 10  # size of the square window
-SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
+SPECKLE_RADIUS_PX = 2  # size of the square window
+SPECKLE_FILTER_MODE = "median"  # "none" | "median" | "adaptive"
 # Logistic curve controls for adaptive speckle filtering
 LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)
@@ -30,7 +22,7 @@ USE_SIMPLE_MBSP = True
 PLUME_P1, PLUME_P2, PLUME_P3 = -0.02, -0.04, -0.08
 
 SHOW_THUMB = False  # QA only - keep False in bulk
-VERBOSE = False
+VERBOSE = True
 MAX_WORKERS = 32  # parallel threads
 XML_SOURCE = "gcp"  # "cdse" | "gcp"
 EXPORT_PARAMS = {
@@ -69,7 +61,7 @@ MASK_PARAMS = {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
         "local_sgi_range": (-0.60, 1.0),  # NDI
-        "outlier_std_range": (0, 3),  # SGX Outlier
+        "outlier_std_range": (1, 5),  # SGX Outlier
     },
-    "min_valid_pct": 0.2,
+    "min_valid_pct": 0.0,
 }
