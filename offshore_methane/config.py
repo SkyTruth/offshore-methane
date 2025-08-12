@@ -69,6 +69,7 @@ MASK_PARAMS = {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
         "local_sgi_range": (-0.60, 1.0),  # NDI
+        "outlier_std_range": (0, 3),  # SGX Outlier
     },
     "min_valid_pct": 0.2,
 }

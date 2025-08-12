@@ -195,7 +195,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     s2 = s2.addBands(sga_img.rename("SGA"))
     b_vis = s2.select("B2").add(s2.select("B3")).add(s2.select("B4")).divide(3)
     s2 = s2.addBands(b_vis.rename("B_vis"))
-    sgi = s2.normalizedDifference(["B12", "B_vis"])
+    sgi = s2.normalizedDifference(["B8A", "B_vis"])
     s2 = s2.addBands(sgi.rename("SGI"))
 
     # ----------- Generate masks ------------------

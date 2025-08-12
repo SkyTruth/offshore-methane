@@ -235,8 +235,12 @@ def sgx_outlier(img, p):
     std = sgi_std_img(alpha)
     return (
         img.select("SGI")
-        .gte(mean.subtract(std.multiply(3)))
-        .And(img.select("SGI").lte(mean.add(std.multiply(3))))
+        .gte(mean.subtract(std.multiply(p["sunglint"]["outlier_std_range"][0])))
+        .And(
+            img.select("SGI").lte(
+                mean.add(std.multiply(p["sunglint"]["outlier_std_range"][1]))
+            )
+        )
     )
 
 
@@ -438,6 +442,8 @@ def build_mask_for_MBSP(
         "cloud": cloud_mask(img, p),
         "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
+        # "sgi": sgi_mask(img, p),
+        "sgx_outlier": sgx_outlier(img, p),
     }
 
     # ── build the final mask ───────────────────────────────────────────
@@ -502,7 +508,7 @@ def view_mask(
     # Add SGI to image as a new band called "SGI"
     b_vis = img.select("B2").add(img.select("B3")).add(img.select("B4")).divide(3)
     img = img.addBands(b_vis.rename("B_vis"))
-    sgi = img.normalizedDifference(["B12", "B_vis"])
+    sgi = img.normalizedDifference(["B8A", "B_vis"])
     img = img.addBands(sgi.rename("SGI"))
 
     # 3️⃣ Build masks, turn into single-colour rasters
@@ -538,6 +544,7 @@ def view_mask(
             vmax=0.1,
             palette=["#FF0000", "#FFFFFF", "#0000FF"],
             zoom_to_layer=False,
+            nodata=-np.inf,
         )
     if os.path.exists(sga_fp):
         m.add_raster(
