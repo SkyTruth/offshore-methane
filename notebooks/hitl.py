@@ -164,7 +164,7 @@ def deduplicate_by_date_and_coords(detections):
     return unique
 
 
-def list_detections_from_gcs(bucket_name, include_reviewed=False, only_plumes=False):
+def list_detections_from_gcs(bucket_name):
     """
     Return a list of (system_index, coordinates) tuples for detections
     missing a HITL annotation in the GCS bucket.
@@ -349,19 +349,20 @@ def display_s2_with_geojson_from_gcs(
 
         return ee.Image(ee.Algorithms.If(coef, apply_correction(), no_correction()))
 
-    global B11_max
-    B11_max = (
+    global B11_median
+    B11_median = (
         s2_image.select("B11")
-        .reduceRegion(reducer=ee.Reducer.max(), bestEffort=True, scale=20)
+        .reduceRegion(reducer=ee.Reducer.median(), bestEffort=True, scale=20)
         .getInfo()["B11"]
     )
-    if B11_max is None:
-        B11_max = 3000  # Default value if max cannot be computed
+    if B11_median is None:
+        B11_median = 2000  # Default value if max cannot be computed
+    B11_median = B11_median + 1000  # Ensure a minimum value
 
     flare_threshold = 1500
 
     rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
-    swir_vis = {"min": 0, "max": B11_max}
+    swir_vis = {"min": 0, "max": B11_median}
     mbsp_vis = {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}
     yellow_vis = {
         "palette": ["yellow", "red"],
@@ -444,7 +445,7 @@ def display_s2_with_geojson_from_gcs(
 
 
 # %%
-list_of_detections = list_detections_from_gcs("offshore_methane", include_reviewed=True)
+list_of_detections = list_detections_from_gcs("offshore_methane")
 sites = pd.read_csv("../data/sites.csv")
 sites["coords"] = (
     sites["lon"].round(3).astype(str) + "_" + sites["lat"].round(3).astype(str)
