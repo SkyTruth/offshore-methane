@@ -5,8 +5,16 @@ from pathlib import Path
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
 SITES_CSV = Path("../data/sites.csv")
+CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
 # SITES_TO_PROCESS = range(0, 47)  # 1 header and 46 S2 images
-SITES_TO_PROCESS = [42]  # Canonical site
+# SITES_TO_PROCESS = [42]  # Canonical site
+# SITES_TO_PROCESS = [29]  # ethan's example
+
+START, END = (
+    "2017-07-05",  # Inclusive
+    "2017-07-05",  # Inclusive
+)  # Known pollution event  # PROTOTYPICAL
+
 
 # ------------------------------------------------------------------
 #  Algorithm switches / constants
@@ -60,8 +68,11 @@ MASK_PARAMS = {
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
-        "local_sgi_range": (-0.60, 1.0),  # NDI
-        "outlier_std_range": (1, 5),  # SGX Outlier
+        "local_sgi_range": (
+            -0.60,
+            1.0,
+        ),  # NDI # -.6 needs to be higher to actually do anything
+        "outlier_std_range": (0, 3),  # SGX Outlier
     },
-    "min_valid_pct": 0.0,
+    "min_valid_pct": 0.01,
 }

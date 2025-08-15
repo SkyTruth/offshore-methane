@@ -75,12 +75,35 @@ def sentinel2_system_indexes(
     start: str,
     end: str,
 ) -> list[str]:
+    """
+    Return system:index values for S2 scenes over 'point' between 'start' and 'end'
+    that pass the cloud filter and have valid sun-glint geometry (SGA_OK == 1).
+    Robust to early scenes with missing angle metadata.
+    """
     from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
 
+    # Require solar angles to exist
+    solar_required = ee.Filter.notNull(
+        ["MEAN_SOLAR_AZIMUTH_ANGLE", "MEAN_SOLAR_ZENITH_ANGLE"]
+    )
+
+    # Require at least one incidence-angle pair to exist (B08/B8A/B02 all acceptable)
+    inc_pairs = [
+        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B08", "MEAN_INCIDENCE_ZENITH_ANGLE_B08"],
+        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"],
+        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B02", "MEAN_INCIDENCE_ZENITH_ANGLE_B02"],
+    ]
+    inc_filter = ee.Filter.notNull(inc_pairs[0])
+    for pair in inc_pairs[1:]:
+        inc_filter = ee.Filter.Or(inc_filter, ee.Filter.notNull(pair))
+
+    # Build, filter, and map with guards so scene_sga_filter never sees missing props
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
+        .filter(solar_required)
+        .filter(inc_filter)
         .filter(scene_cloud_filter(cfg.MASK_PARAMS))
         .map(lambda img: scene_sga_filter(img, cfg.MASK_PARAMS))
         .filter(ee.Filter.eq("SGA_OK", 1))
