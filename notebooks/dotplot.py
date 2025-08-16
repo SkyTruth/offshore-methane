@@ -47,15 +47,24 @@ scenes = (
 print(len(scenes))
 # %%
 import csv  # noqa
-
 import offshore_methane.config as cfg  # noqa
+from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
+from datetime import datetime, timedelta  # noqa
 
-with open(cfg.SITES_CSV, newline="") as f:
+def _add_days(ds: str, days: int, fmt: str = "%Y-%m-%d") -> str:
+    return (datetime.strptime(ds, fmt) + timedelta(days=days)).strftime(fmt)
+
+with open(cfg.EVENTS_CSV, newline="") as f:
     reader = csv.DictReader(f)
     rows = list(reader)[:47]
 
-scenes = [row["system_index"].split(";") for row in rows]
-scenes = [item for sublist in scenes for item in sublist]
+scenes = []
+for row in rows:
+    lon, lat = float(row["lon"]), float(row["lat"])
+    start, end = row.get("start"), row.get("end")
+    scenes.extend(
+        sentinel2_system_indexes(ee.Geometry.Point([lon, lat]), start, _add_days(end, 1))
+    )
 print(len(scenes))
 
 # %%

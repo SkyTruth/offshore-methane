@@ -86,6 +86,9 @@ cython_debug/
 data/*
 !data/.gitkeep
 !data/sites.csv
+!data/events.csv
+!data/granules.csv
+!data/event_granule.csv
 !data/sgi_vs_sga_pixels.csv
 !data/models/
 !data/models/*

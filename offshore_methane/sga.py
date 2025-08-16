@@ -61,8 +61,8 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     saa = _grid2array(
         root.xpath(".//Sun_Angles_Grid/Azimuth/Values_List/VALUES/text()")
     )
-    vza = _mean_detector_grid(root, "12", "Zenith")
-    vaa = _mean_detector_grid(root, "12", "Azimuth")
+    vza = _mean_detector_grid(root, "8A", "Zenith")
+    vaa = _mean_detector_grid(root, "8A", "Azimuth")
 
     # sun-glint angle
     delta_phi = np.deg2rad(np.abs(saa - vaa))

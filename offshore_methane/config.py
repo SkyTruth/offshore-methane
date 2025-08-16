@@ -4,11 +4,18 @@ from pathlib import Path
 # ------------------------------------------------------------------
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
-SITES_CSV = Path("../data/sites.csv")
+# Event- and granule-centric CSVs
+EVENTS_CSV = Path("../data/events.csv")
+GRANULES_CSV = Path("../data/granules.csv")
+EVENT_GRANULE_CSV = Path("../data/event_granule.csv")
+
+# Optional subset of events to process (by event id or row index)
+# EVENTS_TO_PROCESS = None
 CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
-# SITES_TO_PROCESS = range(0, 47)  # 1 header and 46 S2 images
-# SITES_TO_PROCESS = [42]  # Canonical site
-# SITES_TO_PROCESS = [29]  # ethan's example
+# Examples:
+# EVENTS_TO_PROCESS = range(0, 47)
+EVENTS_TO_PROCESS = [42]  # Canonical event id
+# EVENTS_TO_PROCESS = [29]
 
 START, END = (
     "2017-07-05",  # Inclusive
@@ -64,7 +71,7 @@ MASK_PARAMS = {
         "p_high": 100,
         "saturation": 10_000,
     },
-    "ndwi": {"threshold": 0.1},
+    "ndwi": {"threshold": 0.0},
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg

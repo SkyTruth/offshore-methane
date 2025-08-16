@@ -36,8 +36,11 @@ def scene_cloud_filter(p: Dict) -> ee.Filter:
     return ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", p["cloud"]["scene_cloud_pct"])
 
 
-def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
-    """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
+def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Number:
+    """Compute the scene sun-glint angle (degrees) from image metadata.
+
+    Returns an ee.Number (degrees). No filtering is applied here.
+    """
     # metadata → Numbers
     sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
     saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
@@ -56,20 +59,7 @@ def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
         .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
     )
     sga_deg = cos_sga.acos().multiply(180 / np.pi)
-
-    ok = sga_deg.gt(p["sunglint"]["scene_sga_range"][0]).And(
-        sga_deg.lt(p["sunglint"]["scene_sga_range"][1])
-    )
-
-    # keep images that *lack* metadata
-    return ee.Image(
-        img.set(
-            "SGA_OK",
-            ee.Algorithms.If(
-                img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
-            ),
-        )
-    )
+    return sga_deg
 
 
 # ---------------------------------------------------------------------
@@ -572,27 +562,75 @@ def view_mask(
     display(m)
 
 
-# %%
-def main():
-    row = 1
-    sid = "20230427T162831_20230427T164153_T15QWB"
-    with open(cfg.SITES_CSV, newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+def show_me(eid: int | None = None, sid: str | None = None, stats: bool = True) -> None:
+    # Load events
+    with open(cfg.EVENTS_CSV, newline="") as f:
+        erows = list(csv.DictReader(f))
+    if not erows:
+        raise RuntimeError(f"No events found in {cfg.EVENTS_CSV}")
+
+    # Map: id -> row, with fallback to row index
+    ids = [int(r.get("id", i)) for i, r in enumerate(erows)]
+    events_by_id = {int(r.get("id", i)): r for i, r in enumerate(erows)}
+    default_eid = ids[0]
+
+    # Load event→granule mappings (ignore empty system_index markers)
+    mappings = []  # list of (eid, sid)
+    if cfg.EVENT_GRANULE_CSV.is_file():
+        with open(cfg.EVENT_GRANULE_CSV, newline="") as f:
+            for r in csv.DictReader(f):
+                row_sid = (r.get("system_index") or "").strip()
+                if not row_sid:
+                    continue
+                try:
+                    row_eid = int(r.get("event_id", -1))
+                except (TypeError, ValueError):
+                    continue
+                mappings.append((row_eid, row_sid))
+
+    # Resolve target eid/sid per requested rules
+    target_eid = eid if eid is not None else default_eid
+    target_sid = None
+
     if sid:
-        row = next(
-            (row for row in rows if row["system_index"].split(";")[0] == sid), None
-        )
-        if row is None:
-            raise ValueError(f"SID {sid} not found in {cfg.SITES_CSV}")
+        # Find all (eid, sid) pairs matching the requested SID exactly
+        matches = [(e, s) for (e, s) in mappings if s == sid]
+        if not matches:
+            raise RuntimeError(
+                f"SID {sid} not found in {cfg.EVENT_GRANULE_CSV}. Run discovery first or pass --eid to disambiguate."
+            )
+        if len(matches) == 1 and eid is None:
+            target_eid, target_sid = matches[0]
+        else:
+            if eid is None:
+                raise RuntimeError(
+                    f"SID {sid} appears under multiple events; provide --eid as well."
+                )
+            if (eid, sid) not in mappings:
+                raise RuntimeError(
+                    f"No mapping for eid={eid} and sid={sid} in {cfg.EVENT_GRANULE_CSV}."
+                )
+            target_eid, target_sid = eid, sid
     else:
-        row = rows[row]
-    r1 = row["system_index"].split(";")[0]
-    view_mask(r1, float(row["lon"]), float(row["lat"]), True)
-    print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
+        # No SID: use the first mapped SID for the target EID
+        sids_for_eid = [s for (e, s) in mappings if e == target_eid]
+        if not sids_for_eid:
+            raise RuntimeError(
+                f"Event {target_eid} has no mapped granules in {cfg.EVENT_GRANULE_CSV}. Run discovery first."
+            )
+        target_sid = sids_for_eid[0]
+
+    ev = events_by_id.get(target_eid)
+    if not ev:
+        raise RuntimeError(f"Event id {target_eid} not found in {cfg.EVENTS_CSV}")
+
+    lon, lat = float(ev["lon"]), float(ev["lat"])
+    view_mask(target_sid, lon, lat, stats)
+    print(f"eid: {target_eid}, sid: {target_sid}, lon: {lon}, lat: {lat}")
 
 
+# %%
 if __name__ == "__main__":
-    main()
+    show_me(sid="20170705T164319_20170705T165225_T15RXL")
 
 # %%

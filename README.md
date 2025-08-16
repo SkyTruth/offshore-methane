@@ -8,7 +8,7 @@ This repository contains experimental tooling for detecting offshore methane emi
 | --- | --- |
 | `offshore_methane/` | Core Python package. Modules are described below. |
 | `notebooks/` | Example Jupyter notebooks for interactive exploration. |
-| `data/` | Small example data such as `sites.csv` listing known events. |
+| `data/` | Small example data such as `events.csv` (inputs), plus `granules.csv` and `event_granule.csv` (outputs). |
 | `docs/` | Additional documentation. |
 | `tests/` | Unit tests run by `pytest`. |
 
@@ -67,13 +67,28 @@ m = view_mask(
 
 ### 4. Run the orchestrator
 
-The main processing pipeline reads sites from `data/sites.csv` and exports MBSP rasters and plume polygons. Adjust parameters in `offshore_methane/config.py` as needed and launch:
+There are two phases you can run independently:
 
+1) Discover granules (populate `granules.csv` and `event_granule.csv`):
 ```bash
-python -m offshore_methane.orchestrator
+python -m offshore_methane.orchestrator discover
 ```
 
-Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS` in the configuration.
+If an event has no matching Sentinel‑2 granules, a marker row is added to
+`event_granule.csv` for that event (with empty `system_index`), so it won’t be
+re-discovered on subsequent runs.
+
+2) Process granules (SGA grid, masks, MBSP, exports):
+```bash
+python -m offshore_methane.orchestrator process
+```
+
+You can also run both sequentially with:
+```bash
+python -m offshore_methane.orchestrator both
+```
+
+Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS`. Discovered granules are appended to `data/granules.csv` and linked to events in `data/event_granule.csv`.
 
 ## Configuration
 
@@ -83,9 +98,9 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 | Name | Used in | Effect |
 | --- | --- | --- |
-| `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
-| `SITES_TO_PROCESS` | `orchestrator.iter_sites` | Subset of rows to process (indexes). |
-| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `SITES_CSV` is missing. |
+| `EVENTS_CSV` | `orchestrator.iter_sites` | CSV listing events with `lon`, `lat`, `start`, `end`. |
+| `EVENTS_TO_PROCESS` | `orchestrator.iter_sites` | Optional subset to process (event ids or row indexes). |
+| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `EVENTS_CSV` is missing. |
 | `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel-2 search. |
 
 ### Algorithm options

@@ -74,42 +74,62 @@ def sentinel2_system_indexes(
     point: ee.Geometry,
     start: str,
     end: str,
-) -> list[str]:
+) -> list[dict]:
     """
-    Return system:index values for S2 scenes over 'point' between 'start' and 'end'
-    that pass the cloud filter and have valid sun-glint geometry (SGA_OK == 1).
-    Robust to early scenes with missing angle metadata.
+    Return scene metadata for S2 scenes over 'point' in [start, end):
+      [{ 'system_index': str, 'sunglint': float|None, 'cloudiness': float|None }, ...]
+
+    Applies only existence checks for solar/incidence angles; no filtering by
+    SGA or cloudiness.
     """
-    from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
+    from offshore_methane.masking import scene_sga_filter
 
     # Require solar angles to exist
     solar_required = ee.Filter.notNull(
         ["MEAN_SOLAR_AZIMUTH_ANGLE", "MEAN_SOLAR_ZENITH_ANGLE"]
     )
 
-    # Require at least one incidence-angle pair to exist (B08/B8A/B02 all acceptable)
-    inc_pairs = [
-        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B08", "MEAN_INCIDENCE_ZENITH_ANGLE_B08"],
-        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"],
-        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B02", "MEAN_INCIDENCE_ZENITH_ANGLE_B02"],
-    ]
-    inc_filter = ee.Filter.notNull(inc_pairs[0])
-    for pair in inc_pairs[1:]:
-        inc_filter = ee.Filter.Or(inc_filter, ee.Filter.notNull(pair))
+    # Require B8A incidence-angle pair to exist
+    inc_filter = ee.Filter.notNull(["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"])
 
-    # Build, filter, and map with guards so scene_sga_filter never sees missing props
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
         .filter(solar_required)
         .filter(inc_filter)
-        .filter(scene_cloud_filter(cfg.MASK_PARAMS))
-        .map(lambda img: scene_sga_filter(img, cfg.MASK_PARAMS))
-        .filter(ee.Filter.eq("SGA_OK", 1))
+        .map(lambda img: ee.Image(img).set("SGA_SCENE", scene_sga_filter(img, cfg.MASK_PARAMS)))
     )
 
-    return sorted(set(coll.aggregate_array("system:index").getInfo()))
+    sids = coll.aggregate_array("system:index").getInfo()
+    sgas = coll.aggregate_array("SGA_SCENE").getInfo()
+    clouds = coll.aggregate_array("CLOUDY_PIXEL_PERCENTAGE").getInfo()
+
+    def _sensing_iso_from_sid(sid: str) -> str:
+        # system:index looks like YYYYMMDDTHHMMSS_YYYYMMDDTHHMMSS_TxxYYY
+        try:
+            first = sid.split("_")[0]
+            date = first[:8]
+            time = first[9:15]
+            return f"{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}:{time[2:4]}:{time[4:6]}"
+        except Exception:
+            return ""
+
+    times = [_sensing_iso_from_sid(s) for s in sids]
+
+    out = []
+    for sid, sga, cl, ts in zip(sids, sgas, clouds, times):
+        out.append(
+            {
+                "system_index": sid,
+                "sunglint": None if sga is None else float(sga),
+                "cloudiness": None if cl is None else float(cl),
+                "timestamp": ts,
+            }
+        )
+    return out
+
+
 
 
 def _ee_asset_info(asset_id: str) -> dict | None:

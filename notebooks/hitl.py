@@ -413,20 +413,33 @@ def display_s2_with_geojson_from_gcs(
 #     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
 #     ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
 # ]
-row = 1
+row_idx = 1
 sid = ""
-with open(cfg.SITES_CSV, newline="") as f:
+from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
+
+with open(cfg.EVENTS_CSV, newline="") as f:
     reader = csv.DictReader(f)
     rows = list(reader)
-if sid:
-    row = next((row for row in rows if row["system_index"].split(";")[0] == sid), None)
-    if row is None:
-        raise ValueError(f"SID {sid} not found in {cfg.SITES_CSV}")
-else:
-    row = rows[row]
-r1 = row["system_index"].split(";")[0]
-print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
-scenes = [(r1, f"{float(row['lon']):.3f}_{float(row['lat']):.3f}")]
+
+row = rows[row_idx]
+lon, lat = float(row["lon"]), float(row["lat"])
+start, end = row.get("start"), row.get("end")
+
+if not sid:
+    from datetime import datetime, timedelta
+
+    def _add_days(ds: str, days: int, fmt: str = "%Y-%m-%d") -> str:
+        return (datetime.strptime(ds, fmt) + timedelta(days=days)).strftime(fmt)
+
+    sids = sentinel2_system_indexes(
+        ee.Geometry.Point([lon, lat]), start, _add_days(end, 1)
+    )
+    if not sids:
+        raise RuntimeError("No Sentinel-2 scenes found for selected event.")
+    sid = sids[0]
+
+print(f"sid: {sid}, lon: {lon}, lat: {lat}")
+scenes = [(sid, f"{lon:.3f}_{lat:.3f}")]
 
 
 start_hitl_review_loop(scenes)
