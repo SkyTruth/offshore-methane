@@ -14,8 +14,8 @@ PIXEL_CLOUD_PROB_MAX = (
 )
 ROI_CLOUD_FRACTION_MAX = 25  # Maximum cloud fraction for the ROI to be considered clear
 ROI_RADIUS_M = 500  # Radius in meters for the region of interest around each centroid
-start_date = "2020-01-01"
-end_date = "2025-07-14"
+start_date = "2015-06-27"  # Start date for Sentinel-2 data
+end_date = "2025-08-01"
 
 # ----------------------------------------------------------------------------
 # tip and queue to more likely scenes. Prioritzation of site opportunities.
@@ -26,7 +26,7 @@ end_date = "2025-07-14"
 
 
 table = ee.FeatureCollection(
-    "projects/benshostak-skytruth/assets/gulf_of_thailand_flaring"
+    "projects/benshostak-skytruth/assets/custom_flaring_data-Brazil"
 )
 points = table
 print("points:", points.size().getInfo())
@@ -160,7 +160,7 @@ results_fc = ee.FeatureCollection(results_list)
 # Export (optional)
 task = ee.batch.Export.table.toDrive(
     collection=results_fc,
-    description="S2_Flaring_Venting_Export_test_2",  # can change name here
+    description="S2_Flaring_Venting_Brazil_2015_2025",  # can change name here
     fileFormat="CSV",
 )
 
@@ -182,7 +182,7 @@ from datetime import timedelta  # noqa
 
 # Load and prepare data
 df = pd.read_csv(
-    "/Users/bshostak/Documents/GitHub/offshore-methane/data/gulf_of_thailand_flaring.csv",
+    "/Users/bshostak/Documents/GitHub/offshore-methane/data/S2_Flaring_Venting_Brazil_20150627_20250801.csv",
     parse_dates=["start_date", "end_date"],
 )
 
@@ -254,9 +254,9 @@ for latlon, group in df.groupby("latlon"):
 # Final dataframe
 venting_ranges_df = pd.DataFrame(all_ranges).sort_values(by=["lat", "lon", "start"])
 venting_ranges_df.to_csv(
-    "/Users/bshostak/Documents/GitHub/offshore-methane/data/gulf_of_thailand_venting_ranges_20200101_20250714_test.csv",
+    "/Users/bshostak/Documents/GitHub/offshore-methane/data/Brazil_Venting_Ranges_20150627_20250801.csv",
     index=False,
-)
+)  # replace with your desired path
 
 # print(venting_ranges_df)
 
