@@ -36,8 +36,37 @@ print("points:", points.size().getInfo())
 # points = ee.FeatureCollection([ee.Feature(point)])
 # ----------------------------------------------------------------------------
 
+
+# function to filter out rows where flaring only occured prior to s2 imagery
+def filter_recent_flaring(fc):
+    bcm_fields = [
+        "bcm_2016",
+        "bcm_2017",
+        "bcm_2018",
+        "bcm_2019",
+        "bcm_2020",
+        "bcm_2021",
+        "bcm_2022",
+        "bcm_2023",
+    ]
+
+    # Start with first field
+    combined_filter = ee.Filter.gt(bcm_fields[0], 0)
+
+    # Combine the rest using ee.Filter.or
+    for field in bcm_fields[1:]:
+        combined_filter = ee.Filter.Or(combined_filter, ee.Filter.gt(field, 0))
+
+    # Apply filter to FeatureCollection
+    return fc.filter(combined_filter)
+
+
+points_filtered = filter_recent_flaring(table)
+print("points 2016 - 2023:", points_filtered.size().getInfo())
+
+
 # PROCESS CENTROIDS: remove duplicate infrastructure from flaring data
-buffered100 = points.map(lambda f: f.buffer(100))
+buffered100 = points_filtered.map(lambda f: f.buffer(100))
 dissolved = buffered100.union()
 dissolvedPolys = ee.FeatureCollection(
     ee.Geometry(dissolved.geometry())
@@ -160,7 +189,7 @@ results_fc = ee.FeatureCollection(results_list)
 # Export (optional)
 task = ee.batch.Export.table.toDrive(
     collection=results_fc,
-    description="S2_Flaring_Venting_Brazil_2015_2025",  # can change name here
+    description="S2_Flaring_Venting_Brazil_2015_2025_filtered",  # can change name here
     fileFormat="CSV",
 )
 
@@ -182,7 +211,7 @@ from datetime import timedelta  # noqa
 
 # Load and prepare data
 df = pd.read_csv(
-    "/Users/bshostak/Documents/GitHub/offshore-methane/data/S2_Flaring_Venting_Brazil_20150627_20250801.csv",
+    "/Users/bshostak/Documents/GitHub/offshore-methane/data/S2_Flaring_Venting_Brazil_2015_2025_filtered.csv",
     parse_dates=["start_date", "end_date"],
 )
 
@@ -254,7 +283,7 @@ for latlon, group in df.groupby("latlon"):
 # Final dataframe
 venting_ranges_df = pd.DataFrame(all_ranges).sort_values(by=["lat", "lon", "start"])
 venting_ranges_df.to_csv(
-    "/Users/bshostak/Documents/GitHub/offshore-methane/data/Brazil_Venting_Ranges_20150627_20250801.csv",
+    "/Users/bshostak/Documents/GitHub/offshore-methane/data/Brazil_Venting_Ranges_20150627_20250801_filtered.csv",
     index=False,
 )  # replace with your desired path
 
