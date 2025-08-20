@@ -83,6 +83,87 @@ def calculate_sunglint_alpha(image: ee.Image):
     return image.set("glint_alpha", alpha_deg)
 
 
+<<<<<<< Updated upstream
+=======
+import ee
+
+
+import ee
+
+
+import ee
+
+
+def evaluate_offshore_site(image, lat, lon, buffer_m=100):
+    # Define point and buffer
+    point = ee.Geometry.Point([lon, lat])
+    region = point.buffer(buffer_m)
+
+    # Select relevant bands from S2
+    b3 = image.select("B3")  # Green
+    b8 = image.select("B8")  # NIR
+    b11 = image.select("B11")  # SWIR1
+    b12 = image.select("B12")  # SWIR2
+
+    # --- Cloudiness (using S2 Cloud Probability dataset) ---
+    system_index = image.get("system:index")
+
+    cloud_img = (
+        ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
+        .filter(ee.Filter.equals("system:index", system_index))
+        .first()
+    )
+
+    # Cloud probability band is "probability" (0–100)
+    cloud_prob = cloud_img.select("probability")
+    cloud_fraction = cloud_prob.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
+    ).get("probability")
+
+    # --- Structure Presence (via NDWI min) ---
+    ndwi = b3.subtract(b8).divide(b3.add(b8))
+    ndwi_stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
+    )
+    min_ndwi = ndwi_stats.get("B3")
+
+    structure_present = ee.Algorithms.If(
+        ee.Number(min_ndwi).lt(0),
+        1,  # structure
+        0,  # only ocean
+    )
+
+    # --- Flaring Detection (max difference B12 - B11) ---
+    flare_diff = b12.subtract(b11)
+    flare_stats = flare_diff.reduceRegion(
+        reducer=ee.Reducer.max(), geometry=region, scale=20, maxPixels=1e8
+    )
+    max_flare_diff = flare_stats.get("B12")
+
+    flare_present = ee.Algorithms.If(
+        ee.Number(max_flare_diff).gt(250),  # TOA reflectance scale (0–10000)
+        1,
+        0,
+    )
+
+    # Return as dictionary
+    result = ee.Dictionary(
+        {
+            "system_index": system_index,
+            "lat": lat,
+            "lon": lon,
+            "cloud_fraction": cloud_fraction,
+            "min_ndwi": min_ndwi,
+            "structure_present": structure_present,
+            "max_flare_diff": max_flare_diff,
+            "flare_present": flare_present,
+        }
+    )
+
+    return result
+
+
+>>>>>>> Stashed changes
 def show_granule_viewer(
     sid_data,
     b11_b12_max=[1000, 750],
@@ -120,6 +201,11 @@ def show_granule_viewer(
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
         img = get_image(sid)
 
+<<<<<<< Updated upstream
+=======
+        img_flaring_data = evaluate_offshore_site(img, lat, lon).getInfo()
+
+>>>>>>> Stashed changes
         vis_params_b11 = {"bands": ["B11"], "min": 0, "max": b11_b12_max[0]}
         vis_params_b12 = {"bands": ["B12"], "min": 0, "max": b12_max_slider.value}
         vis_params_rgb = {
@@ -178,6 +264,27 @@ def show_granule_viewer(
 
         if img is not None:
             m.center = (lat, lon, zoom)
+<<<<<<< Updated upstream
+=======
+            m.addLayer(
+                b11.subtract(b12),
+                {
+                    "min": -1000,
+                    "max": 1000,
+                    "palette": [
+                        "000000",
+                        "0000FF",
+                        "00FFFF",
+                        "00FF00",
+                        "FFFF00",
+                        "FF0000",
+                        "FFFFFF",
+                    ],
+                },
+                "B11-B12 Difference",
+                False,
+            )
+>>>>>>> Stashed changes
             m.addLayer(mbsp, vis_params_mbsp, "MBSP")
             m.addLayer(img.select("B12"), vis_params_b12, "B12")
             m.addLayer(img.select("B11"), vis_params_b11, "B11")
@@ -199,6 +306,16 @@ def show_granule_viewer(
                 f"c: {round(mbsp.get('C_factor').getInfo(), 3)} "
                 f"glint_alpha: {round(img.get('glint_alpha').getInfo(), 3)})"
             )
+<<<<<<< Updated upstream
+=======
+            print(
+                f"Cloud fraction: {round(img_flaring_data['cloud_fraction'], 3)}"
+                f" | Min NDWI: {round(img_flaring_data['min_ndwi'], 3)}"
+                f" | Structure present: {img_flaring_data['structure_present']}"
+                f" | Max B12-B11: {round(img_flaring_data['max_flare_diff'], 1)}"
+                f" | Flaring present: {img_flaring_data['flare_present']}"
+            )
+>>>>>>> Stashed changes
         return mbsp
 
     # --- navigation buttons ---
