@@ -83,18 +83,7 @@ def calculate_sunglint_alpha(image: ee.Image):
     return image.set("glint_alpha", alpha_deg)
 
 
-<<<<<<< Updated upstream
-=======
-import ee
-
-
-import ee
-
-
-import ee
-
-
-def evaluate_offshore_site(image, lat, lon, buffer_m=100):
+def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     # Define point and buffer
     point = ee.Geometry.Point([lon, lat])
     region = point.buffer(buffer_m)
@@ -134,14 +123,34 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=100):
     )
 
     # --- Flaring Detection (max difference B12 - B11) ---
-    flare_diff = b12.subtract(b11)
-    flare_stats = flare_diff.reduceRegion(
-        reducer=ee.Reducer.max(), geometry=region, scale=20, maxPixels=1e8
+    flare_diff = b12.subtract(b11).rename("flare_diff")
+
+    # Get max value and pixel location
+    flare_reduce = flare_diff.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=region,
+        scale=20,
+        maxPixels=1e8,
+        bestEffort=True,
     )
-    max_flare_diff = flare_stats.get("B12")
+    max_flare_diff = flare_reduce.get("flare_diff")
+
+    # Get coordinates of max flare pixel
+    flare_mask = flare_diff.eq(ee.Number(max_flare_diff))
+    flare_coords = (
+        flare_mask.reduceToVectors(
+            scale=20,
+            geometryType="centroid",
+            maxPixels=1e8,
+            bestEffort=True,
+        )
+        .geometry()
+        .coordinates()
+    )
+    flare_coords = ee.List(flare_coords)
 
     flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(250),  # TOA reflectance scale (0–10000)
+        ee.Number(max_flare_diff).gt(50),  # threshold lowered
         1,
         0,
     )
@@ -157,13 +166,13 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=100):
             "structure_present": structure_present,
             "max_flare_diff": max_flare_diff,
             "flare_present": flare_present,
+            "flare_latlon": flare_coords,
         }
     )
 
     return result
 
 
->>>>>>> Stashed changes
 def show_granule_viewer(
     sid_data,
     b11_b12_max=[1000, 750],
@@ -201,11 +210,8 @@ def show_granule_viewer(
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
         img = get_image(sid)
 
-<<<<<<< Updated upstream
-=======
         img_flaring_data = evaluate_offshore_site(img, lat, lon).getInfo()
 
->>>>>>> Stashed changes
         vis_params_b11 = {"bands": ["B11"], "min": 0, "max": b11_b12_max[0]}
         vis_params_b12 = {"bands": ["B12"], "min": 0, "max": b12_max_slider.value}
         vis_params_rgb = {
@@ -234,6 +240,7 @@ def show_granule_viewer(
         b8a = img.select("B8A")
         b11 = img.select("B11")
         b12 = img.select("B12")
+        flare_diff = b12.subtract(b11).rename("flare_diff")
         delta_sw = b12.subtract(b11)
         tai = delta_sw.divide(b8a)
         flare_threshold = 1500
@@ -264,10 +271,8 @@ def show_granule_viewer(
 
         if img is not None:
             m.center = (lat, lon, zoom)
-<<<<<<< Updated upstream
-=======
             m.addLayer(
-                b11.subtract(b12),
+                flare_diff,
                 {
                     "min": -1000,
                     "max": 1000,
@@ -281,10 +286,9 @@ def show_granule_viewer(
                         "FFFFFF",
                     ],
                 },
-                "B11-B12 Difference",
+                "B12-B11 Difference",
                 False,
             )
->>>>>>> Stashed changes
             m.addLayer(mbsp, vis_params_mbsp, "MBSP")
             m.addLayer(img.select("B12"), vis_params_b12, "B12")
             m.addLayer(img.select("B11"), vis_params_b11, "B11")
@@ -296,8 +300,21 @@ def show_granule_viewer(
                 False,
             )
             m.addLayer(
-                ee.Geometry.Point(lon, lat), {"color": "red"}, "Point of Interest"
+                ee.Geometry.Point(lon, lat).buffer(200),
+                {"color": "red"},
+                "Point of Interest",
+                False,
             )
+
+            if img_flaring_data["flare_present"]:
+                flare_coords = img_flaring_data["flare_latlon"]
+                coords = ee.List(flare_coords).getInfo()
+                m.addLayer(
+                    ee.Geometry.MultiPoint(coords),
+                    {"color": "orange"},
+                    "Detected Flare",
+                    True,
+                )
 
         with out:
             out.clear_output()
@@ -306,8 +323,6 @@ def show_granule_viewer(
                 f"c: {round(mbsp.get('C_factor').getInfo(), 3)} "
                 f"glint_alpha: {round(img.get('glint_alpha').getInfo(), 3)})"
             )
-<<<<<<< Updated upstream
-=======
             print(
                 f"Cloud fraction: {round(img_flaring_data['cloud_fraction'], 3)}"
                 f" | Min NDWI: {round(img_flaring_data['min_ndwi'], 3)}"
@@ -315,7 +330,6 @@ def show_granule_viewer(
                 f" | Max B12-B11: {round(img_flaring_data['max_flare_diff'], 1)}"
                 f" | Flaring present: {img_flaring_data['flare_present']}"
             )
->>>>>>> Stashed changes
         return mbsp
 
     # --- navigation buttons ---
@@ -366,13 +380,13 @@ sid_data = [
     },
 ]
 # %%
-b11 = 3000
+# b11 = 3000
 
-mbsp = show_granule_viewer(
-    sid_data,
-    b11_b12_max=[b11, b11],
-    zoom=16,
-    mbsp_min_max=[-0.1, 0.1],
-)
+# mbsp = show_granule_viewer(
+#     sid_data,
+#     b11_b12_max=[b11, b11],
+#     zoom=16,
+#     mbsp_min_max=[-0.1, 0.1],
+# )
 
 # %%
