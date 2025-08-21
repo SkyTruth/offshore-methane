@@ -12,7 +12,9 @@ import os
 import math
 
 
-mbsp_path = r"C:\Users\ebeva\SkyTruth\git\offshore-methane\offshore_methane"
+mbsp_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "offshore_methane"
+)
 if mbsp_path not in sys.path:
     sys.path.append(mbsp_path)
 
