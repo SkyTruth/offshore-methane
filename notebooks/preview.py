@@ -154,7 +154,7 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     flare_coords = ee.List(flare_coords)
 
     flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(0.1),  # threshold lowered
+        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
         1,
         0,
     )
@@ -247,7 +247,7 @@ def show_granule_viewer(
         delta_sw = b12.subtract(b11)
         tai = delta_sw.divide(b8a)
         # flare_threshold = 1500
-        flare_mask = tai.gte(0.1)
+        flare_mask = tai.gte(0.15)
         flare_mask_layer = img.select("B12").updateMask(flare_mask)
 
         b_vis = img.select("B2").add(img.select("B3")).add(img.select("B4")).divide(3)
@@ -337,7 +337,7 @@ def show_granule_viewer(
     mbsp = update_map(index)
     controls = widgets.HBox([prev_btn, next_btn, b12_max_slider])
     display(controls, out, m)
-    return mbsp
+    # return mbsp
 
 
 # mbsp = show_granule_viewer(sid_data)
