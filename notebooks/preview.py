@@ -144,6 +144,7 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
             maxPixels=1e8,
             bestEffort=True,
         )
+        .filterBounds(region)
         .geometry()
         .coordinates()
     )
