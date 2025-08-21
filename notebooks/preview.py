@@ -94,107 +94,72 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     b11 = image.select("B11")  # SWIR1
     b12 = image.select("B12")  # SWIR2
 
-    # --- Cloudiness (S2 Cloud Probability) ---
+    # --- Cloudiness (using S2 Cloud Probability dataset) ---
     system_index = image.get("system:index")
+
     cloud_img = (
         ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
         .filter(ee.Filter.equals("system:index", system_index))
         .first()
     )
 
-    cloud_fraction = ee.Algorithms.If(
-        cloud_img,
-        ee.Algorithms.If(
-            cloud_img.bandNames().contains("probability"),
-            cloud_img.select("probability")
-            .reduceRegion(
-                reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
-            )
-            .get("probability"),
-            0,
-        ),
-        0,
-    )
+    # Cloud probability band is "probability" (0–100)
+    cloud_prob = cloud_img.select("probability")
+    cloud_fraction = cloud_prob.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
+    ).get("probability")
 
-    # --- Structure Presence (NDWI min) ---
+    # --- Structure Presence (via NDWI min) ---
     ndwi = b3.subtract(b8).divide(b3.add(b8))
-    min_ndwi = ee.Algorithms.If(
-        ndwi,
-        ee.Algorithms.If(
-            ndwi.reduceRegion(
-                reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
-            ).get("B3"),
-            ndwi.reduceRegion(
-                reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
-            ).get("B3"),
-            0,
-        ),
-        0,
+    ndwi_stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
     )
+    min_ndwi = ndwi_stats.get("B3")
 
     structure_present = ee.Algorithms.If(
         ee.Number(min_ndwi).lt(0),
-        1,
-        0,
+        1,  # structure
+        0,  # only ocean
     )
 
     # --- Flaring Detection (max difference B12 - B11) ---
     flare_diff = b12.subtract(b11).rename("flare_diff")
-    max_flare_diff = ee.Algorithms.If(
-        flare_diff,
-        ee.Algorithms.If(
-            flare_diff.reduceRegion(
-                reducer=ee.Reducer.max(),
-                geometry=region,
-                scale=20,
-                maxPixels=1e8,
-                bestEffort=True,
-            ).get("flare_diff"),
-            flare_diff.reduceRegion(
-                reducer=ee.Reducer.max(),
-                geometry=region,
-                scale=20,
-                maxPixels=1e8,
-                bestEffort=True,
-            ).get("flare_diff"),
-            0,
-        ),
-        0,
+
+    # Get max value and pixel location
+    flare_reduce = flare_diff.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=region,
+        scale=20,
+        maxPixels=1e8,
+        bestEffort=True,
     )
+    max_flare_diff = flare_reduce.get("flare_diff")
 
     # Get coordinates of max flare pixel
     flare_mask = flare_diff.eq(ee.Number(max_flare_diff))
-    flare_coords = ee.Algorithms.If(
-        flare_diff,
-        ee.Algorithms.If(
-            flare_mask,
-            ee.List(
-                flare_mask.reduceToVectors(
-                    scale=20,
-                    geometryType="centroid",
-                    maxPixels=1e8,
-                    bestEffort=True,
-                )
-                .filterBounds(region)
-                .geometry()
-                .coordinates()
-            ),
-            ee.List([]),
-        ),
-        ee.List([]),
+    flare_coords = (
+        flare_mask.reduceToVectors(
+            scale=20,
+            geometryType="centroid",
+            maxPixels=1e8,
+            bestEffort=True,
+        )
+        .filterBounds(region)
+        .geometry()
+        .coordinates()
     )
+    flare_coords = ee.List(flare_coords)
 
     flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(50),
+        ee.Number(max_flare_diff).gt(50),  # threshold lowered
         1,
         0,
     )
 
-    # Build feature
+    # Return as dictionary
     result = ee.Dictionary(
         {
             "system_index": system_index,
-            "date": image.date().format("YYYY-MM-dd"),
             "lat": lat,
             "lon": lon,
             "cloud_fraction": cloud_fraction,
@@ -203,11 +168,10 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
             "max_flare_diff": max_flare_diff,
             "flare_present": flare_present,
             "flare_latlon": flare_coords,
-            "glint_alpha": image.get("glint_alpha"),
         }
     )
 
-    return ee.Feature(None, result)
+    return result
 
 
 def show_granule_viewer(
@@ -246,7 +210,7 @@ def show_granule_viewer(
         sid = sid_data[idx]["SID"]
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
         img = get_image(sid)
-        img = calculate_sunglint_alpha(img)
+
         img_flaring_data = evaluate_offshore_site(img, lat, lon).getInfo()
 
         vis_params_b11 = {"bands": ["B11"], "min": 0, "max": b11_b12_max[0]}
@@ -292,6 +256,8 @@ def show_granule_viewer(
         img = img.addBands(b_vis.rename("B_vis"))
         sgi = img.normalizedDifference(["B8A", "B_vis"])
         img = img.addBands(sgi.rename("SGI"))
+
+        img = calculate_sunglint_alpha(img)
         img = img.addBands(
             ee.Image.constant(ee.Number(img.get("glint_alpha"))).rename("SGA")
         )
