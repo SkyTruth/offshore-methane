@@ -93,6 +93,7 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     b8 = image.select("B8")  # NIR
     b11 = image.select("B11")  # SWIR1
     b12 = image.select("B12")  # SWIR2
+    b8a = image.select("B8A")  # Narrow NIR
 
     # --- Cloudiness (using S2 Cloud Probability dataset) ---
     system_index = image.get("system:index")
@@ -123,20 +124,22 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     )
 
     # --- Flaring Detection (max difference B12 - B11) ---
-    flare_diff = b12.subtract(b11).rename("flare_diff")
+    # flare_diff = b12.subtract(b11).rename("flare_diff")
+    delta_sw = b12.subtract(b11)
+    tai = delta_sw.divide(b8a).rename("TAI")
 
     # Get max value and pixel location
-    flare_reduce = flare_diff.reduceRegion(
+    flare_reduce = tai.reduceRegion(
         reducer=ee.Reducer.max(),
         geometry=region,
         scale=20,
         maxPixels=1e8,
         bestEffort=True,
     )
-    max_flare_diff = flare_reduce.get("flare_diff")
+    max_flare_diff = flare_reduce.get("TAI")
 
     # Get coordinates of max flare pixel
-    flare_mask = flare_diff.eq(ee.Number(max_flare_diff))
+    flare_mask = tai.eq(ee.Number(max_flare_diff))
     flare_coords = (
         flare_mask.reduceToVectors(
             scale=20,
@@ -151,7 +154,7 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     flare_coords = ee.List(flare_coords)
 
     flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(50),  # threshold lowered
+        ee.Number(max_flare_diff).gt(0.1),  # threshold lowered
         1,
         0,
     )
@@ -165,7 +168,7 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
             "cloud_fraction": cloud_fraction,
             "min_ndwi": min_ndwi,
             "structure_present": structure_present,
-            "max_flare_diff": max_flare_diff,
+            "max_TAI": max_flare_diff,
             "flare_present": flare_present,
             "flare_latlon": flare_coords,
         }
@@ -241,15 +244,10 @@ def show_granule_viewer(
         b8a = img.select("B8A")
         b11 = img.select("B11")
         b12 = img.select("B12")
-        flare_diff = b12.subtract(b11).rename("flare_diff")
         delta_sw = b12.subtract(b11)
         tai = delta_sw.divide(b8a)
-        flare_threshold = 1500
-        flare_mask = (
-            tai.gte(0.45)
-            .And(delta_sw.gte(b11.subtract(b8a)))
-            .And(b12.gte(flare_threshold))
-        )
+        # flare_threshold = 1500
+        flare_mask = tai.gte(0.1)
         flare_mask_layer = img.select("B12").updateMask(flare_mask)
 
         b_vis = img.select("B2").add(img.select("B3")).add(img.select("B4")).divide(3)
@@ -273,22 +271,7 @@ def show_granule_viewer(
         if img is not None:
             m.center = (lat, lon, zoom)
             m.addLayer(
-                flare_diff,
-                {
-                    "min": -1000,
-                    "max": 1000,
-                    "palette": [
-                        "000000",
-                        "0000FF",
-                        "00FFFF",
-                        "00FF00",
-                        "FFFF00",
-                        "FF0000",
-                        "FFFFFF",
-                    ],
-                },
-                "B12-B11 Difference",
-                False,
+                tai, {"min": 0, "max": 1, "palette": ["black", "white"]}, "TAI", False
             )
             m.addLayer(mbsp, vis_params_mbsp, "MBSP")
             m.addLayer(img.select("B12"), vis_params_b12, "B12")
@@ -328,7 +311,7 @@ def show_granule_viewer(
                 f"Cloud fraction: {round(img_flaring_data['cloud_fraction'], 3)}"
                 f" | Min NDWI: {round(img_flaring_data['min_ndwi'], 3)}"
                 f" | Structure present: {img_flaring_data['structure_present']}"
-                f" | Max B12-B11: {round(img_flaring_data['max_flare_diff'], 1)}"
+                f" | Max TAI: {round(img_flaring_data['max_TAI'], 1)}"
                 f" | Flaring present: {img_flaring_data['flare_present']}"
             )
         return mbsp
