@@ -13,7 +13,7 @@ PIXEL_CLOUD_PROB_MAX = (
     25  # Maximum cloud probability for a pixel to be considered clear
 )
 ROI_CLOUD_FRACTION_MAX = 25  # Maximum cloud fraction for the ROI to be considered clear
-ROI_RADIUS_M = 500  # Radius in meters for the region of interest around each centroid
+ROI_RADIUS_M = 200  # Radius in meters for the region of interest around each centroid
 start_date = "2015-06-27"  # Start date for Sentinel-2 data
 end_date = "2025-08-01"
 
@@ -26,7 +26,7 @@ end_date = "2025-08-01"
 
 
 table = ee.FeatureCollection(
-    "projects/benshostak-skytruth/assets/custom_flaring_data-Brazil"
+    "projects/benshostak-skytruth/assets/custom_flaring_data-4"
 )
 points = table
 print("points:", points.size().getInfo())
@@ -37,36 +37,36 @@ print("points:", points.size().getInfo())
 # ----------------------------------------------------------------------------
 
 
-# function to filter out rows where flaring only occured prior to s2 imagery
-def filter_recent_flaring(fc):
-    bcm_fields = [
-        "bcm_2016",
-        "bcm_2017",
-        "bcm_2018",
-        "bcm_2019",
-        "bcm_2020",
-        "bcm_2021",
-        "bcm_2022",
-        "bcm_2023",
-    ]
+# # function to filter out rows where flaring only occured prior to s2 imagery
+# def filter_recent_flaring(fc):
+#     bcm_fields = [
+#         "bcm_2016",
+#         "bcm_2017",
+#         "bcm_2018",
+#         "bcm_2019",
+#         "bcm_2020",
+#         "bcm_2021",
+#         "bcm_2022",
+#         "bcm_2023",
+#     ]
 
-    # Start with first field
-    combined_filter = ee.Filter.gt(bcm_fields[0], 0)
+#     # Start with first field
+#     combined_filter = ee.Filter.gt(bcm_fields[0], 0)
 
-    # Combine the rest using ee.Filter.or
-    for field in bcm_fields[1:]:
-        combined_filter = ee.Filter.Or(combined_filter, ee.Filter.gt(field, 0))
+#     # Combine the rest using ee.Filter.or
+#     for field in bcm_fields[1:]:
+#         combined_filter = ee.Filter.Or(combined_filter, ee.Filter.gt(field, 0))
 
-    # Apply filter to FeatureCollection
-    return fc.filter(combined_filter)
+#     # Apply filter to FeatureCollection
+#     return fc.filter(combined_filter)
 
 
-points_filtered = filter_recent_flaring(table)
-print("points 2016 - 2023:", points_filtered.size().getInfo())
+# points_filtered = filter_recent_flaring(table)
+# print("points 2016 - 2023:", points_filtered.size().getInfo())
 
 
 # PROCESS CENTROIDS: remove duplicate infrastructure from flaring data
-buffered100 = points_filtered.map(lambda f: f.buffer(100))
+buffered100 = points.map(lambda f: f.buffer(100))
 dissolved = buffered100.union()
 dissolvedPolys = ee.FeatureCollection(
     ee.Geometry(dissolved.geometry())
@@ -99,82 +99,202 @@ joined = s2Sr.linkCollection(s2Cloud, ["probability"])
 
 
 # SCENE EVALUATION FUNCTION
-def evaluateScene(img, geom):
-    geom = ee.Geometry(geom)
+# def evaluateScene(img, geom):
+#     geom = ee.Geometry(geom)
 
-    maxB12 = (
-        img.select("B12")
-        .reduceRegion(reducer=ee.Reducer.max(), geometry=geom, scale=20, maxPixels=1e9)
-        .get("B12")
+#     maxB12 = (
+#         img.select("B12")
+#         .reduceRegion(reducer=ee.Reducer.max(), geometry=geom, scale=20, maxPixels=1e9)
+#         .get("B12")
+#     )
+#     maxB12 = ee.Number(ee.Algorithms.If(maxB12, maxB12, 0))  # default to 0 if no data
+#     isFlare = maxB12.gte(NIR_THRESHOLD_DN)
+
+#     cloudFrac = (
+#         img.select("probability")
+#         .reduceRegion(reducer=ee.Reducer.mean(), geometry=geom, scale=20, maxPixels=1e9)
+#         .get("probability")
+#     )
+#     cloudFrac = ee.Number(ee.Algorithms.If(cloudFrac, cloudFrac, 100))
+#     isClear = cloudFrac.lte(ROI_CLOUD_FRACTION_MAX)
+#     isVenting = isClear.And(
+#         isFlare.Not()
+#     )  # venting = no flaring and low cloud fraction
+
+#     ## EVENT_TYPE LOGIC
+#     event_type = ee.Algorithms.If(
+#         isFlare,
+#         "flaring",
+#         ee.Algorithms.If(
+#             isClear.Not(),
+#             "cloudy",
+#             ee.Algorithms.If(isVenting, "possible_venting", "none"),
+#         ),
+#     )  # helps deal with over saturated pixels in B12 that are not flaring, otherwise would result in multiple classifications
+#     # now all mutually exclusive
+#     ##---------------------------------------------------------##
+
+#     return ee.Feature(geom.centroid()).set(
+#         {
+#             "date": ee.Date(img.get("system:time_start")).format("YYYY-MM-dd"),
+#             "system_index": img.get("system:index"),
+#             "event_type": event_type,
+#             # "is_flaring": isFlare,
+#             # "is_cloudy": isClear.Not(),
+#             # "is_venting": isVenting,
+#             # "maxB12": maxB12,
+#             # "cloudFrac": cloudFrac,
+#         }
+#     )
+
+
+def evaluateScene(image, region):
+    # Define point and buffer
+    point = region.centroid()
+    # region = point.buffer(buffer_m)
+
+    # Select relevant bands from S2
+    b3 = image.select("B3")  # Green
+    b8 = image.select("B8")  # NIR
+    b11 = image.select("B11")  # SWIR1
+    b12 = image.select("B12")  # SWIR2
+    b8a = image.select("B8A")  # Narrow NIR
+
+    # --- Cloudiness (using S2 Cloud Probability dataset) ---
+    system_index = image.get("system:index")
+
+    cloud_img = (
+        ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
+        .filter(ee.Filter.equals("system:index", system_index))
+        .first()
     )
-    maxB12 = ee.Number(ee.Algorithms.If(maxB12, maxB12, 0))  # default to 0 if no data
-    isFlare = maxB12.gte(NIR_THRESHOLD_DN)
 
-    cloudFrac = (
-        img.select("probability")
-        .reduceRegion(reducer=ee.Reducer.mean(), geometry=geom, scale=20, maxPixels=1e9)
-        .get("probability")
+    # Cloud probability band is "probability" (0–100)
+    cloud_prob = cloud_img.select("probability")
+    cloud_fraction = cloud_prob.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
+    ).get("probability")
+
+    # --- Structure Presence (via NDWI min) ---
+    ndwi = b3.subtract(b8).divide(b3.add(b8))
+    ndwi_stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
     )
-    cloudFrac = ee.Number(ee.Algorithms.If(cloudFrac, cloudFrac, 100))
-    isClear = cloudFrac.lte(ROI_CLOUD_FRACTION_MAX)
-    isVenting = isClear.And(
-        isFlare.Not()
-    )  # venting = no flaring and low cloud fraction
+    min_ndwi = ndwi_stats.get("B3")
 
-    ## EVENT_TYPE LOGIC
-    event_type = ee.Algorithms.If(
-        isFlare,
-        "flaring",
-        ee.Algorithms.If(
-            isClear.Not(),
-            "cloudy",
-            ee.Algorithms.If(isVenting, "possible_venting", "none"),
-        ),
-    )  # helps deal with over saturated pixels in B12 that are not flaring, otherwise would result in multiple classifications
-    # now all mutually exclusive
-    ##---------------------------------------------------------##
+    structure_present = ee.Algorithms.If(
+        ee.Number(min_ndwi).lt(0),
+        1,  # structure
+        0,  # only ocean
+    )
 
-    return ee.Feature(geom.centroid()).set(
+    # --- Flaring Detection (max difference B12 - B11) ---
+    # flare_diff = b12.subtract(b11).rename("flare_diff")
+    delta_sw = b12.subtract(b11)
+    tai = delta_sw.divide(b8a).rename("TAI")
+
+    # Get max value and pixel location
+    flare_reduce = tai.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=region,
+        scale=20,
+        maxPixels=1e8,
+        bestEffort=True,
+    )
+    max_flare_diff = flare_reduce.get("TAI")
+
+    # Get coordinates of max flare pixel
+    flare_mask = tai.eq(ee.Number(max_flare_diff))
+    flare_coords = (
+        flare_mask.reduceToVectors(
+            scale=20,
+            geometryType="centroid",
+            maxPixels=1e8,
+            bestEffort=True,
+        )
+        .filterBounds(region)
+        .geometry()
+        .coordinates()
+    )
+    flare_coords = ee.List(flare_coords)
+
+    flare_present = ee.Algorithms.If(
+        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
+        1,
+        0,
+    )
+
+    # Return as dictionary
+    result = ee.Feature(point).set(
         {
-            "date": ee.Date(img.get("system:time_start")).format("YYYY-MM-dd"),
-            "system_index": img.get("system:index"),
-            "event_type": event_type,
-            # "is_flaring": isFlare,
-            # "is_cloudy": isClear.Not(),
-            # "is_venting": isVenting,
-            # "maxB12": maxB12,
-            # "cloudFrac": cloudFrac,
+            "system_index": system_index,
+            "cloud_fraction": cloud_fraction,
+            "min_ndwi": min_ndwi,
+            "structure_present": structure_present,
+            "max_TAI": max_flare_diff,
+            "flare_present": flare_present,
+            "flare_latlon": flare_coords,
         }
     )
+
+    return result
 
 
 # ----------------------------------------------------------------------------
 
 
 # MAIN LOOP OVER CENTROIDS
+# def process_point(pt):
+#     roi = pt.geometry().buffer(ROI_RADIUS_M)
+#     coord = pt.geometry().coordinates()
+
+#     scene_eval = joined.filterBounds(roi).map(lambda img: evaluateScene(img, roi))
+
+#     scene_eval = scene_eval.filter(ee.Filter.neq("event_type", "none"))
+
+#     def make_feature(f):
+#         return ee.Feature(
+#             None,
+#             {
+#                 "lat": coord.get(1),
+#                 "lon": coord.get(0),
+#                 "start_date": f.get("date"),
+#                 "end_date": f.get("date"),
+#                 "event_type": f.get("event_type"),
+#                 "system_index": f.get("system_index"),
+#                 "note": ee.String(f.get("event_type")).cat(" event"),
+#             },
+#         )
+
+#     return scene_eval.map(make_feature)
+
+
+# Process point
 def process_point(pt):
     roi = pt.geometry().buffer(ROI_RADIUS_M)
-    coord = pt.geometry().coordinates()
+    # coord = pt.geometry().coordinates()
 
     scene_eval = joined.filterBounds(roi).map(lambda img: evaluateScene(img, roi))
 
-    scene_eval = scene_eval.filter(ee.Filter.neq("event_type", "none"))
+    return scene_eval
 
-    def make_feature(f):
-        return ee.Feature(
-            None,
-            {
-                "lat": coord.get(1),
-                "lon": coord.get(0),
-                "start_date": f.get("date"),
-                "end_date": f.get("date"),
-                "event_type": f.get("event_type"),
-                "system_index": f.get("system_index"),
-                "note": ee.String(f.get("event_type")).cat(" event"),
-            },
-        )
+    # scene_eval = scene_eval.filter(ee.Filter.neq("event_type", "none"))
 
-    return scene_eval.map(make_feature)
+    # def make_feature(f):
+    #     return ee.Feature(
+    #         None,
+    #         {
+    #             "system_index": system_index,
+    #             "cloud_fraction": cloud_fraction,
+    #             "min_ndwi": min_ndwi,
+    #             "structure_present": structure_present,
+    #             "max_TAI": max_flare_diff,
+    #             "flare_present": flare_present,
+    #             "flare_latlon": flare_coords,
+    #         },
+    #     )
+
+    # return scene_eval.map(make_feature)
 
 
 # Apply to all centroids and flatten result
@@ -189,7 +309,7 @@ results_fc = ee.FeatureCollection(results_list)
 # Export (optional)
 task = ee.batch.Export.table.toDrive(
     collection=results_fc,
-    description="S2_Flaring_Venting_Brazil_2015_2025_filtered",  # can change name here
+    description="GFW_Flaring_Venting_Brazil_2015_2025_filtered",  # can change name here
     fileFormat="CSV",
 )
 
