@@ -179,6 +179,105 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
     return result
 
 
+def evaluateScene(image, region):
+    # Define point and buffer
+    point = region.centroid()
+    # region = point.buffer(buffer_m)
+
+    # Select relevant bands from S2
+    b3 = image.select("B3")  # Green
+    b8 = image.select("B8")  # NIR
+    b11 = image.select("B11")  # SWIR1
+    b12 = image.select("B12")  # SWIR2
+    b8a = image.select("B8A")  # Narrow NIR
+
+    # --- Cloudiness (using S2 Cloud Probability dataset) ---
+    system_index = image.get("system:index")
+
+    cloud_img = (
+        ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
+        .filter(ee.Filter.equals("system:index", system_index))
+        .first()
+    )
+
+    # Cloud probability band is "probability" (0–100)
+    cloud_prob = cloud_img.select("probability")
+    cloud_fraction = cloud_prob.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
+    ).get("probability")
+
+    # --- Structure Presence (via NDWI min) ---
+    ndwi = b3.subtract(b8).divide(b3.add(b8))
+    ndwi_stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
+    )
+    min_ndwi = ndwi_stats.get("B3")
+
+    structure_present = ee.Algorithms.If(
+        ee.Number(min_ndwi).lt(0),
+        1,  # structure
+        0,  # only ocean
+    )
+
+    # --- Flaring Detection (max difference B12 - B11) ---
+    # flare_diff = b12.subtract(b11).rename("flare_diff")
+    delta_sw = b12.subtract(b11)
+    tai = delta_sw.divide(b8a).rename("TAI")
+
+    # Get max value and pixel location
+    flare_reduce = tai.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=region,
+        scale=20,
+        maxPixels=1e8,
+        bestEffort=True,
+    )
+    max_flare_diff = flare_reduce.get("TAI")
+
+    # Get coordinates of max flare pixel
+    flare_mask = tai.eq(ee.Number(max_flare_diff))
+    flare_coords = (
+        flare_mask.reduceToVectors(
+            scale=20,
+            geometryType="centroid",
+            maxPixels=1e8,
+            bestEffort=True,
+        )
+        .filterBounds(region)
+        .geometry()
+        .coordinates()
+    )
+    flare_coords = ee.List(flare_coords)
+
+    flare_present = ee.Algorithms.If(
+        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
+        1,
+        0,
+    )
+
+    # flare_present = ee.Number(0)
+
+    # Return as dictionary
+    result = ee.Feature(point).set(
+        {
+            "system_index": system_index,
+            "cloud_fraction": cloud_fraction,
+            "min_ndwi": min_ndwi,
+            "structure_present": structure_present,
+            "max_TAI": max_flare_diff,
+            "flare_present": flare_present,
+            "flare_latlon": flare_coords,
+        }
+    )
+
+    return result
+
+
+def get_image(sid):
+    col = ee.ImageCollection("COPERNICUS/S2")
+    return col.filter(ee.Filter.eq("system:index", sid)).first()
+
+
 def show_granule_viewer(
     sid_data,
     b11_b12_max=[1000, 750],
@@ -200,10 +299,6 @@ def show_granule_viewer(
         continuous_update=False,
     )
 
-    def get_image(sid):
-        col = ee.ImageCollection("COPERNICUS/S2")
-        return col.filter(ee.Filter.eq("system:index", sid)).first()
-
     def update_map(idx):
         for lyr_name in ["B11", "B12", "RGB", "MBSP", "Flaring"]:
             if lyr_name in m.ee_layers:
@@ -216,7 +311,9 @@ def show_granule_viewer(
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
         img = get_image(sid)
 
-        img_flaring_data = evaluate_offshore_site(img, lat, lon).getInfo()
+        # Use evaluateScene instead of evaluate_offshore_site
+        region = ee.Geometry.Point([lon, lat]).buffer(200)
+        img_flaring_data = evaluateScene(img, region).getInfo()
 
         vis_params_b11 = {"bands": ["B11"], "min": 0, "max": b11_b12_max[0]}
         vis_params_b12 = {"bands": ["B12"], "min": 0, "max": b12_max_slider.value}
@@ -248,7 +345,6 @@ def show_granule_viewer(
         b12 = img.select("B12")
         delta_sw = b12.subtract(b11)
         tai = delta_sw.divide(b8a)
-        # flare_threshold = 1500
         flare_mask = tai.gte(0.15)
         flare_mask_layer = img.select("B12").updateMask(flare_mask)
 
@@ -292,8 +388,8 @@ def show_granule_viewer(
                 False,
             )
 
-            if img_flaring_data["flare_present"]:
-                flare_coords = img_flaring_data["flare_latlon"]
+            if img_flaring_data["properties"]["flare_present"]:
+                flare_coords = img_flaring_data["properties"]["flare_latlon"]
                 coords = ee.List(flare_coords).getInfo()
                 m.addLayer(
                     ee.Geometry.MultiPoint(coords),
@@ -309,12 +405,13 @@ def show_granule_viewer(
                 f"c: {round(mbsp.get('C_factor').getInfo(), 3)} "
                 f"glint_alpha: {round(img.get('glint_alpha').getInfo(), 3)})"
             )
+            props = img_flaring_data["properties"]
             print(
-                f"Cloud fraction: {round(img_flaring_data['cloud_fraction'], 3)}"
-                f" | Min NDWI: {round(img_flaring_data['min_ndwi'], 3)}"
-                f" | Structure present: {img_flaring_data['structure_present']}"
-                f" | Max TAI: {round(img_flaring_data['max_TAI'], 1)}"
-                f" | Flaring present: {img_flaring_data['flare_present']}"
+                f"Cloud fraction: {round(props['cloud_fraction'], 3)}"
+                f" | Min NDWI: {round(props['min_ndwi'], 3)}"
+                f" | Structure present: {props['structure_present']}"
+                f" | Max TAI: {round(props['max_TAI'], 1)}"
+                f" | Flaring present: {props['flare_present']}"
             )
         return mbsp
 
@@ -365,9 +462,20 @@ sid_data = [
         "lat": 7.592794,
     },
 ]
-# %%
-# b11 = 3000
 
+
+sid_data = [
+    {
+        "SID": "20241228T033049_20241228T034259_T47NRJ",
+        "lon": 102.986983,
+        "lat": 7.592794,
+    }
+]
+# %%
+b11 = 3000
+sid = "20230607T130251_20230607T130249_T23JQM"
+lon = 102.61423806737008
+lat = 7.494175116033479
 # mbsp = show_granule_viewer(
 #     sid_data,
 #     b11_b12_max=[b11, b11],
