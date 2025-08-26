@@ -362,10 +362,6 @@ def show_granule_viewer(
         mask_mbsp = ee.Image(ee.Number(1))
         mbsp = ee.Image(mbsp_simple_ee(img, mask_c, mask_mbsp))
 
-        if extra_gdf is not None:
-            ee_gdf = geemap.gdf_to_ee(extra_gdf)
-            m.addLayer(ee_gdf, {}, "Extra GDF", False)
-
         if img is not None:
             m.center = (lat, lon, zoom)
             m.addLayer(
@@ -397,6 +393,9 @@ def show_granule_viewer(
                     "Detected Flare",
                     True,
                 )
+            if extra_gdf is not None:
+                ee_gdf = geemap.gdf_to_ee(extra_gdf)
+                m.addLayer(ee_gdf, {}, "Extra GDF", False)
 
         with out:
             out.clear_output()
