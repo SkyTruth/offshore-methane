@@ -2,6 +2,12 @@
 import ee
 import time
 
+
+# Load first CSV
+import pandas as pd  # noqa
+import geopandas as gpd  # noqa
+from shapely.geometry import Point
+
 # Authenticate and initialize
 ee.Authenticate()
 ee.Initialize()
@@ -14,8 +20,116 @@ PIXEL_CLOUD_PROB_MAX = (
 )
 ROI_CLOUD_FRACTION_MAX = 25  # Maximum cloud fraction for the ROI to be considered clear
 ROI_RADIUS_M = 200  # Radius in meters for the region of interest around each centroid
-start_date = "2015-06-27"  # Start date for Sentinel-2 data
+# start_date = "2016-06-27"  # Start date for Sentinel-2 data
+start_date = "2025-07-01"
 end_date = "2025-08-01"
+
+
+def evaluateScene(image, region):
+    # Define point and buffer
+    point = region.centroid()
+    # region = point.buffer(buffer_m)
+
+    # Select relevant bands from S2
+    b3 = image.select("B3")  # Green
+    b8 = image.select("B8")  # NIR
+    b11 = image.select("B11")  # SWIR1
+    b12 = image.select("B12")  # SWIR2
+    b8a = image.select("B8A")  # Narrow NIR
+
+    # --- Cloudiness (using S2 Cloud Probability dataset) ---
+    system_index = image.get("system:index")
+
+    cloud_fraction = (
+        image.select("probability")
+        .reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e9
+        )
+        .get("probability")
+    )
+    cloud_fraction = ee.Number(ee.Algorithms.If(cloud_fraction, cloud_fraction, 100))
+
+    # --- Structure Presence (via NDWI min) ---
+    ndwi = b3.subtract(b8).divide(b3.add(b8))
+    ndwi_stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
+    )
+    min_ndwi = ndwi_stats.get("B3")
+    min_ndwi = ee.Algorithms.If(min_ndwi, min_ndwi, 9999)  # default to 1 if no data
+    structure_present = ee.Algorithms.If(
+        ee.Number(min_ndwi).lt(0),
+        1,  # structure
+        0,  # only ocean
+    )
+
+    # --- Flaring Detection (max difference B12 - B11) ---
+    # flare_diff = b12.subtract(b11).rename("flare_diff")
+    delta_sw = b12.subtract(b11)
+    tai = delta_sw.divide(b8a).rename("TAI")
+
+    # Get max value and pixel location
+    flare_reduce = tai.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=region,
+        scale=20,
+        maxPixels=1e8,
+        bestEffort=True,
+    )
+    max_flare_diff = flare_reduce.get("TAI")
+    max_flare_diff = ee.Algorithms.If(
+        max_flare_diff, max_flare_diff, -9999
+    )  # default to 0
+
+    # Get coordinates of max flare pixel
+    flare_mask = tai.eq(ee.Number(max_flare_diff))
+    flare_coords = (
+        flare_mask.reduceToVectors(
+            scale=20,
+            geometryType="centroid",
+            maxPixels=1e8,
+            bestEffort=True,
+        )
+        .filterBounds(region)
+        .geometry()
+        .coordinates()
+    )
+    flare_coords = ee.List(flare_coords)
+    flare_present = ee.Algorithms.If(
+        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
+        1,
+        0,
+    )
+
+    # Return as dictionary
+    result = ee.Feature(point).set(
+        {
+            "system_index": system_index,
+            "cloud_fraction": cloud_fraction,
+            "min_ndwi": min_ndwi,
+            "structure_present": structure_present,
+            "max_TAI": max_flare_diff,
+            "flare_present": flare_present,
+            "flare_latlon": flare_coords,
+        }
+    )
+
+    return result
+
+
+# ----------------------------------------------------------------------------
+
+
+# Process point
+def process_point(pt):
+    roi = pt.geometry().buffer(ROI_RADIUS_M)
+    # coord = pt.geometry().coordinates()
+
+    scene_eval = joined.filterBounds(roi).map(lambda img: evaluateScene(img, roi))
+
+    return scene_eval
+
+
+# %%
 
 # ----------------------------------------------------------------------------
 # tip and queue to more likely scenes. Prioritzation of site opportunities.
@@ -66,260 +180,75 @@ print("points:", points.size().getInfo())
 
 
 # PROCESS CENTROIDS: remove duplicate infrastructure from flaring data
-buffered100 = points.map(lambda f: f.buffer(100))
-dissolved = buffered100.union()
-dissolvedPolys = ee.FeatureCollection(
-    ee.Geometry(dissolved.geometry())
-    .geometries()
-    .map(lambda g: ee.Feature(ee.Geometry(g)))
+# buffered100 = points.map(lambda f: f.buffer(100))
+# dissolved = buffered100.union()
+# dissolvedPolys = ee.FeatureCollection(
+#     ee.Geometry(dissolved.geometry())
+#     .geometries()
+#     .map(lambda g: ee.Feature(ee.Geometry(g)))
+# )
+# print("dissolvedPolys:", dissolvedPolys.size().getInfo())
+
+# centroidsAll = dissolvedPolys.map(lambda f: ee.Feature(f.geometry().centroid(1)))
+# print("centroidsAll:", centroidsAll.size().getInfo())
+
+# %%
+gfw_df = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\brazil_gfw_reviewed.csv")
+gfw_gdf = gpd.GeoDataFrame(
+    gfw_df,
+    geometry=gfw_df.apply(lambda row: Point(row["lon"], row["lat"]), axis=1),
+    crs="EPSG:4326",
 )
-print("dissolvedPolys:", dissolvedPolys.size().getInfo())
+gfw_gdf = gfw_gdf[gfw_gdf["note"].isin(["small", "infra"])]
+# gfw_gdf = gfw_gdf.iloc[[0]]
+features = []
+for _, row in gfw_gdf.iterrows():
+    geom = row.geometry
+    if geom.geom_type == "Point":
+        ee_geom = ee.Geometry.Point([geom.x, geom.y])
+        # Keep all non-geometry columns as properties
+        props = row.drop("geometry").to_dict()
+        features.append(ee.Feature(ee_geom, props))
 
-centroidsAll = dissolvedPolys.map(lambda f: ee.Feature(f.geometry().centroid(1)))
-print("centroidsAll:", centroidsAll.size().getInfo())
+# Create FeatureCollection
+centroidsAll = ee.FeatureCollection(features)
+# %%
+# years = list(range(2015, 2026))
+years = [2025]
+for year in years:
+    start_date = f"{year}-01-01"
+    end_date = f"{year + 1}-01-01"
+    s2Sr = (
+        ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+        .filterDate(start_date, end_date)
+        .filterBounds(centroidsAll)
+    )
 
-# ----------------------------------------------------------------------------
-
-# SENTINEL‑2 IMAGE COLLECTION + CLOUD‑PROBABILITY JOIN
-s2Sr = (
-    ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-    .filterDate(start_date, end_date)
-    .filterBounds(centroidsAll)
-)
-
-s2Cloud = (
-    ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
-    .filterDate(start_date, end_date)
-    .filterBounds(centroidsAll)
-)
-
-joined = s2Sr.linkCollection(s2Cloud, ["probability"])
-
-# ----------------------------------------------------------------------------
-
-
-# SCENE EVALUATION FUNCTION
-# def evaluateScene(img, geom):
-#     geom = ee.Geometry(geom)
-
-#     maxB12 = (
-#         img.select("B12")
-#         .reduceRegion(reducer=ee.Reducer.max(), geometry=geom, scale=20, maxPixels=1e9)
-#         .get("B12")
-#     )
-#     maxB12 = ee.Number(ee.Algorithms.If(maxB12, maxB12, 0))  # default to 0 if no data
-#     isFlare = maxB12.gte(NIR_THRESHOLD_DN)
-
-#     cloudFrac = (
-#         img.select("probability")
-#         .reduceRegion(reducer=ee.Reducer.mean(), geometry=geom, scale=20, maxPixels=1e9)
-#         .get("probability")
-#     )
-#     cloudFrac = ee.Number(ee.Algorithms.If(cloudFrac, cloudFrac, 100))
-#     isClear = cloudFrac.lte(ROI_CLOUD_FRACTION_MAX)
-#     isVenting = isClear.And(
-#         isFlare.Not()
-#     )  # venting = no flaring and low cloud fraction
-
-#     ## EVENT_TYPE LOGIC
-#     event_type = ee.Algorithms.If(
-#         isFlare,
-#         "flaring",
-#         ee.Algorithms.If(
-#             isClear.Not(),
-#             "cloudy",
-#             ee.Algorithms.If(isVenting, "possible_venting", "none"),
-#         ),
-#     )  # helps deal with over saturated pixels in B12 that are not flaring, otherwise would result in multiple classifications
-#     # now all mutually exclusive
-#     ##---------------------------------------------------------##
-
-#     return ee.Feature(geom.centroid()).set(
-#         {
-#             "date": ee.Date(img.get("system:time_start")).format("YYYY-MM-dd"),
-#             "system_index": img.get("system:index"),
-#             "event_type": event_type,
-#             # "is_flaring": isFlare,
-#             # "is_cloudy": isClear.Not(),
-#             # "is_venting": isVenting,
-#             # "maxB12": maxB12,
-#             # "cloudFrac": cloudFrac,
-#         }
-#     )
-
-
-def evaluateScene(image, region):
-    # Define point and buffer
-    point = region.centroid()
-    # region = point.buffer(buffer_m)
-
-    # Select relevant bands from S2
-    b3 = image.select("B3")  # Green
-    b8 = image.select("B8")  # NIR
-    b11 = image.select("B11")  # SWIR1
-    b12 = image.select("B12")  # SWIR2
-    b8a = image.select("B8A")  # Narrow NIR
-
-    # --- Cloudiness (using S2 Cloud Probability dataset) ---
-    system_index = image.get("system:index")
-
-    cloud_img = (
+    s2Cloud = (
         ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
-        .filter(ee.Filter.equals("system:index", system_index))
-        .first()
+        .filterDate(start_date, end_date)
+        .filterBounds(centroidsAll)
     )
 
-    # Cloud probability band is "probability" (0–100)
-    cloud_prob = cloud_img.select("probability")
-    cloud_fraction = cloud_prob.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
-    ).get("probability")
+    joined = s2Sr.linkCollection(s2Cloud, ["probability"])
 
-    # --- Structure Presence (via NDWI min) ---
-    ndwi = b3.subtract(b8).divide(b3.add(b8))
-    ndwi_stats = ndwi.reduceRegion(
-        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
-    )
-    min_ndwi = ndwi_stats.get("B3")
-
-    structure_present = ee.Algorithms.If(
-        ee.Number(min_ndwi).lt(0),
-        1,  # structure
-        0,  # only ocean
+    results_list = centroidsAll.map(process_point).flatten()
+    results_fc = ee.FeatureCollection(results_list)
+    task = ee.batch.Export.table.toDrive(
+        collection=results_fc,
+        description=f"GFW_Brazil_Flaring_Evaluation_{year}",  # can change name here
+        fileFormat="CSV",
     )
 
-    # --- Flaring Detection (max difference B12 - B11) ---
-    # flare_diff = b12.subtract(b11).rename("flare_diff")
-    delta_sw = b12.subtract(b11)
-    tai = delta_sw.divide(b8a).rename("TAI")
+    task.start()
 
-    # Get max value and pixel location
-    flare_reduce = tai.reduceRegion(
-        reducer=ee.Reducer.max(),
-        geometry=region,
-        scale=20,
-        maxPixels=1e8,
-        bestEffort=True,
-    )
-    max_flare_diff = flare_reduce.get("TAI")
+    print("Exporting for year", year, "to Google Drive...")
 
-    # Get coordinates of max flare pixel
-    flare_mask = tai.eq(ee.Number(max_flare_diff))
-    flare_coords = (
-        flare_mask.reduceToVectors(
-            scale=20,
-            geometryType="centroid",
-            maxPixels=1e8,
-            bestEffort=True,
-        )
-        .filterBounds(region)
-        .geometry()
-        .coordinates()
-    )
-    flare_coords = ee.List(flare_coords)
+    # while task.active():
+    #     print("Waiting for export... (status: {})".format(task.status()["state"]))
+    #     time.sleep(30)
 
-    flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
-        1,
-        0,
-    )
-
-    # Return as dictionary
-    result = ee.Feature(point).set(
-        {
-            "system_index": system_index,
-            "cloud_fraction": cloud_fraction,
-            "min_ndwi": min_ndwi,
-            "structure_present": structure_present,
-            "max_TAI": max_flare_diff,
-            "flare_present": flare_present,
-            "flare_latlon": flare_coords,
-        }
-    )
-
-    return result
-
-
-# ----------------------------------------------------------------------------
-
-
-# MAIN LOOP OVER CENTROIDS
-# def process_point(pt):
-#     roi = pt.geometry().buffer(ROI_RADIUS_M)
-#     coord = pt.geometry().coordinates()
-
-#     scene_eval = joined.filterBounds(roi).map(lambda img: evaluateScene(img, roi))
-
-#     scene_eval = scene_eval.filter(ee.Filter.neq("event_type", "none"))
-
-#     def make_feature(f):
-#         return ee.Feature(
-#             None,
-#             {
-#                 "lat": coord.get(1),
-#                 "lon": coord.get(0),
-#                 "start_date": f.get("date"),
-#                 "end_date": f.get("date"),
-#                 "event_type": f.get("event_type"),
-#                 "system_index": f.get("system_index"),
-#                 "note": ee.String(f.get("event_type")).cat(" event"),
-#             },
-#         )
-
-#     return scene_eval.map(make_feature)
-
-
-# Process point
-def process_point(pt):
-    roi = pt.geometry().buffer(ROI_RADIUS_M)
-    # coord = pt.geometry().coordinates()
-
-    scene_eval = joined.filterBounds(roi).map(lambda img: evaluateScene(img, roi))
-
-    return scene_eval
-
-    # scene_eval = scene_eval.filter(ee.Filter.neq("event_type", "none"))
-
-    # def make_feature(f):
-    #     return ee.Feature(
-    #         None,
-    #         {
-    #             "system_index": system_index,
-    #             "cloud_fraction": cloud_fraction,
-    #             "min_ndwi": min_ndwi,
-    #             "structure_present": structure_present,
-    #             "max_TAI": max_flare_diff,
-    #             "flare_present": flare_present,
-    #             "flare_latlon": flare_coords,
-    #         },
-    #     )
-
-    # return scene_eval.map(make_feature)
-
-
-# Apply to all centroids and flatten result
-results_list = centroidsAll.map(process_point).flatten()
-
-# Final results FeatureCollection
-results_fc = ee.FeatureCollection(results_list)
-# print(results_fc.limit(10))
-
-# ----------------------------------------------------------------------------
-
-# Export (optional)
-task = ee.batch.Export.table.toDrive(
-    collection=results_fc,
-    description="GFW_Flaring_Venting_Brazil_2015_2025_filtered",  # can change name here
-    fileFormat="CSV",
-)
-
-task.start()
-
-while task.active():
-    print("Waiting for export... (status: {})".format(task.status()["state"]))
-    time.sleep(30)
-
-print("Done. Final status:", task.status())
+    # print("Done. Final status:", task.status())
 
 # add downloaded CSV from Google Drive to data folder
 
