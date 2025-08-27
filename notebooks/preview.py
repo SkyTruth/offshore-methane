@@ -412,11 +412,18 @@ def show_granule_viewer(
                 f" | Max TAI: {round(props['max_TAI'], 1)}"
                 f" | Flaring present: {props['flare_present']}"
             )
+<<<<<<< Updated upstream
         return mbsp
+=======
+>>>>>>> Stashed changes
 
     # --- navigation buttons ---
     next_btn = widgets.Button(description="Next Granule")
     prev_btn = widgets.Button(description="Previous Granule")
+<<<<<<< Updated upstream
+=======
+    update_btn = widgets.Button(description="Refresh")
+>>>>>>> Stashed changes
 
     def on_next(b):
         nonlocal index
@@ -430,9 +437,16 @@ def show_granule_viewer(
 
     next_btn.on_click(on_next)
     prev_btn.on_click(on_prev)
+<<<<<<< Updated upstream
     b12_max_slider.observe(lambda change: update_map(index), names="value")
 
     mbsp = update_map(index)
+=======
+    update_btn.on_click(update_map)
+    # b12_max_slider.observe(lambda change: update_map(index), names="value")
+
+    update_map(index)
+>>>>>>> Stashed changes
     controls = widgets.HBox([prev_btn, next_btn, b12_max_slider])
     display(controls, out, m)
     # return mbsp
