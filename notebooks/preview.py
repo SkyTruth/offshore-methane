@@ -412,18 +412,11 @@ def show_granule_viewer(
                 f" | Max TAI: {round(props['max_TAI'], 1)}"
                 f" | Flaring present: {props['flare_present']}"
             )
-<<<<<<< Updated upstream
-        return mbsp
-=======
->>>>>>> Stashed changes
 
     # --- navigation buttons ---
     next_btn = widgets.Button(description="Next Granule")
     prev_btn = widgets.Button(description="Previous Granule")
-<<<<<<< Updated upstream
-=======
     update_btn = widgets.Button(description="Refresh")
->>>>>>> Stashed changes
 
     def on_next(b):
         nonlocal index
@@ -435,19 +428,17 @@ def show_granule_viewer(
         index = (index - 1) % len(sid_data)
         update_map(index)
 
+    def on_refresh(b):
+        nonlocal index
+        update_map(index)
+
     next_btn.on_click(on_next)
     prev_btn.on_click(on_prev)
-<<<<<<< Updated upstream
-    b12_max_slider.observe(lambda change: update_map(index), names="value")
-
-    mbsp = update_map(index)
-=======
-    update_btn.on_click(update_map)
+    update_btn.on_click(on_refresh)
     # b12_max_slider.observe(lambda change: update_map(index), names="value")
 
     update_map(index)
->>>>>>> Stashed changes
-    controls = widgets.HBox([prev_btn, next_btn, b12_max_slider])
+    controls = widgets.HBox([prev_btn, next_btn, b12_max_slider, update_btn])
     display(controls, out, m)
     # return mbsp
 
@@ -477,23 +468,23 @@ sid_data = [
 ]
 
 
-sid_data = [
-    {
-        "SID": "20241228T033049_20241228T034259_T47NRJ",
-        "lon": 102.986983,
-        "lat": 7.592794,
-    }
-]
+# sid_data = [
+#     {
+#         "SID": "20241228T033049_20241228T034259_T47NRJ",
+#         "lon": 102.986983,
+#         "lat": 7.592794,
+#     }
+# ]
 # %%
 b11 = 3000
 sid = "20230607T130251_20230607T130249_T23JQM"
 lon = 102.61423806737008
 lat = 7.494175116033479
-# mbsp = show_granule_viewer(
-#     sid_data,
-#     b11_b12_max=[b11, b11],
-#     zoom=16,
-#     mbsp_min_max=[-0.1, 0.1],
-# )
+mbsp = show_granule_viewer(
+    sid_data,
+    b11_b12_max=[b11, b11],
+    zoom=16,
+    mbsp_min_max=[-0.1, 0.1],
+)
 
 # %%
