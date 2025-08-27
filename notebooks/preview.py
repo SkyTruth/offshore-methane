@@ -480,11 +480,11 @@ b11 = 3000
 sid = "20230607T130251_20230607T130249_T23JQM"
 lon = 102.61423806737008
 lat = 7.494175116033479
-mbsp = show_granule_viewer(
-    sid_data,
-    b11_b12_max=[b11, b11],
-    zoom=16,
-    mbsp_min_max=[-0.1, 0.1],
-)
+# mbsp = show_granule_viewer(
+#     sid_data,
+#     b11_b12_max=[b11, b11],
+#     zoom=16,
+#     mbsp_min_max=[-0.1, 0.1],
+# )
 
 # %%
