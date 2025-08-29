@@ -193,28 +193,55 @@ print("points:", points.size().getInfo())
 # print("centroidsAll:", centroidsAll.size().getInfo())
 
 # %%
-gfw_df = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\brazil_gfw_reviewed.csv")
-gfw_gdf = gpd.GeoDataFrame(
-    gfw_df,
-    geometry=gfw_df.apply(lambda row: Point(row["lon"], row["lat"]), axis=1),
-    crs="EPSG:4326",
-)
-gfw_gdf = gfw_gdf[gfw_gdf["note"].isin(["small", "infra"])]
-# gfw_gdf = gfw_gdf.iloc[[0]]
-features = []
-for _, row in gfw_gdf.iterrows():
-    geom = row.geometry
-    if geom.geom_type == "Point":
-        ee_geom = ee.Geometry.Point([geom.x, geom.y])
-        # Keep all non-geometry columns as properties
-        props = row.drop("geometry").to_dict()
-        features.append(ee.Feature(ee_geom, props))
+# gfw_df = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\brazil_gfw_reviewed.csv")
+# gfw_gdf = gpd.GeoDataFrame(
+#     gfw_df,
+#     geometry=gfw_df.apply(lambda row: Point(row["lon"], row["lat"]), axis=1),
+#     crs="EPSG:4326",
+# )
+# gfw_gdf = gfw_gdf[gfw_gdf["note"].isin(["small", "infra"])]
+# # gfw_gdf = gfw_gdf.iloc[[0]]
+# features = []
+# for _, row in gfw_gdf.iterrows():
+#     geom = row.geometry
+#     if geom.geom_type == "Point":
+#         ee_geom = ee.Geometry.Point([geom.x, geom.y])
+#         # Keep all non-geometry columns as properties
+#         props = row.drop("geometry").to_dict()
+#         features.append(ee.Feature(ee_geom, props))
 
 # Create FeatureCollection
+# centroidsAll = ee.FeatureCollection(features)
+
+sid_data = [
+    {
+        "SID": "20170705T164319_20170705T165225_T15RXL",
+        "lon": -90.968,
+        "lat": 27.292,
+    },
+    {
+        "SID": "20230716T162841_20230716T164533_T15QWB",
+        "lon": -92.2361,
+        "lat": 19.56586,
+    },
+    {
+        "SID": "20220707T032531_20220707T033631_T48NTP",
+        "lon": 102.986983,
+        "lat": 7.592794,
+    },
+]
+
+# Convert list of dicts into ee.Feature objects
+features = [
+    ee.Feature(ee.Geometry.Point(d["lon"], d["lat"]), {"SID": d["SID"]})
+    for d in sid_data
+]
+
+# Make a FeatureCollection
 centroidsAll = ee.FeatureCollection(features)
 # %%
-# years = list(range(2015, 2026))
-years = [2025]
+years = list(range(2015, 2026))
+# years = [2025]
 for year in years:
     start_date = f"{year}-01-01"
     end_date = f"{year + 1}-01-01"
@@ -236,7 +263,7 @@ for year in years:
     results_fc = ee.FeatureCollection(results_list)
     task = ee.batch.Export.table.toDrive(
         collection=results_fc,
-        description=f"GFW_Brazil_Flaring_Evaluation_{year}",  # can change name here
+        description=f"Plumes_Flaring_Evaluation_{year}",  # can change name here
         fileFormat="CSV",
     )
 
