@@ -10,6 +10,7 @@ from IPython.display import display
 import sys
 import os
 import math
+from tqdm import tqdm
 
 
 mbsp_path = os.path.join(
@@ -23,6 +24,58 @@ from masking import build_mask_for_C, build_mask_for_MBSP
 
 ee.Authenticate()
 ee.Initialize()
+
+
+def add_glint_alpha(sid_data, collection="COPERNICUS/S2_HARMONIZED"):
+    """
+    Adds glint_alpha metadata to each SID in sid_data.
+
+    Parameters
+    ----------
+    sid_data : list of dict
+        Each dict must have a "SID" key.
+    collection : str
+        Earth Engine collection (default: Sentinel-2 SR harmonized).
+
+    Returns
+    -------
+    list of dict
+        Original sid_data with an extra "glint_alpha" field for each entry.
+    """
+    out = []
+    for item in tqdm(sid_data):
+        sid = item["SID"]
+
+        # Load the image
+        img = (
+            ee.ImageCollection(collection)
+            .filter(ee.Filter.eq("system:index", sid))
+            .first()
+        )
+        if img is None:
+            item["glint_alpha"] = None
+            out.append(item)
+            continue
+
+        # Compute glint_alpha
+        img = calculate_sunglint_alpha(img)
+        try:
+            alpha = img.get("glint_alpha").getInfo()
+
+            # Store result
+            item = item.copy()
+            item["glint_alpha"] = alpha
+        except:
+            item = item.copy()
+            item["glint_alpha"] = None
+        out.append(item)
+
+    # Sort by glint_alpha (ignoring Nones)
+    out_sorted = sorted(
+        out,
+        key=lambda d: float("inf") if d["glint_alpha"] is None else d["glint_alpha"],
+    )
+    return out_sorted
 
 
 def mbsp_decay(x: float) -> float:
@@ -278,14 +331,22 @@ def get_image(sid):
     return col.filter(ee.Filter.eq("system:index", sid)).first()
 
 
+class ViewerState:
+    def __init__(self):
+        self.sid = None  # will store currently displayed SID
+
+
 def show_granule_viewer(
     sid_data,
     b11_b12_max=[1000, 750],
     zoom=12,
     mbsp_min_max=[-0.2, 0.2],
     extra_gdf=None,
+    starting_idx=0,
 ):
-    index = 0
+    index = starting_idx
+    state = ViewerState()
+
     m = geemap.Map(center=(sid_data[0]["lat"], sid_data[0]["lon"]), zoom=zoom)
     out = widgets.Output()
 
@@ -300,6 +361,7 @@ def show_granule_viewer(
     )
 
     def update_map(idx):
+        # --- remove old layers ---
         for lyr_name in ["B11", "B12", "RGB", "MBSP", "Flaring"]:
             if lyr_name in m.ee_layers:
                 try:
@@ -307,9 +369,10 @@ def show_granule_viewer(
                 except Exception:
                     pass
 
-        sid = sid_data[idx]["SID"]
+        # update current SID in state
+        state.sid = sid_data[idx]["SID"]
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
-        img = get_image(sid)
+        img = get_image(state.sid)
 
         # Use evaluateScene instead of evaluate_offshore_site
         region = ee.Geometry.Point([lon, lat]).buffer(200)
@@ -323,7 +386,6 @@ def show_granule_viewer(
             "max": 3000,
             "gamma": [1.4, 1.4, 1.4],
         }
-
         vis_params_mbsp = {
             "bands": ["MBSP"],
             "min": mbsp_min_max[0],
@@ -400,7 +462,7 @@ def show_granule_viewer(
         with out:
             out.clear_output()
             print(
-                f"Showing {sid} ({idx + 1}/{len(sid_data)} "
+                f"Showing {state.sid} ({idx + 1}/{len(sid_data)} "
                 f"c: {round(mbsp.get('C_factor').getInfo(), 3)} "
                 f"glint_alpha: {round(img.get('glint_alpha').getInfo(), 3)})"
             )
@@ -435,12 +497,12 @@ def show_granule_viewer(
     next_btn.on_click(on_next)
     prev_btn.on_click(on_prev)
     update_btn.on_click(on_refresh)
-    # b12_max_slider.observe(lambda change: update_map(index), names="value")
 
     update_map(index)
     controls = widgets.HBox([prev_btn, next_btn, b12_max_slider, update_btn])
     display(controls, out, m)
-    # return mbsp
+
+    return state
 
 
 # mbsp = show_granule_viewer(sid_data)
@@ -480,7 +542,7 @@ b11 = 3000
 sid = "20230607T130251_20230607T130249_T23JQM"
 lon = 102.61423806737008
 lat = 7.494175116033479
-# mbsp = show_granule_viewer(
+# state = show_granule_viewer(
 #     sid_data,
 #     b11_b12_max=[b11, b11],
 #     zoom=16,
