@@ -210,32 +210,26 @@ print("points:", points.size().getInfo())
 #         props = row.drop("geometry").to_dict()
 #         features.append(ee.Feature(ee_geom, props))
 
-# Create FeatureCollection
+# # Create FeatureCollection
 # centroidsAll = ee.FeatureCollection(features)
-
+# %%
 sid_data = [
     {
-        "SID": "20170705T164319_20170705T165225_T15RXL",
-        "lon": -90.968,
-        "lat": 27.292,
+        "lat": -25.39439,
+        "lon": -42.76179,
     },
     {
-        "SID": "20230716T162841_20230716T164533_T15QWB",
-        "lon": -92.2361,
-        "lat": 19.56586,
+        "lat": -25.448847759194713,
+        "lon": -42.75307163955262,
     },
     {
-        "SID": "20220707T032531_20220707T033631_T48NTP",
-        "lon": 102.986983,
-        "lat": 7.592794,
+        "lat": -25.602820518570194,
+        "lon": -42.82065823421971,
     },
 ]
 
 # Convert list of dicts into ee.Feature objects
-features = [
-    ee.Feature(ee.Geometry.Point(d["lon"], d["lat"]), {"SID": d["SID"]})
-    for d in sid_data
-]
+features = [ee.Feature(ee.Geometry.Point(d["lon"], d["lat"])) for d in sid_data]
 
 # Make a FeatureCollection
 centroidsAll = ee.FeatureCollection(features)
@@ -263,7 +257,7 @@ for year in years:
     results_fc = ee.FeatureCollection(results_list)
     task = ee.batch.Export.table.toDrive(
         collection=results_fc,
-        description=f"Plumes_Flaring_Evaluation_{year}",  # can change name here
+        description=f"Carbon_Mapper_Confirmed_Flaring_Evaluation_{year}",  # can change name here
         fileFormat="CSV",
     )
 
