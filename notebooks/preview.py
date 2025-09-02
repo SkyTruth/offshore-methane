@@ -9,9 +9,11 @@ import ipywidgets as widgets
 from IPython.display import display
 import sys
 import os
-import math
 from tqdm import tqdm
-
+from IPython.display import display
+import requests
+from io import BytesIO
+from PIL import Image
 
 mbsp_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "offshore_methane"
@@ -76,21 +78,6 @@ def add_glint_alpha(sid_data, collection="COPERNICUS/S2_HARMONIZED"):
         key=lambda d: float("inf") if d["glint_alpha"] is None else d["glint_alpha"],
     )
     return out_sorted
-
-
-def mbsp_decay(x: float) -> float:
-    """
-    Exponential decay function passing through (12, 0.2) and (22, 0.05).
-
-    Args:
-        x (float): Input value.
-
-    Returns:
-        float: Output of the decay function.
-    """
-    A = 1.055
-    k = -0.1386294361
-    return A * math.exp(k * x)
 
 
 def calculate_sunglint_alpha(image: ee.Image):
@@ -338,11 +325,12 @@ class ViewerState:
 
 def show_granule_viewer(
     sid_data,
-    b11_b12_max=[1000, 750],
+    b11_b12_max=[3000, 2800],
     zoom=12,
     mbsp_min_max=[-0.2, 0.2],
     extra_gdf=None,
     starting_idx=0,
+    layers=["B11", "B12", "RGB", "MBSP", "Flaring"],
 ):
     index = starting_idx
     state = ViewerState()
@@ -369,12 +357,10 @@ def show_granule_viewer(
                 except Exception:
                     pass
 
-        # update current SID in state
         state.sid = sid_data[idx]["SID"]
         lat, lon = sid_data[idx]["lat"], sid_data[idx]["lon"]
         img = get_image(state.sid)
 
-        # Use evaluateScene instead of evaluate_offshore_site
         region = ee.Geometry.Point([lon, lat]).buffer(200)
         img_flaring_data = evaluateScene(img, region).getInfo()
 
@@ -401,7 +387,7 @@ def show_granule_viewer(
             ],
         }
 
-        # --- flaring & mbsp logic as before ---
+        # --- flaring & mbsp logic ---
         b8a = img.select("B8A")
         b11 = img.select("B11")
         b12 = img.select("B12")
@@ -426,19 +412,31 @@ def show_granule_viewer(
 
         if img is not None:
             m.center = (lat, lon, zoom)
-            m.addLayer(
-                tai, {"min": 0, "max": 1, "palette": ["black", "white"]}, "TAI", False
-            )
-            m.addLayer(mbsp, vis_params_mbsp, "MBSP")
-            m.addLayer(img.select("B12"), vis_params_b12, "B12")
-            m.addLayer(img.select("B11"), vis_params_b11, "B11")
-            m.addLayer(img.select(["B4", "B3", "B2"]), vis_params_rgb, "RGB", False)
-            m.addLayer(
-                flare_mask_layer,
-                {"palette": ["yellow"], "min": 1500, "max": 3000},
-                "Flaring",
-                False,
-            )
+
+            # --- add only requested layers ---
+            if "TAI" in layers:
+                m.addLayer(
+                    tai,
+                    {"min": 0, "max": 1, "palette": ["black", "white"]},
+                    "TAI",
+                    False,
+                )
+            if "B12" in layers:
+                m.addLayer(img.select("B12"), vis_params_b12, "B12")
+            if "B11" in layers:
+                m.addLayer(img.select("B11"), vis_params_b11, "B11")
+            if "MBSP" in layers:
+                m.addLayer(mbsp, vis_params_mbsp, "MBSP", False)
+            if "RGB" in layers:
+                m.addLayer(img.select(["B4", "B3", "B2"]), vis_params_rgb, "RGB", False)
+            if "Flaring" in layers:
+                m.addLayer(
+                    flare_mask_layer,
+                    {"palette": ["yellow"], "min": 1500, "max": 3000},
+                    "Flaring",
+                    False,
+                )
+
             m.addLayer(
                 ee.Geometry.Point(lon, lat).buffer(200),
                 {"color": "red"},
@@ -505,7 +503,7 @@ def show_granule_viewer(
     return state
 
 
-# mbsp = show_granule_viewer(sid_data)
+# %%
 sid_data = [
     {
         "SID": "20170705T164319_20170705T165225_T15RXL",
@@ -529,19 +527,7 @@ sid_data = [
     },
 ]
 
-
-# sid_data = [
-#     {
-#         "SID": "20241228T033049_20241228T034259_T47NRJ",
-#         "lon": 102.986983,
-#         "lat": 7.592794,
-#     }
-# ]
-# %%
 b11 = 3000
-sid = "20230607T130251_20230607T130249_T23JQM"
-lon = 102.61423806737008
-lat = 7.494175116033479
 # state = show_granule_viewer(
 #     sid_data,
 #     b11_b12_max=[b11, b11],
