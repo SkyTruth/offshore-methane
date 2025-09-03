@@ -503,6 +503,198 @@ def show_granule_viewer(
     return state
 
 
+def gdf_to_sid_list(gdf):
+    sid_data = []
+    for i, row in gdf.iterrows():
+        sid_data.append(
+            {
+                "SID": row["system_index"],
+                "lat": row["geometry"].y,
+                "lon": row["geometry"].x,
+            }
+        )
+    return sid_data
+
+
+def create_structure_flaring_timeline(
+    df, date_col="granule_date", filter_outlier=False, flare_override_absent=True
+):
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = df.sort_values(by=date_col)
+
+    # Map to colors
+    def status_color_override(row):
+        if row["flaring"] == 1:
+            return "green"
+        elif row["structure_present"] == 0:
+            return "red"
+        else:
+            return "yellow"
+
+    def status_color(row):
+        if row["structure_present"] == 0:
+            return "red"
+        elif row["flaring"] == 1:
+            return "green"
+        else:
+            return "yellow"
+
+    if flare_override_absent:
+        df["color"] = df.apply(status_color_override, axis=1)
+    else:
+        df["color"] = df.apply(status_color, axis=1)
+
+    df["is_outlier"] = (df["color"] != df["color"].shift(1)) & (
+        df["color"] != df["color"].shift(-1)
+    )
+    if filter_outlier:
+        df = df[~df["is_outlier"]]
+    return df
+
+
+def plot_structure_flaring_timeline(
+    df, date_col="granule_date", magnitude_col=None, max_mag=1
+):
+    plt.figure(figsize=(12, 3))
+
+    if magnitude_col:
+        # Normalize lengths so they are visually balanced
+        lengths = df[magnitude_col].apply(
+            lambda h: max_mag if (h > max_mag or h < -max_mag) else h
+        )
+        # lengths = (vals / max_mag) * 0.8  # scale to 80% of axis height
+    else:
+        lengths = [0.8] * len(df)
+
+    for x, h, c in zip(df[date_col], lengths, df["color"]):
+        plt.vlines(x, 0, h, color=c, linewidth=2)
+
+    # Beautify
+    plt.title("Structure & Flaring Timeline", fontsize=14)
+    # plt.yticks([])
+    plt.xlabel("Date")
+    plt.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+def extract_state_blocks(df, date_col="granule_date", drop_zero_day=True):
+    """
+    Collapse consecutive rows of the same 'color' into blocks.
+
+    Returns a dataframe with:
+      - start
+      - end
+      - color
+      - duration
+    """
+    color_to_state = {
+        "green": "flaring on",
+        "yellow": "flaring off",
+        "red": "structure absent",
+    }
+    df = df.copy().sort_values(date_col)
+    df = df.reset_index(drop=True)
+
+    # extras
+    # system_index = df['system_index'].iloc[0]
+    lat = df["geometry"].iloc[0].x
+    lon = df["geometry"].iloc[0].y
+    structure_id = df["structure_id"].iloc[0]
+
+    blocks = []
+    start = df.loc[0, date_col]
+    current_color = df.loc[0, "color"]
+    count = 1
+
+    for i in range(1, len(df)):
+        if df.loc[i, "color"] != current_color:
+            end = df.loc[i - 1, date_col]
+            blocks.append(
+                {
+                    "lat": lat,
+                    "lon": lon,
+                    "start": start,
+                    "end": end,
+                    "state": color_to_state[current_color],
+                    "color": current_color,
+                    "duration": end - start,
+                    "granule_count": count,
+                    # "system_index": system_index,
+                    "structure_id": structure_id,
+                }
+            )
+            # start new block
+            start = df.loc[i, date_col]
+            current_color = df.loc[i, "color"]
+            count = 1
+        else:
+            count += 1
+
+    # add final block
+    end = df.loc[len(df) - 1, date_col]
+    blocks.append(
+        {
+            "lat": lat,
+            "lon": lon,
+            "start": start,
+            "end": end,
+            "state": color_to_state[current_color],
+            "color": current_color,
+            "duration": end - start,
+            "granule_count": count,
+            # "system_index": system_index,
+            "structure_id": structure_id,
+        }
+    )
+    block_pd = pd.DataFrame(blocks)
+    if drop_zero_day:
+        block_pd = block_pd[block_pd["duration"] > timedelta(0)]
+
+    return block_pd
+
+
+def plot_state_blocks(blocks_df):
+    """
+    Plot timeline blocks with colors.
+    """
+    fig, ax = plt.subplots(figsize=(12, 2))
+
+    for _, row in blocks_df.iterrows():
+        ax.barh(
+            y=0,
+            width=(row["end"] - row["start"]).days
+            + (row["end"] - row["start"]).seconds / 86400,
+            left=row["start"],
+            color=row["color"],
+            edgecolor="black",
+            height=0.5,
+        )
+
+    ax.set_yticks([])
+    ax.set_xlabel("Date")
+    ax.set_title("State Blocks Timeline")
+    plt.grid(axis="x", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+def assign_group_ids(gdf, buffer_size=0.1, geom_col="geometry", id_col="structure_id"):
+    gdf = gdf.copy()
+    gdf["buffer"] = gdf[geom_col].buffer(buffer_size)
+    gdf[id_col] = -1
+
+    group_id = 0
+    for idx, geom in gdf["buffer"].items():
+        if gdf.at[idx, id_col] == -1:  # not yet assigned
+            group_id += 1
+            intersects = gdf["buffer"].intersects(geom)
+            gdf.loc[intersects, id_col] = group_id
+
+    return gdf.drop(columns="buffer")
+
+
 # %%
 sid_data = [
     {
