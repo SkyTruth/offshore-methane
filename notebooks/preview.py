@@ -1,19 +1,14 @@
 # %%
 import ee
-import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import ee
 import geemap
 import ipywidgets as widgets
 from IPython.display import display
 import sys
 import os
 from tqdm import tqdm
-from IPython.display import display
-import requests
-from io import BytesIO
-from PIL import Image
+from datetime import timedelta
 
 mbsp_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "offshore_methane"
