@@ -325,7 +325,7 @@ def show_granule_viewer(
     mbsp_min_max=[-0.2, 0.2],
     extra_gdf=None,
     starting_idx=0,
-    layers=["B11", "B12", "RGB", "MBSP", "Flaring"],
+    layers=["B11", "B12", "RGB", "MBSP", "Flaring", "Detected Flare"],
 ):
     index = starting_idx
     state = ViewerState()
@@ -439,7 +439,10 @@ def show_granule_viewer(
                 False,
             )
 
-            if img_flaring_data["properties"]["flare_present"]:
+            if (
+                img_flaring_data["properties"]["flare_present"]
+                and "Detected Flare" in layers
+            ):
                 flare_coords = img_flaring_data["properties"]["flare_latlon"]
                 coords = ee.List(flare_coords).getInfo()
                 m.addLayer(
