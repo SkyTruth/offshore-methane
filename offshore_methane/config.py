@@ -27,8 +27,8 @@ START, END = (
 #  Algorithm switches / constants
 # ------------------------------------------------------------------
 # 0 ⇒ no speckle filtering, 1  ⇒  3 × 3 median window (≈ 20 m), 2 ⇒ 5 × 5
-SPECKLE_RADIUS_PX = 2  # size of the square window
-SPECKLE_FILTER_MODE = "median"  # "none" | "median" | "adaptive"
+SPECKLE_RADIUS_PX = 1  # size of the square window
+SPECKLE_FILTER_MODE = "none"  # "none" | "median" | "adaptive"
 # Logistic curve controls for adaptive speckle filtering
 LOGISTIC_SIGMA0 = 0.02  # σ where w = 0.5   (units match image data)
 LOGISTIC_K = 300  # slope at σ₀ (bigger ⇒ steeper transition)

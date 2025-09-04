@@ -9,7 +9,6 @@ where *1* keeps a pixel and *0* discards it.
 
 from __future__ import annotations
 
-import csv
 import math
 import os
 from typing import Dict, Optional
@@ -17,6 +16,7 @@ from typing import Dict, Optional
 import ee
 import geemap
 import numpy as np
+import pandas as pd
 from IPython.display import display
 
 import offshore_methane.config as cfg
@@ -492,7 +492,8 @@ def view_mask(
     )
 
     # Add SGA to image as a new band called "SGA"
-    sga_img = ee.Image.loadGeoTIFF(f"gs://offshore_methane/{sid}/{sid}_SGA.tif")
+    sga_path = f"gs://{cfg.EXPORT_PARAMS['bucket']}/{sid}/{sid}_SGA.tif"
+    sga_img = ee.Image.loadGeoTIFF(sga_path)
     img = img.addBands(sga_img.rename("SGA"))
 
     # Add SGI to image as a new band called "SGI"
@@ -562,69 +563,87 @@ def view_mask(
     display(m)
 
 
-def show_me(eid: int | None = None, sid: str | None = None, stats: bool = True) -> None:
-    # Load events
-    with open(cfg.EVENTS_CSV, newline="") as f:
-        erows = list(csv.DictReader(f))
-    if not erows:
-        raise RuntimeError(f"No events found in {cfg.EVENTS_CSV}")
+def show_me(
+    eid: int | None = None,
+    sid: str | None = None,
+    stats: bool = True,
+    **filters,
+) -> None:
+    """
+    Interactive viewer using the CSV virtual database (csv_utils).
 
-    # Map: id -> row, with fallback to row index
-    ids = [int(r.get("id", i)) for i, r in enumerate(erows)]
-    events_by_id = {int(r.get("id", i)): r for i, r in enumerate(erows)}
-    default_eid = ids[0]
+    Parameters
+    ----------
+    eid : int | None
+        Event id to visualize. If both `eid` and `sid` are provided, filters to
+        that specific mapping.
+    sid : str | None
+        Sentinel-2 system:index (granule id). If provided, chooses the first
+        joined row for this granule (optionally filtered by `eid`).
+    stats : bool
+        When True, `view_mask` prints per-filter stats.
+    **filters : Any
+        Optional quality filters passed through to csv_utils (e.g.
+        scene_cloud_pct=..., scene_sga_range=(...), local_sga_range=(...),
+        local_sgi_range=(...)).
+    """
+    from offshore_methane.csv_utils import df_for_event, df_for_granule, virtual_db
 
-    # Load event→granule mappings (ignore empty system_index markers)
-    mappings = []  # list of (eid, sid)
-    if cfg.EVENT_GRANULE_CSV.is_file():
-        with open(cfg.EVENT_GRANULE_CSV, newline="") as f:
-            for r in csv.DictReader(f):
-                row_sid = (r.get("system_index") or "").strip()
-                if not row_sid:
-                    continue
-                try:
-                    row_eid = int(r.get("event_id", -1))
-                except (TypeError, ValueError):
-                    continue
-                mappings.append((row_eid, row_sid))
+    target_sid: str | None = None
+    target_eid: int | None = None
+    lon: float | None = None
+    lat: float | None = None
 
-    # Resolve target eid/sid per requested rules
-    target_eid = eid if eid is not None else default_eid
-    target_sid = None
+    if sid is not None:
+        # For explicit SID lookups, do NOT apply default scene filters by default.
+        # This avoids accidentally filtering out the correct mapping due to
+        # missing scene metadata in granules.csv.
+        f = dict(filters)
+        f.setdefault("scene_cloud_pct", None)
+        f.setdefault("scene_sga_range", None)
+        df = df_for_granule(sid, **f)
+        if eid is not None:
+            df = df[df["event_id"] == int(eid)]
+        if df.empty:
+            print("No matching rows for given sid/eid with current filters.")
+            return
+        # Prefer earliest timestamp when available
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["event_id"]) if pd.notna(row.get("event_id")) else None  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
 
-    if sid:
-        # Find all (eid, sid) pairs matching the requested SID exactly
-        matches = [(e, s) for (e, s) in mappings if s == sid]
-        if not matches:
-            raise RuntimeError(
-                f"SID {sid} not found in {cfg.EVENT_GRANULE_CSV}. Run discovery first or pass --eid to disambiguate."
-            )
-        if len(matches) == 1 and eid is None:
-            target_eid, target_sid = matches[0]
-        else:
-            if eid is None:
-                raise RuntimeError(
-                    f"SID {sid} appears under multiple events; provide --eid as well."
-                )
-            if (eid, sid) not in mappings:
-                raise RuntimeError(
-                    f"No mapping for eid={eid} and sid={sid} in {cfg.EVENT_GRANULE_CSV}."
-                )
-            target_eid, target_sid = eid, sid
+    elif eid is not None:
+        df = df_for_event(int(eid), **filters)
+        if df.empty:
+            print("No matching rows for given eid with current filters.")
+            return
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["event_id"])  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
+
     else:
-        # No SID: use the first mapped SID for the target EID
-        sids_for_eid = [s for (e, s) in mappings if e == target_eid]
-        if not sids_for_eid:
-            raise RuntimeError(
-                f"Event {target_eid} has no mapped granules in {cfg.EVENT_GRANULE_CSV}. Run discovery first."
-            )
-        target_sid = sids_for_eid[0]
+        # fallback to first available joined row using default filters
+        df = virtual_db(**filters)
+        if df.empty:
+            print("Virtual database is empty (no events/granules join).")
+            return
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["event_id"]) if pd.notna(row.get("event_id")) else None  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
 
-    ev = events_by_id.get(target_eid)
-    if not ev:
-        raise RuntimeError(f"Event id {target_eid} not found in {cfg.EVENTS_CSV}")
+    if target_sid is None or lon is None or lat is None:
+        print("Could not resolve a target scene and location.")
+        return
 
-    lon, lat = float(ev["lon"]), float(ev["lat"])
     view_mask(target_sid, lon, lat, stats)
     print(f"eid: {target_eid}, sid: {target_sid}, lon: {lon}, lat: {lat}")
 

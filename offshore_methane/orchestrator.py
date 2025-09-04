@@ -20,6 +20,18 @@ import ee
 
 import offshore_methane.config as cfg
 from offshore_methane.algos import logistic_speckle, plume_polygons_three_p
+from offshore_methane.csv_utils import (
+    load_event_granule as csv_load_event_granule,
+)
+from offshore_methane.csv_utils import (
+    load_events as csv_load_events,
+)
+from offshore_methane.csv_utils import (
+    update_local_metrics,
+    upsert_event_granule,
+    upsert_granule,
+    virtual_db,
+)
 from offshore_methane.ee_utils import (
     export_image,
     export_polygons,
@@ -85,110 +97,61 @@ def add_days_to_date(date_str: str, days: int, fmt: str = "%Y-%m-%d") -> str:
 
 def _record_event_granules(associations: dict[int, list]) -> None:
     """
-    Record discovered system:index values by appending to granules.csv and
-    event_granule.csv. Idempotent: only adds missing granules and mappings.
+    Record discovered granules and event↔granule mappings using csv_utils upserts.
 
-    associations maps event_id → list of system_index strings.
+    associations maps event_id → list where items are either system_index strings
+    or dicts with keys: system_index, sga_scene, cloudiness, timestamp.
+    When the list is empty, a single marker row is appended to event_granule.csv
+    for that event with an empty system_index (if not already present).
     """
     if not associations:
         return
 
-    # Load or initialize granules.csv
-    granules: set[str] = set()
-    granules_rows: list[dict] = []
-    if cfg.GRANULES_CSV.is_file():
-        with open(cfg.GRANULES_CSV, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                granules.add(row.get("system_index", ""))
-                granules_rows.append(row)
+    def _mark_no_granules(eid: int) -> None:
+        df = csv_load_event_granule()
+        have = False
+        if not df.empty:
+            have = bool(df.loc[df["event_id"] == int(eid)].shape[0])
+        if not have:
+            # Append a marker row (event_id, "")
+            if cfg.EVENT_GRANULE_CSV.is_file():
+                with open(cfg.EVENT_GRANULE_CSV, "a", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=["event_id", "system_index"])
+                    w.writerow({"event_id": int(eid), "system_index": ""})
+            else:
+                with open(cfg.EVENT_GRANULE_CSV, "w", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=["event_id", "system_index"])
+                    w.writeheader()
+                    w.writerow({"event_id": int(eid), "system_index": ""})
 
-    # Load or initialize event_granule.csv
-    mappings: set[tuple[int, str]] = set()
-    mapping_rows: list[dict] = []
-    eids_with_any: set[int] = set()
-    if cfg.EVENT_GRANULE_CSV.is_file():
-        with open(cfg.EVENT_GRANULE_CSV, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    eid = int(row.get("event_id", -1))
-                except (TypeError, ValueError):
-                    continue
-                eids_with_any.add(eid)
-                sid = row.get("system_index", "")
-                mappings.add((eid, sid))
-                mapping_rows.append(row)
-
-    # Append any missing granules and mappings (including 'no granules' markers)
-    new_granules: list[dict] = []
-    new_mappings: list[dict] = []
-    for event_id, sids in associations.items():
-        if not sids and event_id not in eids_with_any:
-            # Mark that this event yielded no granules (empty system_index row)
-            new_mappings.append({"event_id": str(event_id), "system_index": ""})
-            eids_with_any.add(event_id)
-        for item in sids:
+    new_g, new_m = 0, 0
+    for event_id, items in associations.items():
+        if not items:
+            _mark_no_granules(event_id)
+            continue
+        for item in items:
             if isinstance(item, dict):
                 sid = (item.get("system_index") or "").strip()
-                # Values may be None; normalize to formatted strings or blanks later
-                provided_q = {
-                    "sunglint": item.get("sunglint"),
-                    "cloudiness": item.get("cloudiness"),
-                    "timestamp": item.get("timestamp"),
-                }
+                # Upsert quality metadata if present
+                if sid:
+                    upsert_granule(item)
+                    new_g += 1
             else:
                 sid = (item or "").strip()
-                provided_q = None
 
-            if sid and sid not in granules:
-                if provided_q is not None:
-                    q = {
-                        "sunglint": ""
-                        if provided_q["sunglint"] is None
-                        else f"{float(provided_q['sunglint']):.1f}",
-                        "cloudiness": ""
-                        if provided_q["cloudiness"] is None
-                        else f"{float(provided_q['cloudiness']):.1f}",
-                        "timestamp": provided_q["timestamp"] or "",
-                    }
-                else:
-                    q = {"sunglint": "", "cloudiness": "", "timestamp": ""}
-                new_granules.append({"system_index": sid, **q})
-                granules.add(sid)
-
-            if sid and (event_id, sid) not in mappings:
-                new_mappings.append({"event_id": str(event_id), "system_index": sid})
-                mappings.add((event_id, sid))
-
-    # Write granules.csv (preserve existing rows + append new)
-    if new_granules or not cfg.GRANULES_CSV.is_file():
-        fieldnames = ["system_index", "sunglint", "cloudiness", "timestamp"]
-        with open(cfg.GRANULES_CSV, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            # keep any existing rows with the same schema (normalize keys)
-            for r in granules_rows:
-                writer.writerow({k: r.get(k, "") for k in fieldnames})
-            for r in new_granules:
-                writer.writerow(r)
-
-    # Write event_granule.csv (preserve existing + append new)
-    if new_mappings or not cfg.EVENT_GRANULE_CSV.is_file():
-        # Canonical two columns only: event_id, system_index
-        fieldnames = ["event_id", "system_index"]
-        with open(cfg.EVENT_GRANULE_CSV, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for r in mapping_rows:
-                writer.writerow({k: r.get(k, "") for k in fieldnames})
-            for r in new_mappings:
-                writer.writerow({k: r.get(k, "") for k in fieldnames})
+            if sid:
+                upsert_event_granule(int(event_id), sid)
+                new_m += 1
 
     if cfg.VERBOSE:
-        print(
-            f"↻ recorded {len(new_granules)} new granule(s) and {len(new_mappings)} mapping(s)"
-        )
+        print(f"↻ recorded {new_g} new/updated granule(s) and {new_m} mapping(s)")
+
+
+def _update_granule_local_metrics(
+    sid: str, sga_local_median: float | None, sgi_median: float | None
+) -> None:
+    # Delegate to csv_utils helper
+    update_local_metrics(sid, sga_local_median=sga_local_median, sgi_median=sgi_median)
 
 
 # ------------------------------------------------------------------
@@ -300,7 +263,7 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         R_img = mbsp_simple_ee(s2, mask_c, mask_mbsp)
     else:
         R_img = mbsp_complex_ee(
-            s2, sga_img, centre_pt, cfg.MASK_PARAMS["local_sga_range"]
+            s2, sga_img, centre_pt, cfg.MASK_PARAMS["sunglint"]["local_sga_range"]
         )
 
     # ---------------- Speckle filter -----------
@@ -326,6 +289,36 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
             min=-0.1, max=0.1, palette=["red", "white", "blue"]
         ).getThumbURL({"region": export_roi, "dimensions": 512})
         print(f"  🖼  thumb → {url} {sid}")
+
+    # ---------------- Local metrics (medians) --
+    try:
+        med_sga = (
+            s2.select("SGA")
+            .reduceRegion(ee.Reducer.median(), export_roi, scale=20, bestEffort=True)
+            .get("SGA")
+            .getInfo()
+        )
+    except Exception:
+        med_sga = None
+    try:
+        med_sgi = (
+            s2.select("SGI")
+            .reduceRegion(ee.Reducer.median(), export_roi, scale=20, bestEffort=True)
+            .get("SGI")
+            .getInfo()
+        )
+    except Exception:
+        med_sgi = None
+
+    # Persist local metrics to granules.csv immediately
+    try:
+        _update_granule_local_metrics(
+            sid,
+            None if med_sga is None else float(med_sga),
+            None if med_sgi is None else float(med_sgi),
+        )
+    except Exception:
+        pass
 
     # ---------------- Export raster ------------
     cfg.EXPORT_PARAMS["overwrite"] = cfg.EXPORT_PARAMS["overwrite"] or sga_new
@@ -365,32 +358,24 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
 #  Main
 # ------------------------------------------------------------------
 def _load_event_rows() -> list[dict]:
-    if not cfg.EVENTS_CSV.is_file():
-        return []
-    with open(cfg.EVENTS_CSV, newline="") as f:
-        return list(csv.DictReader(f))
+    df = csv_load_events()
+    return df.to_dict(orient="records") if not df.empty else []
 
 
 def _load_mappings() -> tuple[dict[int, list[str]], set[int]]:
+    """Compatibility helper retained for now; prefer csv_utils.virtual_db.
+
+    Returns (event_id → [system_index, …], events_with_any_row).
     """
-    Return (event_id → [system_index, …], events_with_any_row) from event_granule.csv.
-    events_with_any_row includes events that have a 'no-granule' marker row (empty system_index).
-    """
-    if not cfg.EVENT_GRANULE_CSV.is_file():
+    df = csv_load_event_granule()
+    if df.empty:
         return {}, set()
+    have_row = set(df["event_id"].dropna().astype(int).tolist())
+    df = df[df["system_index"].astype(str).str.len() > 0]
     out: dict[int, list[str]] = {}
-    have_row: set[int] = set()
-    with open(cfg.EVENT_GRANULE_CSV, newline="") as f:
-        for row in csv.DictReader(f):
-            try:
-                eid = int(row.get("event_id", -1))
-            except (TypeError, ValueError):
-                continue
-            have_row.add(eid)
-            sid = (row.get("system_index") or "").strip()
-            # Only non-empty SIDs populate the mapping list
-            if sid:
-                out.setdefault(eid, []).append(sid)
+    if not df.empty:
+        for eid, grp in df.groupby("event_id"):
+            out[int(eid)] = [str(s) for s in grp["system_index"].tolist()]
     return out, have_row
 
 
@@ -404,44 +389,33 @@ def discover_granules_for_new_events() -> None:
         print(f"⚠  {cfg.EVENTS_CSV} not found or empty - nothing to do")
         return
 
-    mappings, have_row = _load_mappings()
+    # Events that already have any mapping row (including marker rows)
+    _, have_row = _load_mappings()
 
-    # Build the candidate list of events
+    # Allow filter
     allow: set[int] | None = None
     if cfg.EVENTS_TO_PROCESS is not None:
         allow = {int(x) for x in cfg.EVENTS_TO_PROCESS}
 
-    pending = []
+    # Discover granules for events missing any mapping
     for i, row in enumerate(rows):
         eid = int(row.get("id", i))
         if allow is not None and (i not in allow and eid not in allow):
             continue
         if eid in have_row:
-            continue  # already recorded (has granules or marked as none)
-        pending.append((eid, row))
+            continue
 
-    if not pending:
-        if cfg.VERBOSE:
-            print("✓ No new events to discover")
-        return
-
-    # Discover granules and record
-    for eid, row in pending:
         centre_pt = ee.Geometry.Point([float(row["lon"]), float(row["lat"])])
         products = sentinel2_system_indexes(
             centre_pt,
             str(row.get("start", cfg.START)),
             add_days_to_date(str(row.get("end", cfg.END)), 1),
         )
-        # Always record the event: empty list marks 'no granules found'
         if cfg.VERBOSE:
             print(f"event {eid}: {len(products)} product(s)")
         if products:
-            # Record each granule immediately to guard against mid-run errors
-            for item in products:
-                _record_event_granules({eid: [item]})
+            _record_event_granules({eid: products})
         else:
-            # Record 'no granules' marker for this event now
             _record_event_granules({eid: []})
 
 
@@ -456,65 +430,38 @@ def process_event_granules() -> None:
         print(f"⚠  {cfg.EVENTS_CSV} not found or empty - nothing to do")
         return
 
-    # Index events for quick lookup when building site dicts
-    by_id = {int(r.get("id", i)): r for i, r in enumerate(rows)}
+    # Build the virtual database with default scene-level filters
+    db = virtual_db()
 
-    # Load mappings and quality metadata
-    mappings, _ = _load_mappings()  # event_id → [sids], ignore have_row here
-    gran_meta: dict[str, dict] = {}
-    if cfg.GRANULES_CSV.is_file():
-        with open(cfg.GRANULES_CSV, newline="") as f:
-            for r in csv.DictReader(f):
-                gran_meta[r.get("system_index", "")] = r
-
+    # Allow filter
     allow: set[int] | None = None
     if cfg.EVENTS_TO_PROCESS is not None:
         allow = {int(x) for x in cfg.EVENTS_TO_PROCESS}
-
-    # Thresholds (scene-level)
-    max_cloud = float(cfg.MASK_PARAMS["cloud"]["scene_cloud_pct"])  # %
-    sga_min, sga_max = cfg.MASK_PARAMS["sunglint"]["scene_sga_range"]
+        if not db.empty:
+            db = db[db["event_id"].isin(allow)]
 
     start_time = time.time()
     active: list[ee.batch.Task] = []
     with ThreadPoolExecutor(max_workers=cfg.MAX_WORKERS) as pool:
         futures = []
-        for eid, sids in mappings.items():
-            if allow is not None and eid not in allow:
-                continue
-            ev = by_id.get(eid)
-            if not ev:
-                continue
-            # Build site dict from event row
-            site = {
-                "event_id": eid,
-                "lon": float(ev["lon"]),
-                "lat": float(ev["lat"]),
-                "start": ev.get("start", cfg.START),
-                "end": add_days_to_date(ev.get("end", cfg.END), 1),
-            }
-
-            for sid in sids:
-                meta = gran_meta.get(sid, {})
-                try:
-                    cloud = float(meta.get("cloudiness", ""))
-                except ValueError:
-                    cloud = None
-                try:
-                    sga = float(meta.get("sunglint", ""))
-                except ValueError:
-                    sga = None
-
-                # Filter if we have metadata; if missing, allow through
-                if cloud is not None and cloud > max_cloud:
-                    continue
-                if sga is not None and not (sga_min < sga < sga_max):
-                    continue
-
-                futures.append(pool.submit(process_product, site, sid))
+        if not db.empty:
+            # Iterate unique (event_id, system_index) pairs
+            for (eid, sid), grp in db.groupby(["event_id", "system_index"]):
+                # Build site dict from the first row
+                r = grp.iloc[0]
+                site = {
+                    "event_id": int(eid),
+                    "lon": float(r["lon"]),
+                    "lat": float(r["lat"]),
+                    "start": str(r.get("start", cfg.START)),
+                    "end": add_days_to_date(str(r.get("end", cfg.END)), 1),
+                }
+                futures.append(pool.submit(process_product, site, str(sid)))
 
         for fut in as_completed(futures):
-            active.extend(fut.result())
+            res = fut.result()
+            if res:
+                active.extend(res)
 
     # Monitor outstanding tasks
     if active:

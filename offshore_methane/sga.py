@@ -6,10 +6,10 @@ either GCS or EE assets.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import time
 from pathlib import Path
-import shutil
 
 import numpy as np
 import rasterio
@@ -51,9 +51,13 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
             f"{xpath_suffix}/Values_List/VALUES/text()"
         )
         blocks = root_.xpath(expr)
+        if not blocks:
+            return None
         arrays = [
             _grid2array(blocks[i * 23 : (i + 1) * 23]) for i in range(len(blocks) // 23)
         ]
+        if not arrays:
+            return None
         return np.nanmean(arrays, axis=0)
 
     # ----- raw 23x23 values -----------------------------------------
@@ -61,8 +65,15 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
     saa = _grid2array(
         root.xpath(".//Sun_Angles_Grid/Azimuth/Values_List/VALUES/text()")
     )
-    vza = _mean_detector_grid(root, "8A", "Zenith")
-    vaa = _mean_detector_grid(root, "8A", "Azimuth")
+    # Use B8A viewing angles (bandId="8") for SGA
+    band_id = "8"
+    vza = _mean_detector_grid(root, band_id, "Zenith")
+    vaa = _mean_detector_grid(root, band_id, "Azimuth")
+    if vza is None or vaa is None:
+        raise RuntimeError(
+            "Viewing incidence angles missing in XML for bandId '8'. "
+            "Cannot compute SGA grid."
+        )
 
     # sun-glint angle
     delta_phi = np.deg2rad(np.abs(saa - vaa))
@@ -73,15 +84,52 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         )
     ).astype(np.float32)
 
+    # Basic sanity check: ensure we computed a full grid with finite values
+    if sga_grid.shape != (23, 23):
+        raise RuntimeError(
+            "Computed SGA grid is invalid. "
+            f"Used band: {band_id!r}. Check XML contents and band availability."
+        )
+
     # EE expects origin top-left with row-major order
     sga_grid = np.rot90(
         np.flipud(sga_grid.T), k=-1
     )  # @Brendan WTF is jona doing here? Should I really be rotating and flipping arbitrarily to make it "look right"?
 
-    # geotransform: 5 km pixels
-    ulx = float(root.findtext(".//Geoposition/ULX"))
-    uly = float(root.findtext(".//Geoposition/ULY"))
-    tr = from_origin(ulx, uly, 5000.0, 5000.0)
+    # geotransform: derive from tile geocoding so the 23x23 grid spans the tile
+    # Prefer 10 m grid size if available to infer tile extent
+    crs_code = root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE")
+    ulx_txt = root.findtext(".//Tile_Geocoding/Geoposition/ULX")
+    uly_txt = root.findtext(".//Tile_Geocoding/Geoposition/ULY")
+    if ulx_txt is None or uly_txt is None:
+        raise RuntimeError(
+            "Missing Tile_Geocoding Geoposition ULX/ULY in XML; cannot georeference SGA."
+        )
+    ulx = float(ulx_txt)
+    uly = float(uly_txt)
+
+    def _size_for_res(res: str) -> tuple[int, int] | None:
+        ncols = root.findtext(f".//Tile_Geocoding/Size[@resolution='{res}']/NCOLS")
+        nrows = root.findtext(f".//Tile_Geocoding/Size[@resolution='{res}']/NROWS")
+        if ncols and nrows:
+            return int(ncols), int(nrows)
+        return None
+
+    size = _size_for_res("10") or _size_for_res("20") or _size_for_res("60")
+    if size is None:
+        # Fallback to previous assumption of 5 km pixels if sizes are missing
+        step_x = step_y = 5000.0
+    else:
+        ncols, nrows = size
+        # Convert to meters per pixel at the highest available native grid
+        # assuming resolutions 10/20/60 m respectively
+        res_m = 10.0 if _size_for_res("10") else (20.0 if _size_for_res("20") else 60.0)
+        width_m = ncols * res_m
+        height_m = nrows * res_m
+        step_x = width_m / 23.0
+        step_y = height_m / 23.0
+
+    tr = from_origin(ulx, uly, step_x, step_y)
 
     profile = {
         "driver": "GTiff",
@@ -89,7 +137,7 @@ def compute_sga_coarse(sid: str, tif_path: Path) -> None:
         "height": 23,
         "count": 1,
         "dtype": "float32",
-        "crs": root.findtext(".//Tile_Geocoding/HORIZONTAL_CS_CODE"),
+        "crs": crs_code,
         "transform": tr,
         # --- COG-compliant settings ----------------------------------
         "tiled": True,  # GeoTIFF is now tiled

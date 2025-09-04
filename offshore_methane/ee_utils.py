@@ -2,6 +2,8 @@
 # ee_utils.py
 """
 Thin wrappers around the Earth-Engine Python client.
+
+Also includes convenience helpers used by exploratory notebooks.
 """
 
 import json
@@ -90,7 +92,9 @@ def sentinel2_system_indexes(
     )
 
     # Require B8A incidence-angle pair to exist
-    inc_filter = ee.Filter.notNull(["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"])
+    inc_filter = ee.Filter.notNull(
+        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"]
+    )
 
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
@@ -98,7 +102,11 @@ def sentinel2_system_indexes(
         .filterBounds(point)
         .filter(solar_required)
         .filter(inc_filter)
-        .map(lambda img: ee.Image(img).set("SGA_SCENE", scene_sga_filter(img, cfg.MASK_PARAMS)))
+        .map(
+            lambda img: ee.Image(img).set(
+                "SGA_SCENE", scene_sga_filter(img, cfg.MASK_PARAMS)
+            )
+        )
     )
 
     sids = coll.aggregate_array("system:index").getInfo()
@@ -111,7 +119,9 @@ def sentinel2_system_indexes(
             first = sid.split("_")[0]
             date = first[:8]
             time = first[9:15]
-            return f"{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}:{time[2:4]}:{time[4:6]}"
+            return (
+                f"{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}:{time[2:4]}:{time[4:6]}"
+            )
         except Exception:
             return ""
 
@@ -122,14 +132,12 @@ def sentinel2_system_indexes(
         out.append(
             {
                 "system_index": sid,
-                "sunglint": None if sga is None else float(sga),
+                "sga_scene": None if sga is None else float(sga),
                 "cloudiness": None if cl is None else float(cl),
                 "timestamp": ts,
             }
         )
     return out
-
-
 
 
 def _ee_asset_info(asset_id: str) -> dict | None:
