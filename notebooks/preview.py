@@ -9,6 +9,7 @@ import sys
 import os
 from tqdm import tqdm
 from datetime import timedelta
+from flaring_evaluation import evaluateScene
 
 mbsp_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "offshore_methane"
@@ -202,100 +203,6 @@ def evaluate_offshore_site(image, lat, lon, buffer_m=200):
             "system_index": system_index,
             "lat": lat,
             "lon": lon,
-            "cloud_fraction": cloud_fraction,
-            "min_ndwi": min_ndwi,
-            "structure_present": structure_present,
-            "max_TAI": max_flare_diff,
-            "flare_present": flare_present,
-            "flare_latlon": flare_coords,
-        }
-    )
-
-    return result
-
-
-def evaluateScene(image, region):
-    # Define point and buffer
-    point = region.centroid()
-    # region = point.buffer(buffer_m)
-
-    # Select relevant bands from S2
-    b3 = image.select("B3")  # Green
-    b8 = image.select("B8")  # NIR
-    b11 = image.select("B11")  # SWIR1
-    b12 = image.select("B12")  # SWIR2
-    b8a = image.select("B8A")  # Narrow NIR
-
-    # --- Cloudiness (using S2 Cloud Probability dataset) ---
-    system_index = image.get("system:index")
-
-    cloud_img = (
-        ee.ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY")
-        .filter(ee.Filter.equals("system:index", system_index))
-        .first()
-    )
-
-    # Cloud probability band is "probability" (0–100)
-    cloud_prob = cloud_img.select("probability")
-    cloud_fraction = cloud_prob.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=region, scale=20, maxPixels=1e8
-    ).get("probability")
-
-    # --- Structure Presence (via NDWI min) ---
-    ndwi = b3.subtract(b8).divide(b3.add(b8))
-    ndwi_stats = ndwi.reduceRegion(
-        reducer=ee.Reducer.min(), geometry=region, scale=20, maxPixels=1e8
-    )
-    min_ndwi = ndwi_stats.get("B3")
-
-    structure_present = ee.Algorithms.If(
-        ee.Number(min_ndwi).lt(0),
-        1,  # structure
-        0,  # only ocean
-    )
-
-    # --- Flaring Detection (max difference B12 - B11) ---
-    # flare_diff = b12.subtract(b11).rename("flare_diff")
-    delta_sw = b12.subtract(b11)
-    tai = delta_sw.divide(b8a).rename("TAI")
-
-    # Get max value and pixel location
-    flare_reduce = tai.reduceRegion(
-        reducer=ee.Reducer.max(),
-        geometry=region,
-        scale=20,
-        maxPixels=1e8,
-        bestEffort=True,
-    )
-    max_flare_diff = flare_reduce.get("TAI")
-
-    # Get coordinates of max flare pixel
-    flare_mask = tai.eq(ee.Number(max_flare_diff))
-    flare_coords = (
-        flare_mask.reduceToVectors(
-            scale=20,
-            geometryType="centroid",
-            maxPixels=1e8,
-            bestEffort=True,
-        )
-        .filterBounds(region)
-        .geometry()
-        .coordinates()
-    )
-    flare_coords = ee.List(flare_coords)
-
-    flare_present = ee.Algorithms.If(
-        ee.Number(max_flare_diff).gt(0.15),  # threshold lowered
-        1,
-        0,
-    )
-
-    # flare_present = ee.Number(0)
-
-    # Return as dictionary
-    result = ee.Feature(point).set(
-        {
-            "system_index": system_index,
             "cloud_fraction": cloud_fraction,
             "min_ndwi": min_ndwi,
             "structure_present": structure_present,
