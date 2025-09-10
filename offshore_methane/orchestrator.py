@@ -352,7 +352,14 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     # ---------------- Export raster ------------
     cfg.EXPORT_PARAMS["overwrite"] = cfg.EXPORT_PARAMS["overwrite"] or sga_new
     # Generate a run timestamp now so it can be embedded in shared artefacts
-    ts = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    # Use timezone-aware UTC timestamp
+    from datetime import timezone as _tz
+    ts = (
+        datetime.now(_tz.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     try:
         rast_task, rast_new = export_image(
             R_img, sid, export_roi, last_timestamp=ts, **cfg.EXPORT_PARAMS

@@ -89,6 +89,7 @@ python -m offshore_methane.orchestrator both
 ```
 
 Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS`. Discovered granules are appended to `data/granules.csv` and linked to windows in `data/process_runs.csv`.
+When `EXPORT_PARAMS.overwrite` is `True`, discovery re-evaluates windows even if mappings already exist.
 
 Filters (structure ids, window ids, granule ids) can be passed programmatically:
 
@@ -125,7 +126,7 @@ without restarting your session.
 | `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle-reduction strategy. |
 | `SPECKLE_RADIUS_PX` | `orchestrator.process_product` | Kernel size for median or adaptive speckle filtering. |
 | `LOGISTIC_SIGMA0`, `LOGISTIC_K` | `algos.logistic_speckle` | Shape the logistic weighting for adaptive filtering. Higher `LOGISTIC_K` sharpens the transition; `LOGISTIC_SIGMA0` shifts it. |
-| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex (unimplemented) and simple MBSP implementations. |
+| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex and simple MBSP implementations. |
 | `PLUME_P1`, `PLUME_P2`, `PLUME_P3` | `algos.plume_polygons_three_p` | Monotonic confidence thresholds for plume polygon detection. |
 | `SHOW_THUMB` | `orchestrator.process_product` | If true, displays a diagnostic MBSP thumbnail URL. |
 | `MAX_WORKERS` | `orchestrator.main` | Number of parallel threads used for EE exports. |
@@ -176,6 +177,12 @@ Changing these values alters the pixel selection process; for instance increasin
 Notes
 - Local medians (sga_local_median, sgi_median) are per-run metrics and are stored in process_runs.csv, not granules.csv.
 - For legacy projects that used events.csv and event_granule.csv, use the migration: `python -m offshore_methane.csv_migrate`.
+
+CSV conventions
+- Missing values are written as blank cells (not the literal strings "nan" or "None").
+- Text fields (e.g., `system_index`, `git_hash`, `timestamp`, `structure_id`) use blanks for missing.
+- Numeric fields (e.g., medians, valid_pixel_*) use blanks for missing.
+- `process_runs.system_index` is blank to mark a window with “no granules found”.
 
 ## Contributing
 
