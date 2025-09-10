@@ -48,7 +48,7 @@ XML_SOURCE = "gcp"  # "cdse" | "gcp"
 EXPORT_PARAMS = {
     "bucket": "offshore_methane",
     "ee_asset_folder": "projects/cerulean-338116/assets/offshore_methane",
-    "preferred_location": "local",  # "local", "bucket", "ee_asset_folder"
+    "preferred_location": "bucket",  # "local", "bucket", "ee_asset_folder"
     "overwrite": True,  # overwrite existing files
 }
 

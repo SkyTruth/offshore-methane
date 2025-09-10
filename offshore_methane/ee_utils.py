@@ -492,12 +492,15 @@ def export_image(
     overwrite: bool = kwargs.get("overwrite", False)
     timeout: int = kwargs.get("timeout", 300)
     last_timestamp: str | None = kwargs.get("last_timestamp")
+    # Optional suffix for file naming (e.g., "<lon>_<lat>")
+    suffix: str | None = kwargs.get("suffix")
     roi = region.bounds().coordinates().getInfo()
     task, exported = None, False
 
     if preferred_location == "bucket":
         # Determine if existing object should be overwritten due to mismatch
-        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
+        name = f"{sid}_{datatype}{('_' + suffix) if suffix else ''}"
+        gcs_path = f"gs://{bucket}/{sid}/{name}.tif"
         exists = (
             subprocess.run(
                 [gsutil_cmd(), "ls", gcs_path],
@@ -532,7 +535,7 @@ def export_image(
             image=image,
             description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"{sid}/{sid}_{datatype}",
+            fileNamePrefix=f"{sid}/{name}",
             region=roi,
             scale=20,
             crs=utm,
@@ -575,7 +578,8 @@ def export_image(
             exported = True
 
     else:  # preferred_location == "local"
-        out_path = cfg.DATA_DIR / sid / f"{sid}_{datatype}.tif"
+        name = f"{sid}_{datatype}{('_' + suffix) if suffix else ''}"
+        out_path = cfg.DATA_DIR / sid / f"{name}.tif"
         # Force overwrite if marker mismatches
         ow = overwrite
         if out_path.is_file() and not ow and last_timestamp:

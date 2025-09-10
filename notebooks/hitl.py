@@ -1,36 +1,65 @@
 # %%
 import json
 import os
+from collections import defaultdict
 
 import ee
 import geemap
+import geopandas as gpd
 import ipywidgets as widgets
+import pandas as pd
 from google.cloud import storage
 from IPython.display import display
+from shapely.geometry import Point
+
+
+def _maybe_init_ee() -> bool:
+    """Quietly initialize EE; return True on success, False otherwise."""
+    try:
+        from offshore_methane import config as cfg  # type: ignore
+
+        ee.Initialize(opt_url=getattr(cfg, "EE_ENDPOINT", None))
+        return True
+    except Exception:
+        try:
+            ee.Initialize()
+            return True
+        except Exception:
+            return False
+
+
+def _ipyleaflet_available() -> bool:
+    try:
+        import ipyleaflet  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 # === GCS Save Helper ===
 def save_drawn_feature_to_gcs(
     geometry,
     system_index,
+    coords,
     bucket_name="offshore_methane",
     hitl_prefix="hitl",
+    local_dir=None,
 ):
     """
-    Save drawn feature geometry as a GeoJSON file to Google Cloud Storage.
+    Save drawn feature geometry as a GeoJSON file to Google Cloud Storage and optionally locally.
 
     Args:
         geometry (dict): GeoJSON geometry of the drawn plume.
         system_index (str): Sentinel-2 system:index identifier.
+        coords (str): Coordinate string for the scene.
         bucket_name (str): GCS bucket name.
         hitl_prefix (str): GCS subfolder/prefix for HITL annotations.
+        local_dir (str, optional): Local directory to save the file. If None, skips local save.
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
+    filename = f"{system_index}_HITL_{coords}.geojson"
 
-    filename = f"{system_index}_HITL.geojson"
-    blob = bucket.blob(f"{system_index}/{filename}")
-
+    # Prepare the GeoJSON content
     geojson = {
         "type": "FeatureCollection",
         "features": [
@@ -42,13 +71,34 @@ def save_drawn_feature_to_gcs(
         ],
     }
 
-    blob.upload_from_string(json.dumps(geojson), content_type="application/geo+json")
-    print(f"✔️ Saved plume annotation to: gs://{bucket_name}/{hitl_prefix}/{filename}")
+    # === Save locally if requested ===
+    if local_dir is not None:
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, system_index, filename)
+        with open(local_path, "w", encoding="utf-8") as f:
+            json.dump(geojson, f, ensure_ascii=False, indent=2)
+        print(f"💾 Saved plume annotation locally to: {local_path}")
+    else:
+        # === Save to GCS ===
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        # Store alongside other artefacts for the scene (MBSP, VEC, etc.)
+        blob = bucket.blob(f"{system_index}/{filename}")
+        blob.upload_from_string(
+            json.dumps(geojson), content_type="application/geo+json"
+        )
+        # Reflect the actual write location (hitl_prefix is not used in path)
+        print(
+            f"✔️ Saved plume annotation to: gs://{bucket_name}/{system_index}/{filename}"
+        )
 
 
 # === Reviewer Interface ===
 def start_hitl_review_loop(
-    detections, bucket_name="offshore_methane", save_thumbnail=False
+    detections: pd.DataFrame,
+    bucket_name: str = "offshore_methane",
+    save_thumbnail: bool = False,
+    from_local: str | None = None,
 ):
     """
     Launch an interactive review interface for HITL plume annotation.
@@ -59,8 +109,37 @@ def start_hitl_review_loop(
     """
     save_thumbnail_folder = "../data/thumbnails" if save_thumbnail else None
 
+    # Ensure expected columns exist
+    required_cols = {"system_index", "coords"}
+    missing = required_cols - set(detections.columns)
+    if missing:
+        raise ValueError(f"detections is missing required columns: {sorted(missing)}")
+
+    # Optional window_id for recording HITL decisions back to CSVs
+    include_wid = "window_id" in detections.columns
+
+    def _option_value(r):
+        # Encode optional fields: window_id, lon, lat for better centering
+        base = [str(r["system_index"]), str(r["coords"])]
+        if include_wid and pd.notna(r.get("window_id")):
+            base.append(int(r["window_id"]))
+        if pd.notna(r.get("lon")) and pd.notna(r.get("lat")):
+            base.extend([float(r["lon"]), float(r["lat"])])
+        return tuple(base)
+
+    def _label(row):
+        return f"{row['system_index']} @ {row['coords']}" + (
+            f"  (wid {int(row['window_id'])})"
+            if include_wid and pd.notna(row.get("window_id"))
+            else ""
+        )
+
+    tmp = detections.copy()
+    tmp["__label"] = tmp.apply(_label, axis=1)
+    tmp = tmp.sort_values(["__label"]).reset_index(drop=True)
+
     scene_selector = widgets.Dropdown(
-        options=[(f"{sid} @ {coords}", (sid, coords)) for sid, coords in detections],
+        options=[(_label(row), _option_value(row)) for _, row in tmp.iterrows()],
         description="Scene:",
         layout=widgets.Layout(width="auto"),
     )
@@ -68,38 +147,119 @@ def start_hitl_review_loop(
     save_btn = widgets.Button(description="Save Plume")
     no_plume_btn = widgets.Button(description="Save as No Plume")
     status = widgets.Label()
-    out = widgets.Output()
+    out = widgets.Output(layout=widgets.Layout(height="650px", width="100%"))
     current_map = None
 
-    def display_scene(system_index, coords):
+    def display_scene(system_index, coords, window_id=None):
         nonlocal current_map
         if current_map is not None:
             current_map.close()
 
-        current_map = display_s2_with_geojson_from_gcs(
+        # Preflight: if both VEC and MBSP are missing, show an inline message instead of an empty map
+        vec_name = f"{system_index}_VEC_{coords}.geojson"
+        mbsp_name = f"{system_index}_MBSP_{coords}.tif"
+        missing_msgs = []
+        try:
+            if from_local:
+                base = os.path.join(from_local, system_index)
+                if not os.path.exists(os.path.join(base, vec_name)):
+                    missing_msgs.append(f"Missing vector: {base}/{vec_name}")
+                if not os.path.exists(os.path.join(base, mbsp_name)):
+                    missing_msgs.append(f"Missing MBSP: {base}/{mbsp_name}")
+            else:
+                client = storage.Client()
+                bucket = client.bucket(bucket_name)
+                if not bucket.blob(f"{system_index}/{vec_name}").exists():
+                    missing_msgs.append(
+                        f"Missing vector: gs://{bucket_name}/{system_index}/{vec_name}"
+                    )
+                if not bucket.blob(f"{system_index}/{mbsp_name}").exists():
+                    missing_msgs.append(
+                        f"Missing MBSP: gs://{bucket_name}/{system_index}/{mbsp_name}"
+                    )
+        except Exception:
+            # If storage check fails (e.g., auth), proceed to map rendering
+            missing_msgs = []
+
+        if len(missing_msgs) == 2:
+            out.clear_output()
+            with out:
+                display(
+                    widgets.HTML(
+                        """
+                        <div style='padding:12px;border:2px solid #c00;color:#c00;font-weight:600;'>
+                          Required artefacts not found on the selected source. Please run the pipeline or pick another scene.
+                          <ul style='margin-top:6px;'>
+                            {items}
+                          </ul>
+                        </div>
+                        """.replace(
+                            "{items}",
+                            "".join([f"<li>{m}</li>" for m in missing_msgs]),
+                        )
+                    )
+                )
+            status.value = "❗ Missing both VEC and MBSP artefacts."
+            return
+
+        current_map = display_s2_with_geojson(
             system_index,
             coords,
             bucket_name=bucket_name,
             save_thumbnail_folder=save_thumbnail_folder,
+            local_path=from_local,
+            window_id=window_id,
         )
         if current_map is None:
             status.value = "❗ No scene loaded."
             return
+        # Ensure a reasonable on-screen size
+        try:
+            current_map.layout = widgets.Layout(height="600px", width="100%")
+        except Exception:
+            pass
         current_map.add_draw_control()
         out.clear_output()
         with out:
-            display(current_map)
+            if missing_msgs:
+                msg = widgets.HTML(
+                    """
+                    <div style='margin-bottom:8px;padding:10px;border:1px solid #cc8;color:#a60;background:#fff8e6;'>
+                      Some artefacts are missing for this scene:
+                      <ul style='margin-top:6px;'>
+                        {items}
+                      </ul>
+                    </div>
+                    """.replace(
+                        "{items}", "".join([f"<li>{m}</li>" for m in missing_msgs])
+                    )
+                )
+                display(widgets.VBox([msg, current_map]))
+            else:
+                display(current_map)
 
     def on_load_clicked(b):
-        try:
-            system_index, coords = scene_selector.value
-            display_scene(system_index, coords)
+        val = scene_selector.value
+        if isinstance(val, tuple) and len(val) >= 2:
+            system_index, coords = val[0], val[1]
+            wid = None
+            try:
+                if len(val) >= 3 and isinstance(val[2], (int, float)):
+                    wid = int(val[2])
+            except Exception:
+                wid = None
+            display_scene(system_index, coords, window_id=wid)
             status.value = f"✔️ Loaded scene: {system_index}"
-        except Exception as e:
-            status.value = f"❗ Error loading scene: {e}"
+        else:
+            status.value = "❗ Invalid selection."
 
     def on_save_clicked(b):
-        system_index, coords = scene_selector.value
+        val = scene_selector.value
+        if isinstance(val, tuple) and len(val) >= 2:
+            system_index, coords = val[0], val[1]
+        else:
+            status.value = "❗ Invalid selection."
+            return
         if current_map is None:
             status.value = "❗ No scene loaded."
             return
@@ -108,22 +268,58 @@ def start_hitl_review_loop(
             return
         geometry = current_map.user_roi
         geometry_geojson = geometry.getInfo()
-        save_drawn_feature_to_gcs(geometry_geojson, system_index, bucket_name)
+        save_drawn_feature_to_gcs(
+            geometry_geojson, system_index, coords, bucket_name, local_dir=from_local
+        )
+        # Record HITL label in process_runs.csv if a window_id is available
+        try:
+            from offshore_methane.csv_utils import update_run_metrics
+
+            window_id = None
+            try:
+                if (
+                    isinstance(val, tuple)
+                    and len(val) >= 3
+                    and isinstance(val[2], (int, float))
+                ):
+                    window_id = int(val[2])
+            except Exception:
+                window_id = None
+            if window_id is not None:
+                update_run_metrics(window_id, system_index, hitl_value=1)
+        except Exception:
+            pass
         status.value = f"✔️ Saved plume for {system_index}"
 
     def on_no_plume_clicked(b):
-        system_index, coords = scene_selector.value
-        empty_geojson = {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "geometry": None,
-                    "properties": {"system_index": system_index},
-                }
-            ],
-        }
-        save_drawn_feature_to_gcs(empty_geojson, system_index, bucket_name)
+        val = scene_selector.value
+        if isinstance(val, tuple) and len(val) >= 2:
+            system_index, coords = val[0], val[1]
+        else:
+            status.value = "❗ Invalid selection."
+            return
+        empty_geometry = None
+        save_drawn_feature_to_gcs(
+            empty_geometry, system_index, coords, bucket_name, local_dir=from_local
+        )
+        # Record HITL = 0 (no plume) when possible
+        try:
+            from offshore_methane.csv_utils import update_run_metrics
+
+            window_id = None
+            try:
+                if (
+                    isinstance(val, tuple)
+                    and len(val) >= 3
+                    and isinstance(val[2], (int, float))
+                ):
+                    window_id = int(val[2])
+            except Exception:
+                window_id = None
+            if window_id is not None:
+                update_run_metrics(window_id, system_index, hitl_value=0)
+        except Exception:
+            pass
         status.value = f"✔️ Marked {system_index} as no plume"
 
     load_btn.on_click(on_load_clicked)
@@ -136,71 +332,150 @@ def start_hitl_review_loop(
     display(out)
 
 
-# === GCS Data Helper ===
-def deduplicate_by_date_and_coords(detections):
+def list_detections(bucket_name=None, local_path=None):
     """
-    Deduplicate detections by date and coordinate combination.
+    Return a GeoDataFrame of detections, marking which have HITL review
+    and the size of the HITL file in bytes (None if not available or local_path used).
 
     Args:
-        detections (List[Tuple[str, str]]): List of (system_index, coords) tuples.
+        bucket_name (str): GCS bucket name (optional if local_path is provided).
+        local_path (str): Local folder path with same structure as GCS bucket.
 
     Returns:
-        List[Tuple[str, str]]: Deduplicated list.
+        GeoDataFrame: Columns = [system_index, coords, reviewed, geometry, hitl_file_size]
     """
-    seen = set()
-    unique = []
-
-    for system_index, coords in detections:
-        date = system_index.split("_")[0]
-        key = (date, coords)
-        if key not in seen:
-            unique.append((system_index, coords))
-            seen.add(key)
-
-    return unique
-
-
-def list_unreviewed_detections_from_gcs(bucket_name):
-    """
-    Return a list of (system_index, coordinates) tuples for detections
-    missing a HITL annotation in the GCS bucket.
-
-    Args:
-        bucket_name (str): GCS bucket name.
-
-    Returns:
-        List[Tuple[str, str]]: Unreviewed detections.
-    """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    all_unreviewed = []
-
-    from collections import defaultdict
-
     detections = defaultdict(list)
     hitl_files = set()
+    hitl_file_sizes = {}  # Only used for GCS mode
+    detections_gdf = gpd.GeoDataFrame(
+        columns=["system_index", "coords", "reviewed", "geometry", "hitl_file_size"]
+    )
 
-    for blob in list(bucket.list_blobs()):
-        name = blob.name
-        if name.endswith(".geojson"):
-            parts = name.split("/")
-            if len(parts) != 2:
-                continue
+    if local_path:
+        # Local folder mode
+        for root, _, files in os.walk(local_path):
+            for filename in files:
+                if filename.endswith(".geojson"):
+                    rel_path = os.path.relpath(os.path.join(root, filename), local_path)
+                    parts = rel_path.replace("\\", "/").split("/")
+                    if len(parts) != 2:
+                        continue
+                    system_index, filename = parts
+                    if filename.startswith(f"{system_index}_VEC_"):
+                        coords = filename[
+                            len(f"{system_index}_VEC_") : -len(".geojson")
+                        ]
+                        detections[system_index].append(coords)
+                    elif filename.startswith(f"{system_index}_HITL_"):
+                        coords = filename[
+                            len(f"{system_index}_HITL_") : -len(".geojson")
+                        ]
+                        hitl_files.add((system_index, coords))
+                        hitl_file_sizes[(system_index, coords)] = (
+                            None  # Local mode: always None
+                        )
+    else:
+        # GCS mode
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        for blob in bucket.list_blobs():
+            name = blob.name
+            if name.endswith(".geojson"):
+                parts = name.split("/")
+                if len(parts) != 2:
+                    continue
+                system_index, filename = parts
+                if filename.startswith(f"{system_index}_VEC_"):
+                    coords = filename[len(f"{system_index}_VEC_") : -len(".geojson")]
+                    detections[system_index].append(coords)
+                elif filename.startswith(f"{system_index}_HITL_"):
+                    coords = filename[len(f"{system_index}_HITL_") : -len(".geojson")]
+                    hitl_files.add((system_index, coords))
+                    blob.reload()  # ensure metadata is up-to-date
+                    hitl_file_sizes[(system_index, coords)] = blob.size
 
-            system_index, filename = parts
-            if filename.startswith(f"{system_index}_VEC_"):
-                coords = filename[len(f"{system_index}_VEC_") : -len(".geojson")]
-                detections[system_index].append(coords)
-            elif filename.startswith(f"{system_index}_HITL_"):
-                coords = filename[len(f"{system_index}_HITL_") : -len(".geojson")]
-                hitl_files.add((system_index, coords))
-
+    # Build GeoDataFrame
     for system_index, coords_list in detections.items():
         for coords in coords_list:
-            if (system_index, coords) not in hitl_files:
-                all_unreviewed.append((system_index, coords))
+            # coords may be "<structure_id>" now; geometry unknown without DB
+            lon = lat = None
+            try:
+                lon, lat = map(float, coords.split("_"))
+            except Exception:
+                pass
+            reviewed = (system_index, coords) in hitl_files
+            hitl_file_size = hitl_file_sizes.get((system_index, coords), None)
+            new_row = gpd.GeoDataFrame(
+                [
+                    {
+                        "system_index": system_index,
+                        "coords": coords,
+                        "reviewed": reviewed,
+                        "geometry": Point(lon, lat)
+                        if (lon is not None and lat is not None)
+                        else None,
+                        "hitl_file_size": hitl_file_size,
+                    }
+                ],
+                columns=[
+                    "system_index",
+                    "coords",
+                    "reviewed",
+                    "geometry",
+                    "hitl_file_size",
+                ],
+            )
+            detections_gdf = pd.concat([detections_gdf, new_row], ignore_index=True)
 
-    return sorted(all_unreviewed)
+    return detections_gdf
+
+
+def list_detections_from_db(**filters) -> pd.DataFrame:
+    """
+    Build the detections table from the CSV virtual database.
+
+    Uses csv_utils.virtual_db to join windows ↔ runs ↔ granules and produces
+    a DataFrame with the columns expected by the review UI:
+      - system_index (granule id)
+      - coords       (structure_id string used as filename suffix)
+      - window_id    (for recording HITL results back to process_runs.csv)
+      - reviewed     (bool; True when process_runs.hitl_value is present)
+
+    Optional filters are passed through to csv_utils.virtual_db (e.g.,
+    scene_cloud_pct, scene_sga_range, local_sga_range, local_sgi_range).
+    """
+    from offshore_methane.csv_utils import virtual_db
+
+    db = virtual_db(**filters)
+    if db.empty:
+        return pd.DataFrame(columns=["system_index", "coords", "window_id", "reviewed"])  # type: ignore[list-item]
+
+    # Keep rows with a concrete granule id and coordinates
+    df = db.copy()
+    df = df[df["system_index"].astype(str).str.len() > 0]
+    df = df[
+        df["lon"].notna() & df["lat"].notna()
+    ]  # expect coords from windows/structures
+
+    # Use structure_id as suffix and label; keep lon/lat for centering
+    if "structure_id" in df.columns:
+        df["coords"] = df["structure_id"].astype(str)
+    else:
+        df["coords"] = df.apply(
+            lambda r: f"{float(r['lon']):.3f}_{float(r['lat']):.3f}", axis=1
+        )
+    reviewed_col = "hitl_value" if "hitl_value" in df.columns else None
+    df["reviewed"] = df[reviewed_col].notna() if reviewed_col else False
+
+    # Deduplicate by (system_index, coords); prefer unreviewed first
+    df = df.sort_values(["reviewed"]).drop_duplicates(
+        subset=["system_index", "coords"], keep="first"
+    )
+
+    keep_cols = ["system_index", "coords", "window_id", "reviewed"]
+    if "lon" in df.columns and "lat" in df.columns:
+        keep_cols += ["lon", "lat"]
+    return df[keep_cols].reset_index(drop=True)
 
 
 class ThumbnailCreator:
@@ -252,11 +527,13 @@ class ThumbnailCreator:
         urllib.request.urlretrieve(thumb_url, out_path)
 
 
-def display_s2_with_geojson_from_gcs(
+def display_s2_with_geojson(
     system_index,
     coords,
     bucket_name="offshore_methane",
     save_thumbnail_folder=None,
+    local_path=None,
+    window_id=None,
 ):
     """
     Visualize Sentinel-2 imagery and annotation vectors for a given detection.
@@ -265,34 +542,99 @@ def display_s2_with_geojson_from_gcs(
         system_index (str): Sentinel-2 system:index.
         coords (str): Coordinate identifier.
         bucket_name (str): GCS bucket name.
+        save_thumbnail_folder (str): Optional folder for saving thumbnails.
+        local_path (str): Local folder path with same structure as the GCS bucket.
 
     Returns:
         geemap.Map: Interactive map with layers and annotations.
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
+
+    # Ensure EE is initialized (avoid noisy stack traces in notebooks)
+    if not _maybe_init_ee():
+        print(
+            "Earth Engine is not initialized. Run ee.Authenticate(); ee.Initialize() and retry."
+        )
+        return None
+
+    # === Resolve lon/lat and a default AOI ===
+    lon = lat = None
+    # Try to parse from the selector value by re-reading last selection via a global
+    # or attempt to parse coords as "lon_lat" for backward compatibility.
+    try:
+        lon, lat = map(float, coords.split("_"))
+    except Exception:
+        pass
+    # If not parseable, try to derive from DB
+    if lon is None or lat is None:
+        try:
+            from offshore_methane.csv_utils import df_for_granule
+
+            df = df_for_granule(system_index)
+            if window_id is not None:
+                try:
+                    df = df[df["window_id"].astype("Int64") == int(window_id)]
+                except Exception:
+                    pass
+            if not df.empty and df["lon"].notna().any() and df["lat"].notna().any():
+                lon = float(df.iloc[0]["lon"])  # type: ignore[arg-type]
+                lat = float(df.iloc[0]["lat"])  # type: ignore[arg-type]
+        except Exception:
+            pass
+    if lon is None or lat is None:
+        print("Could not resolve lon/lat for the selected scene.")
+        return None
+    default_radius = 5000
+    try:
+        from offshore_methane import config as _cfg  # local import to avoid cycles
+
+        default_radius = int(_cfg.MASK_PARAMS["dist"]["export_radius_m"])  # type: ignore[index]
+    except Exception:
+        pass
+    point = ee.Geometry.Point(lon, lat)
+    aoi = point.buffer(default_radius)
+
+    # === Try to load VEC GeoJSON (optional) ===
+    fc = None
     filename = f"{system_index}_VEC_{coords}.geojson"
-    blob_path = f"{system_index}/{filename}"
-    blob = bucket.blob(blob_path)
+    client = None
+    bucket = None
+    if local_path:
+        vec_path = os.path.join(local_path, system_index, filename)
+        if os.path.exists(vec_path):
+            try:
+                with open(vec_path, "r") as f:
+                    geojson = json.load(f)
+                fc = geemap.geojson_to_ee(geojson)
+                aoi = fc.geometry()
+            except Exception:
+                pass
+        else:
+            print(f"Vector not found locally (continuing without it): {vec_path}")
+    else:
+        try:
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob_path = f"{system_index}/{filename}"
+            blob = bucket.blob(blob_path)
+            if blob.exists():
+                geojson = json.loads(blob.download_as_text())
+                fc = geemap.geojson_to_ee(geojson)
+                aoi = fc.geometry()
+            else:
+                print(f"Vector not found in GCS (continuing without it): {blob_path}")
+        except Exception as e:
+            print(f"Error loading vector from GCS: {e}")
 
-    if not blob.exists():
-        print(f"GeoJSON file not found in GCS: {blob_path}")
-        return
-
-    geojson = json.loads(blob.download_as_text())
-    fc = geemap.geojson_to_ee(geojson)
-    aoi = fc.geometry()
-
+    # === Load Sentinel-2 image from Earth Engine ===
     s2_image = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filter(ee.Filter.eq("system:index", system_index))
         .first()
     )
 
-    if s2_image is None:
-        print(f"No Sentinel-2 image found with system:index = {system_index}")
-        return
+    # EE returns an object even when empty; proceed and let visualization fail gracefully
 
+    # === Linear fit function ===
     def linearFit(img):
         xVar = img.select("B12")
         yVar = img.select("B11")
@@ -305,140 +647,174 @@ def display_s2_with_geojson_from_gcs(
             bestEffort=True,
         )
 
-        coefList = ee.Array(fit.get("coefficients")).toList()
-        b0 = ee.Number(ee.List(coefList.get(0)).get(0))
-        corrected_b12 = img.select("B12").multiply(b0).rename("B12_corrected")
-        return img.addBands(corrected_b12).set({"c_fit": b0, "coef_list": coefList})
+        coef = fit.get("coefficients")
 
-    B11_max = (
-        s2_image.select("B11")
-        .reduceRegion(reducer=ee.Reducer.max(), geometry=aoi, scale=20)
-        .getInfo()["B11"]
-    )
+        def apply_correction():
+            coef_list = ee.Array(coef).toList()
+            b0 = ee.Number(ee.List(coef_list.get(0)).get(0))
+            corrected_b12 = xVar.multiply(b0).rename("B12_corrected")
+            return img.addBands(corrected_b12).set(
+                {"c_fit": b0, "coef_list": coef_list}
+            )
+
+        def no_correction():
+            return img.addBands(xVar.rename("B12_corrected")).set(
+                {"c_fit": None, "coef_list": None}
+            )
+
+        return ee.Image(ee.Algorithms.If(coef, apply_correction(), no_correction()))
+
+    # === Median B11 value ===
+    global B11_median
+    try:
+        B11_median = (
+            s2_image.select("B11")
+            .reduceRegion(
+                reducer=ee.Reducer.median(), geometry=aoi, bestEffort=True, scale=20
+            )
+            .getInfo()
+            .get("B11", 1500)
+        )
+        if B11_median is None:
+            B11_median = 1500
+    except Exception:
+        B11_median = 1500
+    # B11_median
+
     flare_threshold = 1500
-
     rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0, "max": 3000}
-    swir_vis = {"min": 0, "max": B11_max}
+    swir_vis = {"min": 0, "max": 2 * B11_median}
     mbsp_vis = {"min": -0.2, "max": 0.2, "palette": ["red", "white", "blue"]}
     yellow_vis = {
         "palette": ["yellow", "red"],
         "min": flare_threshold,
         "max": flare_threshold * 2,
     }
-    fc_vis = {"color": "green", "width": 2}
+    # fc_vis = {"color": "green", "width": 2}
 
     corrected_img = linearFit(s2_image)
-    lon, lat = map(float, coords.split("_"))
-    Map = geemap.Map(center=[lat, lon], zoom=15)
-    point = ee.Geometry.Point(lon, lat)
-    Map.addLayer(
-        s2_image,
-        rgb_vis,
-        f"RGB {system_index}",
-    )
-    Map.addLayer(corrected_img.select("B11"), swir_vis, "B11")
+    Map = geemap.Map()
+    try:
+        Map.layout = widgets.Layout(height="600px", width="100%")
+    except Exception:
+        pass
+
+    Map.addLayer(s2_image, rgb_vis, f"RGB {system_index}")
+    Map.addLayer(s2_image.select("B11"), swir_vis, "B11")
     Map.addLayer(corrected_img.select("B12_corrected"), swir_vis, "B12 * c_fit")
 
-    mbsp = ee.Image.loadGeoTIFF(
-        f"gs://offshore_methane/{system_index}/{system_index}_MBSP.tif"
-    )
-    Map.addLayer(mbsp, mbsp_vis, "MBSP")
-    hitl_blob_path = f"{system_index}/{system_index}_HITL.geojson"
-    hitl_blob = bucket.blob(hitl_blob_path)
-    if hitl_blob.exists():
-        hitl_str = hitl_blob.download_as_text()
-        hitl_geojson = json.loads(hitl_str)
-        if hitl_geojson["features"][0]["geometry"]:
-            hitl_fc = geemap.geojson_to_ee(hitl_geojson)
-            Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
+    # === Load MBSP layer (optional) ===
+    mbsp_filename = f"{system_index}_MBSP_{coords}.tif"
+    if local_path:
+        mbsp_path = os.path.join(local_path, system_index, mbsp_filename)
+        if not os.path.exists(mbsp_path):
+            print(f"MBSP file not found locally (skipping): {mbsp_path}")
+        else:
+            Map.add_raster(
+                mbsp_path,
+                vmin=-0.2,
+                vmax=0.2,
+                colormap=["red", "white", "blue"],
+                layer_name="MBSP",
+                zoom_to_layer=False,
+            )
+    else:
+        try:
+            # Check existence before attempting to visualize
+            if bucket is None:
+                client = storage.Client()
+                bucket = client.bucket(bucket_name)
+            mbsp_blob = bucket.blob(f"{system_index}/{mbsp_filename}")
+            if mbsp_blob.exists():
+                mbsp = ee.Image.loadGeoTIFF(
+                    f"gs://{bucket_name}/{system_index}/{mbsp_filename}"
+                )
+                Map.addLayer(mbsp, mbsp_vis, "MBSP")
+            else:
+                print(
+                    f"MBSP not found in GCS (skipping): {system_index}/{mbsp_filename}"
+                )
+        except Exception as e:
+            print(f"Error loading MBSP from GCS: {e}")
 
-    Map.addLayer(fc, {}, "Vector")
+    # === Optional HITL layer ===
+    hitl_filename = f"{system_index}_HITL_{coords}.geojson"
+    if local_path:
+        hitl_path = os.path.join(local_path, system_index, hitl_filename)
+        if os.path.exists(hitl_path):
+            with open(hitl_path, "r") as f:
+                hitl_geojson = json.load(f)
+            if hitl_geojson["features"][0]["geometry"] is not None:
+                hitl_fc = geemap.geojson_to_ee(hitl_geojson)
+                Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
+    else:
+        try:
+            if bucket is None:
+                client = storage.Client()
+                bucket = client.bucket(bucket_name)
+            hitl_blob_path = f"{system_index}/{hitl_filename}"
+            hitl_blob = bucket.blob(hitl_blob_path)
+            if hitl_blob.exists():
+                hitl_geojson = json.loads(hitl_blob.download_as_text())
+                if hitl_geojson["features"][0]["geometry"] is not None:
+                    hitl_fc = geemap.geojson_to_ee(hitl_geojson)
+                    Map.addLayer(hitl_fc, {"color": "red"}, "Existing HITL Plume")
+        except Exception as e:
+            print(f"Error loading HITL layer: {e}")
+
+    # === Add detection vector and point ===
+    if fc is not None:
+        Map.addLayer(fc, {}, "Vector")
+    else:
+        # Add a simple buffered ROI as context when VEC is absent
+        Map.addLayer(aoi, {"color": "green"}, "ROI")
     Map.addLayer(point, {"color": "red"}, "Target")
+    Map.centerObject(point, 14)
+    try:
+        Map.addLayerControl()
+    except Exception:
+        pass
 
-    b8a = s2_image.select("B8A")  # 0.86 µm (narrow NIR)
-    b11 = s2_image.select("B11")  # 1.61 µm (SWIR-1)
-    b12 = s2_image.select("B12")  # 2.19 µm (SWIR-2)
-
-    delta_sw = b12.subtract(b11)  # B12 - B11
-    tai = delta_sw.divide(b8a)  # (B12 - B11) / B8A
-
+    # === Flare mask ===
+    b8a = s2_image.select("B8A")
+    b11 = s2_image.select("B11")
+    b12 = s2_image.select("B12")
+    delta_sw = b12.subtract(b11)
+    tai = delta_sw.divide(b8a)
     flare_mask = (
-        tai.gte(0.45)  # ① TAI ≥ 0.45
-        .And(delta_sw.gte(b11.subtract(b8a)))  # ② ΔSWIR ≥ ΔNIR-SWIR
-        .And(b12.gte(flare_threshold))  # ③ keep very hot pixels (original gate)
+        tai.gte(0.45).And(delta_sw.gte(b11.subtract(b8a))).And(b12.gte(flare_threshold))
     )
-
     flare_mask_layer = s2_image.select("B12").updateMask(flare_mask)
     Map.addLayer(flare_mask_layer, yellow_vis, "Flaring", False)
 
-    if save_thumbnail_folder is not None:
-        # Create thumbnails for each band and the blended image
-        thumbnail_creator = ThumbnailCreator(
-            system_index,
-            region=aoi,
-            save_thumbnail_folder=save_thumbnail_folder,
-        )
-        thumbnail_creator.create_thumbnail(s2_image, "rgb", rgb_vis)
-        thumbnail_creator.create_thumbnail(mbsp, "mbsp", mbsp_vis)
-        thumbnail_creator.create_thumbnail(corrected_img.select("B11"), "b11", swir_vis)
-        thumbnail_creator.create_thumbnail(
-            corrected_img.select("B12_corrected"), "b12_corrected", swir_vis
-        )
-
-        # Style the FeatureCollection
-        fc_style = fc.style(**fc_vis).visualize()
-        mbsp_img = mbsp.visualize(**mbsp_vis)
-        blended = mbsp_img.blend(fc_style)
-        thumbnail_creator.create_thumbnail(blended, "blended", vis_params={})
-
-        if "hitl_fc" in locals():
-            fc_style = fc.filterBounds(hitl_fc.geometry()).style(**fc_vis).visualize()
-            mbsp_img = mbsp.visualize(**mbsp_vis)
-            blended = mbsp_img.blend(fc_style)
-            thumbnail_creator.create_thumbnail(blended, "blended_hitl", vis_params={})
-    return Map
-
 
 # %%
-# list_of_detections = list_unreviewed_detections_from_gcs("offshore_methane")
-# scenes = deduplicate_by_date_and_coords(list_of_detections)
+from offshore_methane import config as cfg  # noqa: E402
 
-# scenes = [
-#     ("20170705T164319_20170705T165225_T15RYL", "-90.968_27.292"),
-#     ("20230716T162841_20230716T164533_T15QWB", "-92.237_19.566"),
-#     ("20240421T162841_20240421T164310_T15QWB", "-92.237_19.566"),
-#     ("20240417T032521_20240417T033918_T48NTP", "102.987_7.593"),
-#     ("20230830T162839_20230830T164019_T15QWB", "-92.291_19.601"),
-# ]
-row_idx = 1
-sid = ""
-from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
+# Preferred: build from CSV virtual DB (honours default scene filters)
+detections_df = list_detections_from_db()
+if detections_df.empty:
+    # Fallback: scan bucket/local for available vector/HITL files
+    src = cfg.EXPORT_PARAMS.get("bucket") or "offshore_methane"
+    detections_df = list_detections(src)
 
-from offshore_methane.csv_utils import load_events  # noqa
+# Decide storage source for artefacts
+bucket = cfg.EXPORT_PARAMS.get("bucket", "offshore_methane")
+use_local = (
+    str(cfg.EXPORT_PARAMS.get("preferred_location", "bucket")).lower() == "local"
+)
+local_data = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
-rows = load_events().to_dict(orient="records")
+start_hitl_review_loop(
+    detections_df,
+    bucket_name=bucket,
+    from_local=(local_data if use_local else None),
+)
 
-row = rows[row_idx]
-lon, lat = float(row["lon"]), float(row["lat"])
-start, end = row.get("start"), row.get("end")
+# %%
+# # Optional: use local folder instead of bucket
+# detections_local = list_detections(cfg.EXPORT_PARAMS.get("bucket"), local_path="../data")
+# start_hitl_review_loop(detections_local, from_local="../data")
 
-if not sid:
-    from datetime import datetime, timedelta
-
-    def _add_days(ds: str, days: int, fmt: str = "%Y-%m-%d") -> str:
-        return (datetime.strptime(ds, fmt) + timedelta(days=days)).strftime(fmt)
-
-    sids = sentinel2_system_indexes(
-        ee.Geometry.Point([lon, lat]), start, _add_days(end, 1)
-    )
-    if not sids:
-        raise RuntimeError("No Sentinel-2 scenes found for selected event.")
-    sid = sids[0]
-
-print(f"sid: {sid}, lon: {lon}, lat: {lat}")
-scenes = [(sid, f"{lon:.3f}_{lat:.3f}")]
-
-
-start_hitl_review_loop(scenes)
 
 # %%

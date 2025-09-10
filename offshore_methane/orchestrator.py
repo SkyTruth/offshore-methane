@@ -362,7 +362,12 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     )
     try:
         rast_task, rast_new = export_image(
-            R_img, sid, export_roi, last_timestamp=ts, **cfg.EXPORT_PARAMS
+            R_img,
+            sid,
+            export_roi,
+            last_timestamp=ts,
+            suffix=f"{site['lon']:.3f}_{site['lat']:.3f}",
+            **cfg.EXPORT_PARAMS,
         )
     except Exception as exc:
         if cfg.VERBOSE:
@@ -384,7 +389,8 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
     cfg.EXPORT_PARAMS["overwrite"] = (
         cfg.EXPORT_PARAMS["overwrite"] or sga_new or rast_new
     )
-    suffix = f"{site['lon']:.3f}_{site['lat']:.3f}"
+    # Use structure_id as suffix for saved artefacts
+    suffix = str(site.get("structure_id", ""))
     vect_task, _ = export_polygons(
         vect_fc, sid, suffix, last_timestamp=ts, **cfg.EXPORT_PARAMS
     )
@@ -600,6 +606,7 @@ def process_event_granules(
                     "window_id": int(eid),
                     "lon": float(r["lon"]),
                     "lat": float(r["lat"]),
+                    "structure_id": str(r.get("structure_id", "")),
                     "start": str(r.get("start")),
                     "end": add_days_to_date(str(r.get("end")), 1),
                 }

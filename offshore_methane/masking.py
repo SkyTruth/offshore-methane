@@ -578,7 +578,16 @@ def view_mask(
     sid_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "data", sid)
     )
+    # Prefer new naming with suffix; fallback to legacy filename
     mbsp_fp = os.path.join(sid_dir, f"{sid}_MBSP.tif")
+    try:
+        import glob
+
+        candidates = sorted(glob.glob(os.path.join(sid_dir, f"{sid}_MBSP_*.tif")))
+        if candidates:
+            mbsp_fp = candidates[0]
+    except Exception:
+        pass
     sga_fp = os.path.join(sid_dir, f"{sid}_SGA.tif")
 
     if os.path.exists(mbsp_fp):
