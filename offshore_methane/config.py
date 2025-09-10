@@ -4,23 +4,28 @@ from pathlib import Path
 # ------------------------------------------------------------------
 #  Scene / AOI parameters
 # ------------------------------------------------------------------
-# Event- and granule-centric CSVs
-EVENTS_CSV = Path("../data/events.csv")
-GRANULES_CSV = Path("../data/granules.csv")
-EVENT_GRANULE_CSV = Path("../data/event_granule.csv")
+# Resolve repository root (offshore_methane/..)
+_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = _ROOT / "data"
 
-# Optional subset of events to process (by event id or row index)
-# EVENTS_TO_PROCESS = None
-CENTRE_LON, CENTRE_LAT = -90.96802087968751, 27.29220815000002  # PROTOTYPICAL
-# Examples:
-# EVENTS_TO_PROCESS = range(0, 47)
-EVENTS_TO_PROCESS = [42]  # Canonical event id
-# EVENTS_TO_PROCESS = [29]
+# Standard CSV locations (derived from DATA_DIR). Callers should prefer
+# csv_utils helpers instead of reading these directly.
+GRANULES_CSV = DATA_DIR / "granules.csv"
+PROCESS_RUNS_CSV = DATA_DIR / "process_runs.csv"
+STRUCTURES_CSV = DATA_DIR / "structures.csv"
+WINDOWS_CSV = DATA_DIR / "windows.csv"
 
-START, END = (
-    "2017-07-05",  # Inclusive
-    "2017-07-05",  # Inclusive
-)  # Known pollution event  # PROTOTYPICAL
+# Optional subsets to process
+# Prefer passing lists to orchestrator.main(...). These config lists are used
+# when running as a module without arguments.
+# - WINDOWS_TO_PROCESS: window ids
+# - STRUCTURES_TO_PROCESS: structure ids (strings or ints)
+# - GRANULES_TO_PROCESS: Sentinel-2 system:index values
+#
+# Leave as None to process all.
+# WINDOWS_TO_PROCESS = None
+# STRUCTURES_TO_PROCESS = None
+# GRANULES_TO_PROCESS = None
 
 
 # ------------------------------------------------------------------
@@ -71,7 +76,7 @@ MASK_PARAMS = {
         "p_high": 100,
         "saturation": 10_000,
     },
-    "ndwi": {"threshold": 0.0},
+    "ndwi": {"threshold": -10.0},
     "sunglint": {
         "scene_sga_range": (0.0, 40.0),  # deg
         "local_sga_range": (0.0, 30.0),  # deg
@@ -79,7 +84,7 @@ MASK_PARAMS = {
             -0.60,
             1.0,
         ),  # NDI # -.6 needs to be higher to actually do anything
-        "outlier_std_range": (0, 3),  # SGX Outlier
+        "outlier_std_range": (-10, 10),  # SGX Outlier
     },
     "min_valid_pct": 0.01,
 }

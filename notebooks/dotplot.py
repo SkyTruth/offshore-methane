@@ -46,17 +46,16 @@ scenes = (
 )
 print(len(scenes))
 # %%
-import csv  # noqa
 import offshore_methane.config as cfg  # noqa
 from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
+from offshore_methane.csv_utils import load_events  # noqa
 from datetime import datetime, timedelta  # noqa
 
 def _add_days(ds: str, days: int, fmt: str = "%Y-%m-%d") -> str:
     return (datetime.strptime(ds, fmt) + timedelta(days=days)).strftime(fmt)
 
-with open(cfg.EVENTS_CSV, newline="") as f:
-    reader = csv.DictReader(f)
-    rows = list(reader)[:47]
+ev_df = load_events()
+rows = ev_df.to_dict(orient="records")[:47]
 
 scenes = []
 for row in rows:

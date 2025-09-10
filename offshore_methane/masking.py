@@ -356,7 +356,7 @@ def build_mask_for_C(
         # "outlier": outlier_mask(img, p, valid_mask=base),
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
-        "ndwi": ndwi_mask(img, p),
+        # "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
         "sga": sga_mask(img, p),
         "sgi": sgi_mask(img, p),
@@ -430,7 +430,7 @@ def build_mask_for_MBSP(
     filters = {
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
-        "ndwi": ndwi_mask(img, p),
+        # "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
         # "sgi": sgi_mask(img, p),
         "sgx_outlier": sgx_outlier(img, p),
@@ -475,6 +475,14 @@ def view_mask(
         Interactive map; in notebooks just evaluate to render, or call
         ``m.to_html("outfile.html")`` to export.
     """
+    # Ensure the most recent config values are used in interactive sessions
+    try:
+        from .utils import refresh_config as _refresh
+
+        _refresh()
+    except Exception:
+        pass
+
     ee.Initialize()
 
     # 1️⃣ Load image and derive centre geometry
@@ -483,6 +491,53 @@ def view_mask(
         raise ValueError(f"Sentinel-2 image {sid!r} not found.")
 
     centre = ee.Geometry.Point([centre_lon, centre_lat])
+
+    # Shared-location timestamp guardrail: compare remote vs local run timestamp
+    try:
+        from offshore_methane.csv_utils import df_for_granule
+        from offshore_methane.ee_utils import read_remote_last_timestamp
+        import warnings
+        try:
+            from IPython.display import HTML  # type: ignore
+        except Exception:  # pragma: no cover
+            HTML = None  # type: ignore
+
+        df_ts = df_for_granule(sid)
+        local_ts = None
+        if not df_ts.empty and "last_timestamp" in df_ts.columns:
+            non_null = df_ts[df_ts["last_timestamp"].notna() & (df_ts["last_timestamp"].astype(str).str.len() > 0)]
+            if not non_null.empty:
+                # Choose most recent when multiple rows exist
+                try:
+                    non_null = non_null.sort_values("last_timestamp")
+                except Exception:
+                    pass
+                local_ts = str(non_null.iloc[-1]["last_timestamp"]).strip()
+
+        if local_ts:
+            remote_ts = read_remote_last_timestamp(
+                sid,
+                preferred_location=cfg.EXPORT_PARAMS.get("preferred_location", "local"),
+                bucket=cfg.EXPORT_PARAMS.get("bucket", ""),
+                ee_asset_folder=cfg.EXPORT_PARAMS.get("ee_asset_folder", ""),
+            )
+            if remote_ts and str(remote_ts).strip() != local_ts:
+                msg = (
+                    f"Timestamp mismatch for {sid}: shared={remote_ts} vs local={local_ts}. "
+                    "Another user may have processed this scene; outputs may not match local settings."
+                )
+                # Raise a visible warning in notebooks/CLI
+                warnings.warn("⚠ " + msg, RuntimeWarning)
+                if HTML is not None:
+                    try:
+                        display(HTML(
+                            f"<div style='padding:8px;border:2px solid #c00;color:#c00;font-weight:600;'>⚠ {msg}</div>"
+                        ))
+                    except Exception:
+                        pass
+    except Exception:
+        # Non-fatal in viewer
+        pass
 
     # 2️⃣ True-colour backdrop (stretch a touch for contrast)
     rgb = (
@@ -575,7 +630,7 @@ def show_me(
     Parameters
     ----------
     eid : int | None
-        Event id to visualize. If both `eid` and `sid` are provided, filters to
+        Window id to visualize. If both `eid` and `sid` are provided, filters to
         that specific mapping.
     sid : str | None
         Sentinel-2 system:index (granule id). If provided, chooses the first
@@ -587,7 +642,14 @@ def show_me(
         scene_cloud_pct=..., scene_sga_range=(...), local_sga_range=(...),
         local_sgi_range=(...)).
     """
-    from offshore_methane.csv_utils import df_for_event, df_for_granule, virtual_db
+    # Ensure the most recent config values are used
+    try:
+        from .utils import refresh_config as _refresh
+
+        _refresh()
+    except Exception:
+        pass
+    from offshore_methane.csv_utils import df_for_granule, df_for_window, virtual_db
 
     target_sid: str | None = None
     target_eid: int | None = None
@@ -603,7 +665,7 @@ def show_me(
         f.setdefault("scene_sga_range", None)
         df = df_for_granule(sid, **f)
         if eid is not None:
-            df = df[df["event_id"] == int(eid)]
+            df = df[df["window_id"] == int(eid)]
         if df.empty:
             print("No matching rows for given sid/eid with current filters.")
             return
@@ -612,11 +674,11 @@ def show_me(
             df = df.sort_values("timestamp")
         row = df.iloc[0]
         target_sid = str(row["system_index"]).strip()
-        target_eid = int(row["event_id"]) if pd.notna(row.get("event_id")) else None  # type: ignore[arg-type]
+        target_eid = int(row["window_id"]) if pd.notna(row.get("window_id")) else None  # type: ignore[arg-type]
         lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
 
     elif eid is not None:
-        df = df_for_event(int(eid), **filters)
+        df = df_for_window(int(eid), **filters)
         if df.empty:
             print("No matching rows for given eid with current filters.")
             return
@@ -624,7 +686,7 @@ def show_me(
             df = df.sort_values("timestamp")
         row = df.iloc[0]
         target_sid = str(row["system_index"]).strip()
-        target_eid = int(row["event_id"])  # type: ignore[arg-type]
+        target_eid = int(row["window_id"])  # type: ignore[arg-type]
         lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
 
     else:
@@ -637,7 +699,7 @@ def show_me(
             df = df.sort_values("timestamp")
         row = df.iloc[0]
         target_sid = str(row["system_index"]).strip()
-        target_eid = int(row["event_id"]) if pd.notna(row.get("event_id")) else None  # type: ignore[arg-type]
+        target_eid = int(row["window_id"]) if pd.notna(row.get("window_id")) else None  # type: ignore[arg-type]
         lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
 
     if target_sid is None or lon is None or lat is None:

@@ -1,5 +1,4 @@
 # %%
-import csv
 import json
 import os
 
@@ -8,8 +7,6 @@ import geemap
 import ipywidgets as widgets
 from google.cloud import storage
 from IPython.display import display
-
-import offshore_methane.config as cfg
 
 
 # === GCS Save Helper ===
@@ -417,9 +414,9 @@ row_idx = 1
 sid = ""
 from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
 
-with open(cfg.EVENTS_CSV, newline="") as f:
-    reader = csv.DictReader(f)
-    rows = list(reader)
+from offshore_methane.csv_utils import load_events  # noqa
+
+rows = load_events().to_dict(orient="records")
 
 row = rows[row_idx]
 lon, lat = float(row["lon"]), float(row["lat"])

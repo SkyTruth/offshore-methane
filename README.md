@@ -8,7 +8,7 @@ This repository contains experimental tooling for detecting offshore methane emi
 | --- | --- |
 | `offshore_methane/` | Core Python package. Modules are described below. |
 | `notebooks/` | Example Jupyter notebooks for interactive exploration. |
-| `data/` | Small example data such as `events.csv` (inputs), plus `granules.csv` and `event_granule.csv` (outputs). |
+| `data/` | Small example data such as `structures.csv`+`windows.csv` (inputs), plus `granules.csv` and `process_runs.csv` (outputs). |
 | `docs/` | Additional documentation. |
 | `tests/` | Unit tests run by `pytest`. |
 
@@ -69,13 +69,13 @@ m = view_mask(
 
 There are two phases you can run independently:
 
-1) Discover granules (populate `granules.csv` and `event_granule.csv`):
+1) Discover granules (populate `granules.csv` and `process_runs.csv`):
 ```bash
 python -m offshore_methane.orchestrator discover
 ```
 
-If an event has no matching Sentinel‑2 granules, a marker row is added to
-`event_granule.csv` for that event (with empty `system_index`), so it won’t be
+If a window has no matching Sentinel‑2 granules, a marker row is added to
+`process_runs.csv` for that window (with empty `system_index`), so it won’t be
 re-discovered on subsequent runs.
 
 2) Process granules (SGA grid, masks, MBSP, exports):
@@ -88,7 +88,23 @@ You can also run both sequentially with:
 python -m offshore_methane.orchestrator both
 ```
 
-Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS`. Discovered granules are appended to `data/granules.csv` and linked to events in `data/event_granule.csv`.
+Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS`. Discovered granules are appended to `data/granules.csv` and linked to windows in `data/process_runs.csv`.
+
+Filters (structure ids, window ids, granule ids) can be passed programmatically:
+
+```python
+from offshore_methane.orchestrator import main
+# Discover only for given structures
+main("discover", structure_ids=["x1", "x7"]) 
+# Process for specific windows or granules
+main("process", window_ids=[101, 102])
+main("process", system_indexes=["20170705T164319_20170705T165225_T15RXL"]) 
+```
+
+When running as a module, you can also set lists in `config.py`:
+`STRUCTURES_TO_PROCESS`, `WINDOWS_TO_PROCESS`, `GRANULES_TO_PROCESS`.
+The orchestrator auto‑reloads `config.py` at runtime, so edits take effect
+without restarting your session.
 
 ## Configuration
 
@@ -98,9 +114,8 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 | Name | Used in | Effect |
 | --- | --- | --- |
-| `EVENTS_CSV` | `orchestrator.iter_sites` | CSV listing events with `lon`, `lat`, `start`, `end`. |
-| `EVENTS_TO_PROCESS` | `orchestrator.iter_sites` | Optional subset to process (event ids or row indexes). |
-| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `EVENTS_CSV` is missing. |
+| `STRUCTURES_CSV`, `WINDOWS_CSV` | `csv_utils.load_events` | Primary inputs (normalized split). `events.csv` is legacy fallback. |
+| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates when no windows exist. |
 | `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel-2 search. |
 
 ### Algorithm options
@@ -146,6 +161,21 @@ Changing these values alters the pixel selection process; for instance increasin
 
 - [docs/references.md](docs/references.md) - relevant papers and background material.
 - `notebooks/` - exploratory notebooks demonstrating cosine lookups, sunglint correction and a full MBSP demo.
+
+## Data Model (CSV)
+
+- granules.csv (key: system_index)
+  - Columns: system_index, sga_scene, cloudiness, timestamp, git_hash.
+- process_runs.csv (many-to-many: window_id ↔ system_index)
+  - Columns: window_id, system_index, git_hash, last_timestamp (UTC ISO), sga_local_median, sgi_median, valid_pixel_c, valid_pixel_mbsp, hitl_value.
+- windows.csv (input)
+  - Columns: id (window_id), structure_id, start, end, flare_lat, flare_lon, optional metadata (e.g., citation, EEZ).
+- structures.csv (input)
+  - Columns: structure_id, lon, lat, optional name, country.
+
+Notes
+- Local medians (sga_local_median, sgi_median) are per-run metrics and are stored in process_runs.csv, not granules.csv.
+- For legacy projects that used events.csv and event_granule.csv, use the migration: `python -m offshore_methane.csv_migrate`.
 
 ## Contributing
 

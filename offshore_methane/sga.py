@@ -233,7 +233,7 @@ def ensure_sga_asset(
     sid: str,
     ee_asset_folder: str,
     bucket: str,
-    local_path: Path = Path("../data"),
+    local_path: Path = cfg.DATA_DIR,
     preferred_location: str | None = None,
     **kwargs,
 ) -> tuple[str, bool]:

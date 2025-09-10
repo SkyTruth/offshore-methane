@@ -88,6 +88,9 @@ data/*
 !data/sites.csv
 !data/events.csv
 !data/granules.csv
+!data/process_runs.csv
+!data/structures.csv
+!data/windows.csv
 !data/event_granule.csv
 !data/sgi_vs_sga_pixels.csv
 !data/models/
