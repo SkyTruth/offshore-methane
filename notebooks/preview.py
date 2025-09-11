@@ -381,6 +381,63 @@ def gdf_to_sid_list(gdf):
     return sid_data
 
 
+def sid_data_from_db(
+    *,
+    structure_ids=None,
+    window_ids=None,
+    system_indexes=None,
+    **filters,
+):
+    """
+    Build a sid_data list (for show_granule_viewer) directly from the CSV virtual DB.
+
+    Parameters
+    ----------
+    structure_ids : Iterable | None
+        Optional list of structure IDs to include.
+    window_ids : Iterable | None
+        Optional list of window IDs to include.
+    system_indexes : Iterable | None
+        Optional list of Sentinel-2 system:index values to include.
+    filters : dict
+        Optional scene/local filters forwarded to csv_utils (e.g., scene_cloud_pct,
+        scene_sga_range, local_sga_range, local_sgi_range).
+
+    Returns
+    -------
+    list[dict]
+        List of dicts with keys: SID, lat, lon.
+
+    Notes
+    -----
+    - Uses csv_utils.unified_db, which prefers the normalized structures/windows
+      inputs and falls back to legacy events.csv if needed.
+    - Only rows with non-empty system_index and valid lon/lat are returned.
+    """
+    try:
+        from offshore_methane.csv_utils import unified_db
+
+        df = unified_db(
+            structure_ids=structure_ids,
+            window_ids=window_ids,
+            system_indexes=system_indexes,
+            **filters,
+        )
+        if df.empty:
+            return []
+        df = df.copy()
+        # Keep rows with concrete granule id + coords
+        df = df[(df["system_index"].astype(str).str.len() > 0)]
+        df = df[df["lon"].notna() & df["lat"].notna()]
+        return [
+            {"SID": r["system_index"], "lat": float(r["lat"]), "lon": float(r["lon"])}
+            for _, r in df.iterrows()
+        ]
+    except Exception:
+        # Graceful fallback: no DB available
+        return []
+
+
 # %%
 # sid_data = [
 #     {

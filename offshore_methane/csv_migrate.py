@@ -39,7 +39,9 @@ from offshore_methane.csv_utils import (
 # -----------------------------------------------------------------------------
 #  Helpers
 # -----------------------------------------------------------------------------
-def _write_sorted(df: pd.DataFrame, path: Path, sort_by: list[str], *, float_fmt: Optional[str] = None) -> None:
+def _write_sorted(
+    df: pd.DataFrame, path: Path, sort_by: list[str], *, float_fmt: Optional[str] = None
+) -> None:
     if not df.empty and sort_by:
         for col in sort_by:
             if col not in df.columns:
@@ -51,7 +53,9 @@ def _write_sorted(df: pd.DataFrame, path: Path, sort_by: list[str], *, float_fmt
 # -----------------------------------------------------------------------------
 #  Migrations
 # -----------------------------------------------------------------------------
-def migrate_event_granule_to_process_runs(delete_old: bool = False) -> Tuple[bool, Path]:
+def migrate_event_granule_to_process_runs(
+    delete_old: bool = False,
+) -> Tuple[bool, Path]:
     """Create process_runs.csv from event_granule.csv (if present).
 
     Adds git_hash (current HEAD, best-effort) and an empty last_timestamp.
@@ -65,7 +69,9 @@ def migrate_event_granule_to_process_runs(delete_old: bool = False) -> Tuple[boo
     df = _read_csv(src).copy()
     if df.empty:
         # Write an empty file with headers (modern schema)
-        out = pd.DataFrame(columns=["window_id", "system_index", "git_hash", "last_timestamp"])
+        out = pd.DataFrame(
+            columns=["window_id", "system_index", "git_hash", "last_timestamp"]
+        )
         _write_sorted(out, dst, ["window_id", "system_index"])
         if delete_old:
             try:
@@ -197,7 +203,9 @@ def migrate_move_local_medians_to_runs() -> bool:
     return changed
 
 
-def _sanitize_nan_strings(df: pd.DataFrame, text_cols: list[str]) -> tuple[pd.DataFrame, bool]:
+def _sanitize_nan_strings(
+    df: pd.DataFrame, text_cols: list[str]
+) -> tuple[pd.DataFrame, bool]:
     changed = False
     for col in text_cols:
         if col not in df.columns:
@@ -223,7 +231,9 @@ def migrate_sanitize_nan_strings() -> bool:
     # process_runs.csv
     pr = _read_csv(cfg.PROCESS_RUNS_CSV).copy()
     if not pr.empty:
-        pr2, ch = _sanitize_nan_strings(pr, ["system_index", "git_hash", "last_timestamp"])
+        pr2, ch = _sanitize_nan_strings(
+            pr, ["system_index", "git_hash", "last_timestamp"]
+        )
         if ch:
             _atomic_write_csv(pr2, cfg.PROCESS_RUNS_CSV)
             changed_any = True
@@ -245,16 +255,20 @@ def migrate_sanitize_nan_strings() -> bool:
     # structures.csv
     s = _read_csv(cfg.STRUCTURES_CSV).copy()
     if not s.empty:
-        s2, ch = _sanitize_nan_strings(s, ["structure_id", "name", "country"]) if any(
-            c in s.columns for c in ("structure_id", "name", "country")
-        ) else (s, False)
+        s2, ch = (
+            _sanitize_nan_strings(s, ["structure_id", "name", "country"])
+            if any(c in s.columns for c in ("structure_id", "name", "country"))
+            else (s, False)
+        )
         if ch:
             _atomic_write_csv(s2, cfg.STRUCTURES_CSV)
             changed_any = True
     return changed_any
 
 
-def migrate_events_to_structures_and_windows(delete_old: bool = False) -> Tuple[bool, Path, Path]:
+def migrate_events_to_structures_and_windows(
+    delete_old: bool = False,
+) -> Tuple[bool, Path, Path]:
     """Split events.csv into structures.csv + windows.csv.
 
     - structures.csv: structure_id, lon, lat, [name]
@@ -272,9 +286,15 @@ def migrate_events_to_structures_and_windows(delete_old: bool = False) -> Tuple[
     ev = _read_csv(src).copy()
     if ev.empty:
         # write empty shells
-        _write_sorted(pd.DataFrame(columns=["structure_id", "lon", "lat"]), cfg.STRUCTURES_CSV, ["structure_id"])
         _write_sorted(
-            pd.DataFrame(columns=["id", "structure_id", "start", "end", "flare_lat", "flare_lon"]),
+            pd.DataFrame(columns=["structure_id", "lon", "lat"]),
+            cfg.STRUCTURES_CSV,
+            ["structure_id"],
+        )
+        _write_sorted(
+            pd.DataFrame(
+                columns=["id", "structure_id", "start", "end", "flare_lat", "flare_lon"]
+            ),
             cfg.WINDOWS_CSV,
             ["id"],
         )
@@ -305,17 +325,14 @@ def migrate_events_to_structures_and_windows(delete_old: bool = False) -> Tuple[
     key_cols = ["lon", "lat"]
     # sort unique locations for deterministic IDs
     unique_locs = (
-        ev[key_cols]
-        .drop_duplicates()
-        .sort_values(key_cols)
-        .reset_index(drop=True)
+        ev[key_cols].drop_duplicates().sort_values(key_cols).reset_index(drop=True)
     )
     struct_rows = []
     loc_to_struct: dict[tuple, str] = {}
     for idx, row in unique_locs.iterrows():
         lon = row["lon"]
         lat = row["lat"]
-        sid = f"x{idx+1}"
+        sid = f"x{idx + 1}"
         loc_to_struct[(lon, lat)] = sid
         # Optionally carry a name/label if present and consistent (first seen)
         sub = ev[(ev["lon"] == lon) & (ev["lat"] == lat)]
@@ -334,12 +351,17 @@ def migrate_events_to_structures_and_windows(delete_old: bool = False) -> Tuple[
 
     # Windows: move id/start/end and link to structure_id; keep extra columns except lon/lat
     windows_cols = ["id", "start", "end"]
-    extra_cols = [c for c in ev.columns if c not in (set(windows_cols) | {"lon", "lat"})]
+    extra_cols = [
+        c for c in ev.columns if c not in (set(windows_cols) | {"lon", "lat"})
+    ]
     win_rows = []
     for _, row in ev.iterrows():
         lon, lat = row["lon"], row["lat"]
         sid = loc_to_struct[(lon, lat)]
-        item = {"id": int(row["id"]) if pd.notna(row["id"]) else None, "structure_id": sid}
+        item = {
+            "id": int(row["id"]) if pd.notna(row["id"]) else None,
+            "structure_id": sid,
+        }
         for c in ("start", "end"):
             if c in ev.columns:
                 item[c] = str(row.get(c, ""))
@@ -352,7 +374,7 @@ def migrate_events_to_structures_and_windows(delete_old: bool = False) -> Tuple[
     for col in ("flare_lat", "flare_lon"):
         if col not in windows.columns:
             windows[col] = pd.NA
-    _write_sorted(windows, cfg.WINDOWS_CSV, ["id"]) 
+    _write_sorted(windows, cfg.WINDOWS_CSV, ["id"])
 
     if delete_old:
         try:
@@ -379,7 +401,9 @@ def migrate_all(delete_old: bool = False) -> None:
         print("  process_runs.csv: normalized column event_id → window_id")
     print(f"  granules.csv:     {'git_hash added' if ch2 else 'no change'} → {dst2}")
     if ch2b:
-        print("  moved local medians (SGA/SGI) to process_runs.csv and removed from granules.csv")
+        print(
+            "  moved local medians (SGA/SGI) to process_runs.csv and removed from granules.csv"
+        )
     print(
         f"  structures/windows: {'created' if ch3 else 'no change'} → {dst3a}, {dst3b}"
     )
@@ -387,7 +411,9 @@ def migrate_all(delete_old: bool = False) -> None:
         print("  sanitized 'nan' string literals to blanks in CSVs")
     # Ensure windows.csv has a proper header row
     if ensure_windows_header():
-        print("  windows.csv: inserted header row [id,structure_id,start,end,citation,country]")
+        print(
+            "  windows.csv: inserted header row [id,structure_id,start,end,citation,country]"
+        )
 
 
 def main():
@@ -398,7 +424,9 @@ def main():
     try:
         merged, updated = merge_nearby_structures(0.005)
         if merged or updated:
-            print(f"Merged {merged} structure group(s); updated {updated} window row(s).")
+            print(
+                f"Merged {merged} structure group(s); updated {updated} window row(s)."
+            )
     except Exception as e:
         print(f"Structure merge skipped due to error: {e}")
 
@@ -589,7 +617,10 @@ def add_country_to_structures_from_windows(
 
     sdf["structure_id"] = sdf["structure_id"].astype("string")
     before = sdf.get(target_col)
-    sdf[target_col] = [mapping.get(sid, (before[i] if before is not None else None)) for i, sid in enumerate(sdf["structure_id"]) ]
+    sdf[target_col] = [
+        mapping.get(sid, (before[i] if before is not None else None))
+        for i, sid in enumerate(sdf["structure_id"])
+    ]
 
     # Count changes (new or different values)
     changed = 0

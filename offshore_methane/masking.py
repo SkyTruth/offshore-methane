@@ -497,6 +497,7 @@ def view_mask(
         from offshore_methane.csv_utils import df_for_granule
         from offshore_methane.ee_utils import read_remote_last_timestamp
         import warnings
+
         try:
             from IPython.display import HTML  # type: ignore
         except Exception:  # pragma: no cover
@@ -505,7 +506,10 @@ def view_mask(
         df_ts = df_for_granule(sid)
         local_ts = None
         if not df_ts.empty and "last_timestamp" in df_ts.columns:
-            non_null = df_ts[df_ts["last_timestamp"].notna() & (df_ts["last_timestamp"].astype(str).str.len() > 0)]
+            non_null = df_ts[
+                df_ts["last_timestamp"].notna()
+                & (df_ts["last_timestamp"].astype(str).str.len() > 0)
+            ]
             if not non_null.empty:
                 # Choose most recent when multiple rows exist
                 try:
@@ -530,9 +534,11 @@ def view_mask(
                 warnings.warn("⚠ " + msg, RuntimeWarning)
                 if HTML is not None:
                     try:
-                        display(HTML(
-                            f"<div style='padding:8px;border:2px solid #c00;color:#c00;font-weight:600;'>⚠ {msg}</div>"
-                        ))
+                        display(
+                            HTML(
+                                f"<div style='padding:8px;border:2px solid #c00;color:#c00;font-weight:600;'>⚠ {msg}</div>"
+                            )
+                        )
                     except Exception:
                         pass
     except Exception:

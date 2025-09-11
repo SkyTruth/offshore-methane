@@ -19,4 +19,3 @@ def refresh_config():
     from . import config as cfg
 
     return importlib.reload(cfg)
-

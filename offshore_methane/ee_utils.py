@@ -518,12 +518,18 @@ def export_image(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                must_overwrite = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                must_overwrite = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 must_overwrite = False
         if exists and (overwrite or must_overwrite):
             # Remove existing object so the new export can succeed
-            subprocess.run([gsutil_cmd(), "rm", gcs_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [gsutil_cmd(), "rm", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             exists = False
         if exists and not overwrite:
             if cfg.VERBOSE:
@@ -555,12 +561,12 @@ def export_image(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                ow = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 pass
-        if _prepare_asset(
-            asset_id, overwrite=ow, timeout=timeout, datatype="raster"
-        ):
+        if _prepare_asset(asset_id, overwrite=ow, timeout=timeout, datatype="raster"):
             # Attach run metadata as asset properties for coordination
             if last_timestamp:
                 image = image.set({"last_timestamp": str(last_timestamp)})
@@ -590,7 +596,9 @@ def export_image(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                ow = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 pass
         if out_path.is_file() and ow:
@@ -668,11 +676,17 @@ def export_polygons(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                must_overwrite = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                must_overwrite = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 must_overwrite = False
         if exists and (overwrite or must_overwrite):
-            subprocess.run([gsutil_cmd(), "rm", gcs_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [gsutil_cmd(), "rm", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             exists = False
         if exists and not overwrite:
             if cfg.VERBOSE:
@@ -699,12 +713,12 @@ def export_polygons(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                ow = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 pass
-        if _prepare_asset(
-            asset_id, overwrite=ow, timeout=timeout, datatype="vector"
-        ):
+        if _prepare_asset(asset_id, overwrite=ow, timeout=timeout, datatype="vector"):
             # Attach run metadata
             if last_timestamp:
                 fc = fc.set({"last_timestamp": str(last_timestamp)})
@@ -726,7 +740,9 @@ def export_polygons(
                     bucket=bucket,
                     ee_asset_folder=ee_asset_folder,
                 )
-                ow = bool(remote_ts and str(remote_ts).strip() != str(last_timestamp).strip())
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
             except Exception:
                 pass
         if out_path.is_file() and ow:

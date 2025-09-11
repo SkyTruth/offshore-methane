@@ -51,8 +51,10 @@ from offshore_methane.ee_utils import sentinel2_system_indexes  # noqa
 from offshore_methane.csv_utils import load_events  # noqa
 from datetime import datetime, timedelta  # noqa
 
+
 def _add_days(ds: str, days: int, fmt: str = "%Y-%m-%d") -> str:
     return (datetime.strptime(ds, fmt) + timedelta(days=days)).strftime(fmt)
+
 
 ev_df = load_events()
 rows = ev_df.to_dict(orient="records")[:47]
@@ -62,7 +64,9 @@ for row in rows:
     lon, lat = float(row["lon"]), float(row["lat"])
     start, end = row.get("start"), row.get("end")
     scenes.extend(
-        sentinel2_system_indexes(ee.Geometry.Point([lon, lat]), start, _add_days(end, 1))
+        sentinel2_system_indexes(
+            ee.Geometry.Point([lon, lat]), start, _add_days(end, 1)
+        )
     )
 print(len(scenes))
 

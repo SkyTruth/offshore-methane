@@ -73,8 +73,11 @@ def save_drawn_feature_to_gcs(
 
     # === Save locally if requested ===
     if local_dir is not None:
+        # Ensure both the root and per-scene subfolder exist
         os.makedirs(local_dir, exist_ok=True)
-        local_path = os.path.join(local_dir, system_index, filename)
+        scene_dir = os.path.join(local_dir, system_index)
+        os.makedirs(scene_dir, exist_ok=True)
+        local_path = os.path.join(scene_dir, filename)
         with open(local_path, "w", encoding="utf-8") as f:
             json.dump(geojson, f, ensure_ascii=False, indent=2)
         print(f"💾 Saved plume annotation locally to: {local_path}")
