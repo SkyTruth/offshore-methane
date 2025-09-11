@@ -6,8 +6,12 @@ dependencies:
   - earthengine-api
   - geemap
   - jupyter
+  - ipyleaflet
+  - jupyterlab_widgets
   - numpy
+  - pandas
   - ipywidgets
+  - geopandas
   - pre-commit
   - ruff
   - pytest
@@ -18,3 +22,5 @@ dependencies:
   - affine
   - rasterio
   - scipy
+  - localtileserver
+  - google-cloud-storage

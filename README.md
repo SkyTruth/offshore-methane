@@ -8,7 +8,7 @@ This repository contains experimental tooling for detecting offshore methane emi
 | --- | --- |
 | `offshore_methane/` | Core Python package. Modules are described below. |
 | `notebooks/` | Example Jupyter notebooks for interactive exploration. |
-| `data/` | Small example data such as `sites.csv` listing known events. |
+| `data/` | Small example data such as `structures.csv`+`windows.csv` (inputs), plus `granules.csv` and `process_runs.csv` (outputs). |
 | `docs/` | Additional documentation. |
 | `tests/` | Unit tests run by `pytest`. |
 
@@ -67,13 +67,45 @@ m = view_mask(
 
 ### 4. Run the orchestrator
 
-The main processing pipeline reads sites from `data/sites.csv` and exports MBSP rasters and plume polygons. Adjust parameters in `offshore_methane/config.py` as needed and launch:
+There are two phases you can run independently:
 
+1) Discover granules (populate `granules.csv` and `process_runs.csv`):
 ```bash
-python -m offshore_methane.orchestrator
+python -m offshore_methane.orchestrator discover
 ```
 
-Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS` in the configuration.
+If a window has no matching Sentinel‑2 granules, a marker row is added to
+`process_runs.csv` for that window (with empty `system_index`), so it won’t be
+re-discovered on subsequent runs.
+
+2) Process granules (SGA grid, masks, MBSP, exports):
+```bash
+python -m offshore_methane.orchestrator process
+```
+
+You can also run both sequentially with:
+```bash
+python -m offshore_methane.orchestrator both
+```
+
+Exports can target local files, Google Cloud Storage or EE assets depending on `EXPORT_PARAMS`. Discovered granules are appended to `data/granules.csv` and linked to windows in `data/process_runs.csv`.
+When `EXPORT_PARAMS.overwrite` is `True`, discovery re-evaluates windows even if mappings already exist.
+
+Filters (structure ids, window ids, granule ids) can be passed programmatically:
+
+```python
+from offshore_methane.orchestrator import main
+# Discover only for given structures
+main("discover", structure_ids=["x1", "x7"]) 
+# Process for specific windows or granules
+main("process", window_ids=[101, 102])
+main("process", system_indexes=["20170705T164319_20170705T165225_T15RXL"]) 
+```
+
+When running as a module, you can also set lists in `config.py`:
+`STRUCTURES_TO_PROCESS`, `WINDOWS_TO_PROCESS`, `GRANULES_TO_PROCESS`.
+The orchestrator auto‑reloads `config.py` at runtime, so edits take effect
+without restarting your session.
 
 ## Configuration
 
@@ -83,9 +115,8 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 
 | Name | Used in | Effect |
 | --- | --- | --- |
-| `SITES_CSV` | `orchestrator.iter_sites` | CSV listing sites with `lon`, `lat`, `start`, `end`. |
-| `SITES_TO_PROCESS` | `orchestrator.iter_sites` | Subset of rows to process (indexes). |
-| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates if `SITES_CSV` is missing. |
+| `STRUCTURES_CSV`, `WINDOWS_CSV` | `csv_utils.load_events` | Primary inputs (normalized split). `events.csv` is legacy fallback. |
+| `CENTRE_LON`, `CENTRE_LAT` | `orchestrator.iter_sites` | Fallback coordinates when no windows exist. |
 | `START`, `END` | `orchestrator.iter_sites` | Default date window for Sentinel-2 search. |
 
 ### Algorithm options
@@ -95,7 +126,7 @@ Exports can target local files, Google Cloud Storage or EE assets depending on `
 | `SPECKLE_FILTER_MODE` (`"none"`, `"median"`, `"adaptive"`) | `orchestrator.process_product` | Chooses the speckle-reduction strategy. |
 | `SPECKLE_RADIUS_PX` | `orchestrator.process_product` | Kernel size for median or adaptive speckle filtering. |
 | `LOGISTIC_SIGMA0`, `LOGISTIC_K` | `algos.logistic_speckle` | Shape the logistic weighting for adaptive filtering. Higher `LOGISTIC_K` sharpens the transition; `LOGISTIC_SIGMA0` shifts it. |
-| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex (unimplemented) and simple MBSP implementations. |
+| `USE_SIMPLE_MBSP` | `orchestrator.process_product` | Toggle between the complex and simple MBSP implementations. |
 | `PLUME_P1`, `PLUME_P2`, `PLUME_P3` | `algos.plume_polygons_three_p` | Monotonic confidence thresholds for plume polygon detection. |
 | `SHOW_THUMB` | `orchestrator.process_product` | If true, displays a diagnostic MBSP thumbnail URL. |
 | `MAX_WORKERS` | `orchestrator.main` | Number of parallel threads used for EE exports. |
@@ -131,6 +162,27 @@ Changing these values alters the pixel selection process; for instance increasin
 
 - [docs/references.md](docs/references.md) - relevant papers and background material.
 - `notebooks/` - exploratory notebooks demonstrating cosine lookups, sunglint correction and a full MBSP demo.
+
+## Data Model (CSV)
+
+- granules.csv (key: system_index)
+  - Columns: system_index, sga_scene, cloudiness, timestamp, git_hash.
+- process_runs.csv (many-to-many: window_id ↔ system_index)
+  - Columns: window_id, system_index, git_hash, last_timestamp (UTC ISO), sga_local_median, sgi_median, valid_pixel_c, valid_pixel_mbsp, hitl_value.
+- windows.csv (input)
+  - Columns: id (window_id), structure_id, start, end, flare_lat, flare_lon, optional metadata (e.g., citation, EEZ).
+- structures.csv (input)
+  - Columns: structure_id, lon, lat, optional name, country.
+
+Notes
+- Local medians (sga_local_median, sgi_median) are per-run metrics and are stored in process_runs.csv, not granules.csv.
+- For legacy projects that used events.csv and event_granule.csv, use the migration: `python -m offshore_methane.csv_migrate`.
+
+CSV conventions
+- Missing values are written as blank cells (not the literal strings "nan" or "None").
+- Text fields (e.g., `system_index`, `git_hash`, `timestamp`, `structure_id`) use blanks for missing.
+- Numeric fields (e.g., medians, valid_pixel_*) use blanks for missing.
+- `process_runs.system_index` is blank to mark a window with “no granules found”.
 
 ## Contributing
 

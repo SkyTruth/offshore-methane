@@ -2,13 +2,14 @@
 # ee_utils.py
 """
 Thin wrappers around the Earth-Engine Python client.
+
+Also includes convenience helpers used by exploratory notebooks.
 """
 
 import json
 import math
 import subprocess
 import time
-from pathlib import Path
 
 import ee
 import geemap
@@ -17,6 +18,7 @@ from requests.exceptions import ConnectionError, HTTPError
 
 import offshore_methane.config as cfg
 from offshore_methane.gcp_utils import gsutil_cmd
+from offshore_methane.gcp_utils import upload_text_gcs, read_text_gcs
 
 ee.Initialize()  # single global EE session
 
@@ -49,8 +51,8 @@ def quick_view(system_index, region=None, bands=["B4", "B3", "B2"]):
     )
 
     # Build min/max lists for visualization
-    min_vals = [stats.get(f"{b}_p10", 0) for b in bands]
-    max_vals = [stats.get(f"{b}_p75", 3000) for b in bands]
+    min_vals = [stats.get(f"{b}_p2", 0) for b in bands]
+    max_vals = [stats.get(f"{b}_p98", 3000) for b in bands]
 
     vis_params = {
         "bands": bands,
@@ -74,19 +76,75 @@ def sentinel2_system_indexes(
     point: ee.Geometry,
     start: str,
     end: str,
-) -> list[str]:
-    from offshore_methane.masking import scene_cloud_filter, scene_sga_filter
+) -> list[dict]:
+    """
+    Return scene metadata for S2 scenes over 'point' in [start, end):
+      [{ 'system_index': str, 'sunglint': float|None, 'cloudiness': float|None }, ...]
+
+    Applies only existence checks for solar/incidence angles; no filtering by
+    SGA or cloudiness.
+    """
+    # Pick up config changes for scene filters
+    try:
+        from .utils import refresh_config as _refresh
+
+        _refresh()
+    except Exception:
+        pass
+    from offshore_methane.masking import scene_sga_filter
+
+    # Require solar angles to exist
+    solar_required = ee.Filter.notNull(
+        ["MEAN_SOLAR_AZIMUTH_ANGLE", "MEAN_SOLAR_ZENITH_ANGLE"]
+    )
+
+    # Require B8A incidence-angle pair to exist
+    inc_filter = ee.Filter.notNull(
+        ["MEAN_INCIDENCE_AZIMUTH_ANGLE_B8A", "MEAN_INCIDENCE_ZENITH_ANGLE_B8A"]
+    )
 
     coll = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
         .filterDate(start, end)
         .filterBounds(point)
-        .filter(scene_cloud_filter(cfg.MASK_PARAMS))
-        .map(lambda img: scene_sga_filter(img, cfg.MASK_PARAMS))
-        .filter(ee.Filter.eq("SGA_OK", 1))
+        .filter(solar_required)
+        .filter(inc_filter)
+        .map(
+            lambda img: ee.Image(img).set(
+                "SGA_SCENE", scene_sga_filter(img, cfg.MASK_PARAMS)
+            )
+        )
     )
 
-    return sorted(set(coll.aggregate_array("system:index").getInfo()))
+    sids = coll.aggregate_array("system:index").getInfo()
+    sgas = coll.aggregate_array("SGA_SCENE").getInfo()
+    clouds = coll.aggregate_array("CLOUDY_PIXEL_PERCENTAGE").getInfo()
+
+    def _sensing_iso_from_sid(sid: str) -> str:
+        # system:index looks like YYYYMMDDTHHMMSS_YYYYMMDDTHHMMSS_TxxYYY
+        try:
+            first = sid.split("_")[0]
+            date = first[:8]
+            time = first[9:15]
+            return (
+                f"{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}:{time[2:4]}:{time[4:6]}"
+            )
+        except Exception:
+            return ""
+
+    times = [_sensing_iso_from_sid(s) for s in sids]
+
+    out = []
+    for sid, sga, cl, ts in zip(sids, sgas, clouds, times):
+        out.append(
+            {
+                "system_index": sid,
+                "sga_scene": None if sga is None else float(sga),
+                "cloudiness": None if cl is None else float(cl),
+                "timestamp": ts,
+            }
+        )
+    return out
 
 
 def _ee_asset_info(asset_id: str) -> dict | None:
@@ -123,6 +181,115 @@ def ee_asset_ready(asset_id: str) -> bool:
     if info.get("type") == "Image":
         return bool(info.get("bands"))
     return True
+
+
+# ------------------------------------------------------------------
+#  Shared-location run metadata: last_timestamp marker
+# ------------------------------------------------------------------
+def write_last_timestamp_marker(
+    sid: str,
+    last_timestamp: str | None,
+    *,
+    preferred_location: str,
+    bucket: str,
+    ee_asset_folder: str,
+) -> None:
+    """
+    Persist a small marker indicating the process_runs.last_timestamp alongside
+    shared exports so concurrent users can detect mismatches.
+
+    - For bucket: writes "gs://{bucket}/{sid}/last_timestamp.txt"
+    - For EE assets: exported assets will carry an image/table property
+      "last_timestamp" via export helpers (no separate marker written here).
+    - For local: writes "data/{sid}/last_timestamp.txt"
+    """
+    if not last_timestamp:
+        return
+    if preferred_location == "bucket":
+        try:
+            upload_text_gcs(bucket, f"{sid}/last_timestamp.txt", str(last_timestamp))
+        except Exception:
+            # Best-effort; continue silently
+            pass
+    elif preferred_location == "ee_asset_folder":
+        # EE properties are set during export; nothing to do here.
+        return
+    else:
+        # local sidecar
+        from offshore_methane import config as cfg
+
+        out = cfg.DATA_DIR / sid / "last_timestamp.txt"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(str(last_timestamp))
+        except Exception:
+            pass
+
+
+def read_remote_last_timestamp(
+    sid: str,
+    *,
+    preferred_location: str,
+    bucket: str,
+    ee_asset_folder: str,
+) -> str | None:
+    """Fetch the shared-location last_timestamp marker for a given SID.
+
+    Returns the timestamp string, or None if not available.
+    """
+    if preferred_location == "bucket":
+        try:
+            ts = read_text_gcs(bucket, f"{sid}/last_timestamp.txt")
+            return ts.strip() if ts is not None else None
+        except Exception:
+            return None
+    elif preferred_location == "ee_asset_folder":
+        # Prefer raster asset metadata as the authoritative source
+        asset_id = f"{ee_asset_folder}/{sid}_MBSP"
+        info = _ee_asset_info(asset_id)
+        if info and isinstance(info.get("properties"), dict):
+            ts = info["properties"].get("last_timestamp")
+            if ts:
+                return str(ts)
+        return None
+    else:
+        from offshore_methane import config as cfg
+
+        path = cfg.DATA_DIR / sid / "last_timestamp.txt"
+        try:
+            return path.read_text().strip() if path.is_file() else None
+        except Exception:
+            return None
+
+
+def check_remote_timestamp_mismatch(
+    sid: str,
+    local_ts: str | None,
+    *,
+    preferred_location: str,
+    bucket: str,
+    ee_asset_folder: str,
+) -> bool:
+    """
+    Compare a local process run timestamp against shared-location metadata.
+
+    Returns True when a mismatch is detected and prints a visible warning.
+    """
+    if not local_ts:
+        return False
+    remote_ts = read_remote_last_timestamp(
+        sid,
+        preferred_location=preferred_location,
+        bucket=bucket,
+        ee_asset_folder=ee_asset_folder,
+    )
+    if remote_ts and str(remote_ts).strip() != str(local_ts).strip():
+        print(
+            f"⚠ Timestamp mismatch for {sid}: shared={remote_ts} vs local={local_ts}.\n"
+            "  Another user may have processed this scene; outputs may not match local settings."
+        )
+        return True
+    return False
 
 
 def process_sid_into_gcs_xml_address(sid: str) -> str:
@@ -173,10 +340,49 @@ def _download_url(url, dest, chunk=8192, *, max_retries=5, backoff=1.5):
         try:
             with requests.get(url, stream=True, timeout=60) as r:
                 r.raise_for_status()
+                # Track expected size when provided by server
+                expected = None
+                try:
+                    h = r.headers.get("Content-Length")
+                    if h is not None:
+                        expected = int(h)
+                except Exception:
+                    expected = None
+
+                written = 0
                 with open(dest, "wb") as fh:
                     for block in r.iter_content(chunk):
                         if block:  # ignore keep-alives
                             fh.write(block)
+                            written += len(block)
+
+                # If server provided size, verify integrity
+                if expected is not None and written != expected:
+                    # Remove partial file and retry
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    raise ConnectionError(
+                        f"incomplete download: wrote {written} of {expected} bytes"
+                    )
+
+                # Optional lightweight validation for GeoTIFFs
+                if dest.suffix.lower() in {".tif", ".tiff"}:
+                    try:
+                        import rasterio  # local import to avoid hard dependency at module load
+
+                        with rasterio.Env():
+                            with rasterio.open(dest) as ds:
+                                # Read a tiny window (top-left 1x1) to ensure tiles decode
+                                ds.read(1, window=((0, 1), (0, 1)))
+                    except Exception as exc:  # corrupt or undecodable → retry
+                        try:
+                            dest.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        raise ConnectionError(f"GeoTIFF validation failed: {exc}")
+
             return  # success
         except HTTPError as exc:
             code = exc.response.status_code if exc.response else None
@@ -285,13 +491,17 @@ def export_image(
     datatype = "MBSP"
     overwrite: bool = kwargs.get("overwrite", False)
     timeout: int = kwargs.get("timeout", 300)
+    last_timestamp: str | None = kwargs.get("last_timestamp")
+    # Optional suffix for file naming (e.g., "<lon>_<lat>")
+    suffix: str | None = kwargs.get("suffix")
     roi = region.bounds().coordinates().getInfo()
     task, exported = None, False
 
     if preferred_location == "bucket":
-        # Skip if object exists and overwrite is False
-        gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}.tif"
-        already = (
+        # Determine if existing object should be overwritten due to mismatch
+        name = f"{sid}_{datatype}{('_' + suffix) if suffix else ''}"
+        gcs_path = f"gs://{bucket}/{sid}/{name}.tif"
+        exists = (
             subprocess.run(
                 [gsutil_cmd(), "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
@@ -299,7 +509,29 @@ def export_image(
             ).returncode
             == 0
         )
-        if already and not overwrite:
+        must_overwrite = False
+        if exists and not overwrite and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                must_overwrite = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                must_overwrite = False
+        if exists and (overwrite or must_overwrite):
+            # Remove existing object so the new export can succeed
+            subprocess.run(
+                [gsutil_cmd(), "rm", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            exists = False
+        if exists and not overwrite:
             if cfg.VERBOSE:
                 print(f"  ✓ raster exists → {gcs_path} (skipped)")
             return None, False
@@ -309,7 +541,7 @@ def export_image(
             image=image,
             description=f"{sid}_{datatype}",
             bucket=bucket,
-            fileNamePrefix=f"{sid}/{sid}_{datatype}",
+            fileNamePrefix=f"{sid}/{name}",
             region=roi,
             scale=20,
             crs=utm,
@@ -319,9 +551,25 @@ def export_image(
 
     elif preferred_location == "ee_asset_folder":
         asset_id = f"{ee_asset_folder}/{sid}_{datatype}"
-        if _prepare_asset(
-            asset_id, overwrite=overwrite, timeout=timeout, datatype="raster"
-        ):
+        # Force overwrite if remote marker mismatches
+        ow = overwrite
+        if not ow and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                pass
+        if _prepare_asset(asset_id, overwrite=ow, timeout=timeout, datatype="raster"):
+            # Attach run metadata as asset properties for coordination
+            if last_timestamp:
+                image = image.set({"last_timestamp": str(last_timestamp)})
             utm = image.select(datatype).projection()
             task = ee.batch.Export.image.toAsset(
                 image=image,
@@ -336,8 +584,29 @@ def export_image(
             exported = True
 
     else:  # preferred_location == "local"
-        out_path = Path("../data") / sid / f"{sid}_{datatype}.tif"
-        if out_path.is_file() and not overwrite:
+        name = f"{sid}_{datatype}{('_' + suffix) if suffix else ''}"
+        out_path = cfg.DATA_DIR / sid / f"{name}.tif"
+        # Force overwrite if marker mismatches
+        ow = overwrite
+        if out_path.is_file() and not ow and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                pass
+        if out_path.is_file() and ow:
+            try:
+                out_path.unlink()
+            except Exception:
+                pass
+        if out_path.is_file() and not ow:
             if cfg.VERBOSE:
                 print(f"  ✓ raster exists → {out_path} (skipped)")
             return None, False
@@ -356,6 +625,17 @@ def export_image(
 
     if task:
         task.start()
+    # For bucket/local, drop a sidecar marker for coordination
+    try:
+        write_last_timestamp_marker(
+            sid,
+            last_timestamp,
+            preferred_location=preferred_location,
+            bucket=bucket,
+            ee_asset_folder=ee_asset_folder,
+        )
+    except Exception:
+        pass
     return task, exported
 
 
@@ -374,11 +654,12 @@ def export_polygons(
     datatype = "VEC"
     overwrite: bool = kwargs.get("overwrite", False)
     timeout: int = kwargs.get("timeout", 300)
+    last_timestamp: str | None = kwargs.get("last_timestamp")
     task, exported = None, False
 
     if preferred_location == "bucket":
         gcs_path = f"gs://{bucket}/{sid}/{sid}_{datatype}_{suffix}.geojson"
-        already = (
+        exists = (
             subprocess.run(
                 [gsutil_cmd(), "ls", gcs_path],
                 stdout=subprocess.DEVNULL,
@@ -386,7 +667,28 @@ def export_polygons(
             ).returncode
             == 0
         )
-        if already and not overwrite:
+        must_overwrite = False
+        if exists and not overwrite and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                must_overwrite = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                must_overwrite = False
+        if exists and (overwrite or must_overwrite):
+            subprocess.run(
+                [gsutil_cmd(), "rm", gcs_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            exists = False
+        if exists and not overwrite:
             if cfg.VERBOSE:
                 print(f"  ✓ vectors exist → {gcs_path} (skipped)")
             return None, False
@@ -402,9 +704,24 @@ def export_polygons(
 
     elif preferred_location == "ee_asset_folder":
         asset_id = f"{ee_asset_folder}/{sid}_{datatype}_{suffix}"
-        if _prepare_asset(
-            asset_id, overwrite=overwrite, timeout=timeout, datatype="vector"
-        ):
+        ow = overwrite
+        if not ow and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                pass
+        if _prepare_asset(asset_id, overwrite=ow, timeout=timeout, datatype="vector"):
+            # Attach run metadata
+            if last_timestamp:
+                fc = fc.set({"last_timestamp": str(last_timestamp)})
             task = ee.batch.Export.table.toAsset(
                 collection=fc,
                 description=f"{sid}_{datatype}",
@@ -413,8 +730,27 @@ def export_polygons(
             exported = True
 
     else:  # preferred_location == "local"
-        out_path = Path("../data") / sid / f"{sid}_{datatype}_{suffix}.geojson"
-        if out_path.is_file() and not overwrite:
+        out_path = cfg.DATA_DIR / sid / f"{sid}_{datatype}_{suffix}.geojson"
+        ow = overwrite
+        if out_path.is_file() and not ow and last_timestamp:
+            try:
+                remote_ts = read_remote_last_timestamp(
+                    sid,
+                    preferred_location=preferred_location,
+                    bucket=bucket,
+                    ee_asset_folder=ee_asset_folder,
+                )
+                ow = bool(
+                    remote_ts and str(remote_ts).strip() != str(last_timestamp).strip()
+                )
+            except Exception:
+                pass
+        if out_path.is_file() and ow:
+            try:
+                out_path.unlink()
+            except Exception:
+                pass
+        if out_path.is_file() and not ow:
             if cfg.VERBOSE:
                 print(f"  ✓ vectors exist → {out_path} (skipped)")
             return None, False
@@ -426,6 +762,17 @@ def export_polygons(
 
     if task:
         task.start()
+    # For bucket/local, write a sidecar marker as above
+    try:
+        write_last_timestamp_marker(
+            sid,
+            last_timestamp,
+            preferred_location=preferred_location,
+            bucket=bucket,
+            ee_asset_folder=ee_asset_folder,
+        )
+    except Exception:
+        pass
     return task, exported
 
 

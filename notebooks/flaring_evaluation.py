@@ -112,6 +112,61 @@ def load_points_from_df(df, lon_field="lon", lat_field="lat"):
     return ee.FeatureCollection(features)
 
 
+def load_points_from_db(
+    *, structure_ids=None, window_ids=None, system_indexes=None, **filters
+):
+    """
+    Build an EE FeatureCollection of points directly from the CSV "virtual DB".
+
+    Parameters
+    ----------
+    structure_ids : Iterable | None
+        Optional list of structure IDs to include.
+    window_ids : Iterable | None
+        Optional list of window IDs to include.
+    system_indexes : Iterable | None
+        Optional list of Sentinel-2 system:index values to include.
+    filters : dict
+        Optional scene/local filters forwarded to csv_utils (e.g., scene_cloud_pct,
+        scene_sga_range, local_sga_range, local_sgi_range).
+
+    Returns
+    -------
+    ee.FeatureCollection
+        Points at lon/lat with any available properties preserved.
+
+    Notes
+    -----
+    - Relies on offshore_methane.csv_utils.unified_db, which prefers the
+      normalized structures/windows inputs and falls back to legacy events.csv.
+    - Only unique lon/lat pairs are converted to points.
+    """
+    try:
+        from offshore_methane.csv_utils import unified_db
+
+        df = unified_db(
+            structure_ids=structure_ids,
+            window_ids=window_ids,
+            system_indexes=system_indexes,
+            **filters,
+        )
+        if df.empty:
+            return ee.FeatureCollection([])
+        df = df.copy()
+        df = df[df["lon"].notna() & df["lat"].notna()]
+        # Deduplicate spatially to avoid repeated features
+        df = df.drop_duplicates(subset=["lon", "lat"]).reset_index(drop=True)
+        features = []
+        for _, r in df.iterrows():
+            lon, lat = float(r["lon"]), float(r["lat"])  # type: ignore[arg-type]
+            props = {k: v for k, v in r.items() if k not in {"lon", "lat"}}
+            features.append(ee.Feature(ee.Geometry.Point([lon, lat]), props))
+        return ee.FeatureCollection(features)
+    except Exception:
+        # Fallback to an empty collection when DB is unavailable
+        return ee.FeatureCollection([])
+
+
 # %%
 # Main export loop
 def run_exports(points_fc, years, file_prefix="flaring"):

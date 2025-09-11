@@ -1,13 +1,13 @@
 # %%
+import os
+import sys
+
 import ee
-import pandas as pd
 import geemap
 import ipywidgets as widgets
-from IPython.display import display
-import sys
-import os
-from tqdm import tqdm
 from flaring_evaluation import evaluateScene
+from IPython.display import display
+from tqdm import tqdm
 
 mbsp_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "offshore_methane"
@@ -15,8 +15,7 @@ mbsp_path = os.path.join(
 if mbsp_path not in sys.path:
     sys.path.append(mbsp_path)
 
-from mbsp import mbsp_simple_ee
-from masking import build_mask_for_C, build_mask_for_MBSP
+from mbsp import mbsp_simple_ee  # noqa
 
 ee.Authenticate()
 ee.Initialize()
@@ -61,7 +60,8 @@ def add_glint_alpha(sid_data, collection="COPERNICUS/S2_HARMONIZED"):
             # Store result
             item = item.copy()
             item["glint_alpha"] = alpha
-        except:
+        except Exception as e:
+            print(f"Error computing glint_alpha for {sid}: {e}")
             item = item.copy()
             item["glint_alpha"] = None
         out.append(item)
@@ -379,6 +379,63 @@ def gdf_to_sid_list(gdf):
             }
         )
     return sid_data
+
+
+def sid_data_from_db(
+    *,
+    structure_ids=None,
+    window_ids=None,
+    system_indexes=None,
+    **filters,
+):
+    """
+    Build a sid_data list (for show_granule_viewer) directly from the CSV virtual DB.
+
+    Parameters
+    ----------
+    structure_ids : Iterable | None
+        Optional list of structure IDs to include.
+    window_ids : Iterable | None
+        Optional list of window IDs to include.
+    system_indexes : Iterable | None
+        Optional list of Sentinel-2 system:index values to include.
+    filters : dict
+        Optional scene/local filters forwarded to csv_utils (e.g., scene_cloud_pct,
+        scene_sga_range, local_sga_range, local_sgi_range).
+
+    Returns
+    -------
+    list[dict]
+        List of dicts with keys: SID, lat, lon.
+
+    Notes
+    -----
+    - Uses csv_utils.unified_db, which prefers the normalized structures/windows
+      inputs and falls back to legacy events.csv if needed.
+    - Only rows with non-empty system_index and valid lon/lat are returned.
+    """
+    try:
+        from offshore_methane.csv_utils import unified_db
+
+        df = unified_db(
+            structure_ids=structure_ids,
+            window_ids=window_ids,
+            system_indexes=system_indexes,
+            **filters,
+        )
+        if df.empty:
+            return []
+        df = df.copy()
+        # Keep rows with concrete granule id + coords
+        df = df[(df["system_index"].astype(str).str.len() > 0)]
+        df = df[df["lon"].notna() & df["lat"].notna()]
+        return [
+            {"SID": r["system_index"], "lat": float(r["lat"]), "lon": float(r["lon"])}
+            for _, r in df.iterrows()
+        ]
+    except Exception:
+        # Graceful fallback: no DB available
+        return []
 
 
 # %%

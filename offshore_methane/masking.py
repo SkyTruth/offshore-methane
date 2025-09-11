@@ -9,16 +9,18 @@ where *1* keeps a pixel and *0* discards it.
 
 from __future__ import annotations
 
-import csv
 import math
+import os
 from typing import Dict, Optional
 
 import ee
 import geemap
 import numpy as np
+import pandas as pd
 from IPython.display import display
 
 import offshore_methane.config as cfg
+from offshore_methane.models.sgi_funcs import sgi_hat_img, sgi_std_img
 
 # ---------------------------------------------------------------------
 #  Module-level constants (avoid recomputing in map() lambdas)
@@ -34,8 +36,11 @@ def scene_cloud_filter(p: Dict) -> ee.Filter:
     return ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", p["cloud"]["scene_cloud_pct"])
 
 
-def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
-    """Add a Boolean property 'SGA_OK' based on scene-glint angle limits."""
+def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Number:
+    """Compute the scene sun-glint angle (degrees) from image metadata.
+
+    Returns an ee.Number (degrees). No filtering is applied here.
+    """
     # metadata → Numbers
     sza = ee.Number(img.get("MEAN_SOLAR_ZENITH_ANGLE"))
     saa = ee.Number(img.get("MEAN_SOLAR_AZIMUTH_ANGLE"))
@@ -54,20 +59,7 @@ def scene_sga_filter(img: ee.Image, p: Dict) -> ee.Image:
         .subtract(sza_r.sin().multiply(vza_r.sin()).multiply(dphi_r.cos()))
     )
     sga_deg = cos_sga.acos().multiply(180 / np.pi)
-
-    ok = sga_deg.gt(p["sunglint"]["scene_sga_range"][0]).And(
-        sga_deg.lt(p["sunglint"]["scene_sga_range"][1])
-    )
-
-    # keep images that *lack* metadata
-    return ee.Image(
-        img.set(
-            "SGA_OK",
-            ee.Algorithms.If(
-                img.propertyNames().contains("MEAN_SOLAR_ZENITH_ANGLE"), ok, True
-            ),
-        )
-    )
+    return sga_deg
 
 
 # ---------------------------------------------------------------------
@@ -94,7 +86,7 @@ def _count(img_bin, region, scale):
 def geom_mask(centre: ee.Geometry, radius_m: float, inside: bool) -> ee.Image:
     """
     1 → pixels *inside* the radius (default) or *outside* when inside=False.
-    Returns a single-band image called “mask”.
+    Returns a single-band image called "mask".
     """
     dx_dy = _lonlat_dx_dy(centre)
     r2 = radius_m**2
@@ -174,7 +166,7 @@ def outlier_mask(
     Returns
     -------
     ee.Image
-        Single-band mask (“mask”) that is **both**
+        Single-band mask ("mask") that is **both**
         • computed *from* the current valid pixels, *and*
         • restricted *to* those same pixels.
     """
@@ -210,11 +202,36 @@ def ndwi_mask(img: ee.Image, p: Dict) -> ee.Image:
 
 
 def sga_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGA").lt(p["sunglint"]["local_sga_range"][1]).rename("mask")
+    return (
+        img.select("SGA")
+        .gt(p["sunglint"]["local_sga_range"][0])
+        .And(img.select("SGA").lt(p["sunglint"]["local_sga_range"][1]))
+        .rename("mask")
+    )
 
 
 def sgi_mask(img: ee.Image, p: Dict) -> ee.Image:
-    return img.select("SGI").gt(p["sunglint"]["local_sgi_range"][0]).rename("mask")
+    return (
+        img.select("SGI")
+        .gt(p["sunglint"]["local_sgi_range"][0])
+        .And(img.select("SGI").lt(p["sunglint"]["local_sgi_range"][1]))
+        .rename("mask")
+    )
+
+
+def sgx_outlier(img, p):
+    alpha = img.select("SGA")
+    mean = sgi_hat_img(alpha)
+    std = sgi_std_img(alpha)
+    return (
+        img.select("SGI")
+        .gte(mean.add(std.multiply(p["sunglint"]["outlier_std_range"][0])))
+        .And(
+            img.select("SGI").lte(
+                mean.add(std.multiply(p["sunglint"]["outlier_std_range"][1]))
+            )
+        )
+    )
 
 
 def _lonlat_dx_dy(centre: ee.Geometry) -> ee.Image:
@@ -339,10 +356,11 @@ def build_mask_for_C(
         # "outlier": outlier_mask(img, p, valid_mask=base),
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
-        "ndwi": ndwi_mask(img, p),
+        # "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
         "sga": sga_mask(img, p),
         "sgi": sgi_mask(img, p),
+        "sgx_outlier": sgx_outlier(img, p),
     }
 
     # ── build the final mask (logical AND of everything) ─────────────────────────
@@ -355,6 +373,18 @@ def build_mask_for_C(
     region = centre.buffer(p["dist"]["local_radius_m"]).bounds()
     total = _count(base, region, scale)  # pixels allowed by geom_mask
     if compute_stats:
+        stats_reducer = ee.Reducer.percentile([10, 50, 90], ["p10", "p50", "p90"])
+        sga_stats = (
+            img.select("SGA").reduceRegion(stats_reducer, region, scale).getInfo()
+        )
+        sgi_stats = (
+            img.select("SGI").reduceRegion(stats_reducer, region, scale).getInfo()
+        )
+        print(
+            f"SGA 10, 50, 90%: \n{sga_stats['SGA_p10']:.1f}, {sga_stats['SGA_p50']:.1f}, {sga_stats['SGA_p90']:.1f}\n",
+            f"SGI 10, 50, 90%: \n{sgi_stats['SGI_p10']:.2f}, {sgi_stats['SGI_p50']:.2f}, {sgi_stats['SGI_p90']:.2f}",
+        )
+
         print("Percentage of pixels removed w.r.t. geom_mask:")
         for name, f in filters.items():
             remaining = _count(base.And(f), region, scale)
@@ -400,8 +430,10 @@ def build_mask_for_MBSP(
     filters = {
         "saturation": saturation_mask(img, p),
         "cloud": cloud_mask(img, p),
-        "ndwi": ndwi_mask(img, p),
+        # "ndwi": ndwi_mask(img, p),
         "windspeed": windspeed_mask(wind_layers, p),
+        # "sgi": sgi_mask(img, p),
+        "sgx_outlier": sgx_outlier(img, p),
     }
 
     # ── build the final mask ───────────────────────────────────────────
@@ -443,6 +475,14 @@ def view_mask(
         Interactive map; in notebooks just evaluate to render, or call
         ``m.to_html("outfile.html")`` to export.
     """
+    # Ensure the most recent config values are used in interactive sessions
+    try:
+        from .utils import refresh_config as _refresh
+
+        _refresh()
+    except Exception:
+        pass
+
     ee.Initialize()
 
     # 1️⃣ Load image and derive centre geometry
@@ -452,6 +492,59 @@ def view_mask(
 
     centre = ee.Geometry.Point([centre_lon, centre_lat])
 
+    # Shared-location timestamp guardrail: compare remote vs local run timestamp
+    try:
+        from offshore_methane.csv_utils import df_for_granule
+        from offshore_methane.ee_utils import read_remote_last_timestamp
+        import warnings
+
+        try:
+            from IPython.display import HTML  # type: ignore
+        except Exception:  # pragma: no cover
+            HTML = None  # type: ignore
+
+        df_ts = df_for_granule(sid)
+        local_ts = None
+        if not df_ts.empty and "last_timestamp" in df_ts.columns:
+            non_null = df_ts[
+                df_ts["last_timestamp"].notna()
+                & (df_ts["last_timestamp"].astype(str).str.len() > 0)
+            ]
+            if not non_null.empty:
+                # Choose most recent when multiple rows exist
+                try:
+                    non_null = non_null.sort_values("last_timestamp")
+                except Exception:
+                    pass
+                local_ts = str(non_null.iloc[-1]["last_timestamp"]).strip()
+
+        if local_ts:
+            remote_ts = read_remote_last_timestamp(
+                sid,
+                preferred_location=cfg.EXPORT_PARAMS.get("preferred_location", "local"),
+                bucket=cfg.EXPORT_PARAMS.get("bucket", ""),
+                ee_asset_folder=cfg.EXPORT_PARAMS.get("ee_asset_folder", ""),
+            )
+            if remote_ts and str(remote_ts).strip() != local_ts:
+                msg = (
+                    f"Timestamp mismatch for {sid}: shared={remote_ts} vs local={local_ts}. "
+                    "Another user may have processed this scene; outputs may not match local settings."
+                )
+                # Raise a visible warning in notebooks/CLI
+                warnings.warn("⚠ " + msg, RuntimeWarning)
+                if HTML is not None:
+                    try:
+                        display(
+                            HTML(
+                                f"<div style='padding:8px;border:2px solid #c00;color:#c00;font-weight:600;'>⚠ {msg}</div>"
+                            )
+                        )
+                    except Exception:
+                        pass
+    except Exception:
+        # Non-fatal in viewer
+        pass
+
     # 2️⃣ True-colour backdrop (stretch a touch for contrast)
     rgb = (
         img.select(["B4", "B3", "B2"])
@@ -460,13 +553,14 @@ def view_mask(
     )
 
     # Add SGA to image as a new band called "SGA"
-    sga_img = ee.Image.loadGeoTIFF(f"gs://offshore_methane/{sid}/{sid}_SGA.tif")
+    sga_path = f"gs://{cfg.EXPORT_PARAMS['bucket']}/{sid}/{sid}_SGA.tif"
+    sga_img = ee.Image.loadGeoTIFF(sga_path)
     img = img.addBands(sga_img.rename("SGA"))
 
     # Add SGI to image as a new band called "SGI"
     b_vis = img.select("B2").add(img.select("B3")).add(img.select("B4")).divide(3)
     img = img.addBands(b_vis.rename("B_vis"))
-    sgi = img.normalizedDifference(["B12", "B_vis"])
+    sgi = img.normalizedDifference(["B8A", "B_vis"])
     img = img.addBands(sgi.rename("SGI"))
 
     # 3️⃣ Build masks, turn into single-colour rasters
@@ -479,35 +573,160 @@ def view_mask(
     mask_c = mask_c.selfMask()
     mask_m = mask_m.selfMask()
 
-    vis_c = mask_c.visualize(palette=["#FF0000"])  # red
-    vis_m = mask_m.visualize(palette=["#00FF00"])  # green
-
     # 4️⃣ Assemble map
     coords = centre.coordinates().getInfo()
     if coords is None:
         raise RuntimeError("Could not retrieve centre coordinates")
     lon, lat = coords
-    m = geemap.Map(center=[lat, lon], zoom=11)
+    m = geemap.Map(center=[lat, lon], zoom=14)
     m.addLayer(rgb, {}, "True colour")
-    m.addLayer(vis_c, {"opacity": 0.6}, "Mask C (red)")
-    m.addLayer(vis_m, {"opacity": 0.6}, "Mask MBSP (green)")
+
+    sid_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "data", sid)
+    )
+    # Prefer new naming with suffix; fallback to legacy filename
+    mbsp_fp = os.path.join(sid_dir, f"{sid}_MBSP.tif")
+    try:
+        import glob
+
+        candidates = sorted(glob.glob(os.path.join(sid_dir, f"{sid}_MBSP_*.tif")))
+        if candidates:
+            mbsp_fp = candidates[0]
+    except Exception:
+        pass
+    sga_fp = os.path.join(sid_dir, f"{sid}_SGA.tif")
+
+    if os.path.exists(mbsp_fp):
+        # red = -.1, white = 0, blue = .1
+        m.add_raster(
+            mbsp_fp,
+            layer_name="MBSP",
+            vmin=-0.1,
+            vmax=0.1,
+            palette=["#FF0000", "#FFFFFF", "#0000FF"],
+            zoom_to_layer=False,
+            nodata=-np.inf,
+        )
+    if os.path.exists(sga_fp):
+        m.add_raster(
+            sga_fp,
+            layer_name="SGA",
+            vmin=0,
+            vmax=30,
+            palette=["#FFFFFF", "#000000"],
+            visible=False,
+            zoom_to_layer=False,
+        )
+    # lon_fmt = f"{lon:.3f}"
+    # lat_fmt = f"{lat:.3f}"
+    # vec_fp = os.path.join(sid_dir, f"{sid}_VEC_{lon_fmt}_{lat_fmt}.geojson")
+
+    # if os.path.exists(vec_fp):
+    #     m.add_geojson(vec_fp, "Vector", {"color": "black"})
+
+    # addLayer(object, visparams, name, display, opacity)
+    m.addLayer(mask_c, {"palette": ["#FF0000"]}, "Mask C (red)", False)
+    m.addLayer(mask_m, {"palette": ["#00FF00"]}, "Mask MBSP (green)", False)
+    m.addLayer(centre, {"color": "yellow"}, "Target")
+
     m.addLayerControl()
     display(m)
 
 
+def show_me(
+    eid: int | None = None,
+    sid: str | None = None,
+    stats: bool = True,
+    **filters,
+) -> None:
+    """
+    Interactive viewer using the CSV virtual database (csv_utils).
+
+    Parameters
+    ----------
+    eid : int | None
+        Window id to visualize. If both `eid` and `sid` are provided, filters to
+        that specific mapping.
+    sid : str | None
+        Sentinel-2 system:index (granule id). If provided, chooses the first
+        joined row for this granule (optionally filtered by `eid`).
+    stats : bool
+        When True, `view_mask` prints per-filter stats.
+    **filters : Any
+        Optional quality filters passed through to csv_utils (e.g.
+        scene_cloud_pct=..., scene_sga_range=(...), local_sga_range=(...),
+        local_sgi_range=(...)).
+    """
+    # Ensure the most recent config values are used
+    try:
+        from .utils import refresh_config as _refresh
+
+        _refresh()
+    except Exception:
+        pass
+    from offshore_methane.csv_utils import df_for_granule, df_for_window, virtual_db
+
+    target_sid: str | None = None
+    target_eid: int | None = None
+    lon: float | None = None
+    lat: float | None = None
+
+    if sid is not None:
+        # For explicit SID lookups, do NOT apply default scene filters by default.
+        # This avoids accidentally filtering out the correct mapping due to
+        # missing scene metadata in granules.csv.
+        f = dict(filters)
+        f.setdefault("scene_cloud_pct", None)
+        f.setdefault("scene_sga_range", None)
+        df = df_for_granule(sid, **f)
+        if eid is not None:
+            df = df[df["window_id"] == int(eid)]
+        if df.empty:
+            print("No matching rows for given sid/eid with current filters.")
+            return
+        # Prefer earliest timestamp when available
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["window_id"]) if pd.notna(row.get("window_id")) else None  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
+
+    elif eid is not None:
+        df = df_for_window(int(eid), **filters)
+        if df.empty:
+            print("No matching rows for given eid with current filters.")
+            return
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["window_id"])  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
+
+    else:
+        # fallback to first available joined row using default filters
+        df = virtual_db(**filters)
+        if df.empty:
+            print("Virtual database is empty (no events/granules join).")
+            return
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        row = df.iloc[0]
+        target_sid = str(row["system_index"]).strip()
+        target_eid = int(row["window_id"]) if pd.notna(row.get("window_id")) else None  # type: ignore[arg-type]
+        lon, lat = float(row["lon"]), float(row["lat"])  # type: ignore[arg-type]
+
+    if target_sid is None or lon is None or lat is None:
+        print("Could not resolve a target scene and location.")
+        return
+
+    view_mask(target_sid, lon, lat, stats)
+    print(f"eid: {target_eid}, sid: {target_sid}, lon: {lon}, lat: {lat}")
+
+
 # %%
-def main():
-    row = 1
-    with open(cfg.SITES_CSV, newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    row = rows[row]
-    r1 = row["system_index"].split(";")[0]
-    view_mask(r1, float(row["lon"]), float(row["lat"]), True)
-    print(f"sid: {r1}, lon: {float(row['lon'])}, lat: {float(row['lat'])}")
-
-
 if __name__ == "__main__":
-    main()
+    show_me(sid="20170705T164319_20170705T165225_T15RXL")
 
 # %%
