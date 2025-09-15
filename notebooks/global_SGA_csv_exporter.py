@@ -137,10 +137,10 @@ def _drive_export(
 def export_year(year: int) -> None:
     start, end = f"{year}-01-01", f"{year + 1}-01-01"
 
-    # 1 · All S‑2 granules (ocean‑only)
+    # 1 · All S-2 granules (ocean-only)
     col = s2_collection(start, end)
 
-    # 2 · Long table, split by month  (12 parallel Drive tasks)
+    # 2 · Long table, split by month  (12 parallel Drive tasks)
     for m in range(1, 13):
         m_start = ee.Date.fromYMD(year, m, 1)
         m_end = m_start.advance(1, "month")
