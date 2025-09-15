@@ -790,6 +790,8 @@ def display_s2_with_geojson(
     flare_mask_layer = s2_image.select("B12").updateMask(flare_mask)
     Map.addLayer(flare_mask_layer, yellow_vis, "Flaring", False)
 
+    return Map
+
 
 # %%
 from offshore_methane import config as cfg  # noqa: E402
