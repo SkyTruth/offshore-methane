@@ -467,3 +467,27 @@ def sid_data_from_db(
 # )
 
 # %%
+import pandas as pd
+
+sus_ids = [413479, 263882, 193410, 193410, 52840, 705528, 382097, 460079, 460079]
+sus_sids = [
+    "20231216T125309_20231216T125305_T24KUA",
+    "20171023T125311_20171023T125502_T24KVB",
+    "20241120T125309_20241120T125305_T24KVA",
+    "20241115T125311_20241115T125305_T24KVA",
+    "20201211T125309_20201211T125305_T24KVA",
+    "20250122T130249_20250122T130546_T23JQN",
+    "20230115T125311_20230115T125305_T24KVB",
+    "20211121T125311_20211121T125308_T24KVA",
+    "20190111T125309_20190111T125307_T24KVA",
+]
+gfw = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\brazil_gfw_reviewed.csv")
+
+# Create DataFrame from sus_sids and sus_ids
+df = pd.DataFrame({"SID": sus_sids, "structure_id": sus_ids})
+
+# Merge lat/lon from gfw based on structure_id
+df = df.merge(gfw[["structure_id", "lat", "lon"]], on="structure_id", how="left")
+
+# %%
+sid_data = df.to_dict("records")

@@ -655,7 +655,6 @@ def main(
         gids = set(str(x) for x in system_indexes)
     else:
         gids = set(str(x) for x in (getattr(cfg, "GRANULES_TO_PROCESS", []) or []))
-
     if cmd == "discover":
         discover_granules_for_new_events(
             structure_ids=sids or None,
