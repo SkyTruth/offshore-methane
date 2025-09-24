@@ -386,9 +386,13 @@ def process_product(site: dict, sid: str) -> list[ee.batch.Task]:
         cfg.EXPORT_PARAMS["overwrite"] or sga_new or rast_new
     )
     # Use structure_id as suffix for saved artefacts
-    suffix = str(site.get("structure_id", ""))
+    # suffix = str(site.get("structure_id", ""))
     vect_task, _ = export_polygons(
-        vect_fc, sid, suffix, last_timestamp=ts, **cfg.EXPORT_PARAMS
+        vect_fc,
+        sid,
+        last_timestamp=ts,
+        suffix=f"{site['lon']:.3f}_{site['lat']:.3f}",
+        **cfg.EXPORT_PARAMS,
     )
     if vect_task:
         tasks.append(vect_task)

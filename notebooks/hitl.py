@@ -810,11 +810,12 @@ use_local = (
 )
 local_data = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
-start_hitl_review_loop(
-    detections_df,
-    bucket_name=bucket,
-    from_local=(local_data if use_local else None),
-)
+if __name__ == "__main__":
+    start_hitl_review_loop(
+        detections_df,
+        bucket_name=bucket,
+        from_local=(local_data),
+    )
 
 # %%
 # # Optional: use local folder instead of bucket
