@@ -156,7 +156,8 @@ def show_granule_viewer(
     b11_b12_max=[3000, 2800],
     zoom=12,
     mbsp_min_max=[-0.2, 0.2],
-    extra_gdf=None,
+    extra_gdfs=[],
+    extra_gdf_colors=[],
     starting_idx=0,
     layers=["B11", "B12", "RGB", "MBSP", "Flaring", "Detected Flare"],
 ):
@@ -173,8 +174,8 @@ def show_granule_viewer(
         Initial zoom level for the map (default: 12).
     mbsp_min_max : list of float
         Minimum and maximum values for MBSP visualization (default: [-0.2, 0.2]).
-    extra_gdf : GeoDataFrame, optional
-        Additional GeoDataFrame to overlay on the map (default: None).
+    extra_gdfs : List of GeoDataFrame, optional
+        Additional GeoDataFrames to overlay on the map (default: None).
     starting_idx : int
         Index of the initial SID to display (default: 0).
     layers : list of str
@@ -305,9 +306,15 @@ def show_granule_viewer(
                     "Detected Flare",
                     True,
                 )
-            if extra_gdf is not None:
-                ee_gdf = geemap.gdf_to_ee(extra_gdf)
-                m.addLayer(ee_gdf, {}, "Extra GDF", False)
+            if len(extra_gdfs) > 0:
+                for i, extra_gdf in enumerate(extra_gdfs):
+                    ee_gdf = geemap.gdf_to_ee(extra_gdf)
+                    m.addLayer(
+                        ee_gdf,
+                        {"color": extra_gdf_colors[i]},
+                        f"Extra GDF {i + 1}",
+                        False,
+                    )
 
         with out:
             out.clear_output()
@@ -438,7 +445,6 @@ def sid_data_from_db(
         return []
 
 
-# %%
 # sid_data = [
 #     {
 #         "SID": "20170705T164319_20170705T165225_T15RXL",
@@ -465,29 +471,4 @@ def sid_data_from_db(
 # state = show_granule_viewer(
 #     sid_data,
 # )
-
 # %%
-import pandas as pd
-
-sus_ids = [413479, 263882, 193410, 193410, 52840, 705528, 382097, 460079, 460079]
-sus_sids = [
-    "20231216T125309_20231216T125305_T24KUA",
-    "20171023T125311_20171023T125502_T24KVB",
-    "20241120T125309_20241120T125305_T24KVA",
-    "20241115T125311_20241115T125305_T24KVA",
-    "20201211T125309_20201211T125305_T24KVA",
-    "20250122T130249_20250122T130546_T23JQN",
-    "20230115T125311_20230115T125305_T24KVB",
-    "20211121T125311_20211121T125308_T24KVA",
-    "20190111T125309_20190111T125307_T24KVA",
-]
-gfw = pd.read_csv(r"C:\Users\ebeva\SkyTruth\methane\brazil_gfw_reviewed.csv")
-
-# Create DataFrame from sus_sids and sus_ids
-df = pd.DataFrame({"SID": sus_sids, "structure_id": sus_ids})
-
-# Merge lat/lon from gfw based on structure_id
-df = df.merge(gfw[["structure_id", "lat", "lon"]], on="structure_id", how="left")
-
-# %%
-sid_data = df.to_dict("records")
