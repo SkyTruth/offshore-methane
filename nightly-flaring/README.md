@@ -51,12 +51,14 @@ Manager as `production-gfw-infra-api-key`) in the shell or the repo-root `.env`.
 .venv/bin/python -m pytest -q tests
 ```
 
-The viewer maps every site for the selected night (or the 7-night mean):
+The viewer maps every site for one night or the mean over a range of nights:
 flaring sites glow on an amber scale sized by radiant heat, and hovering shows
-a sparkline of the nightly values. Play animates the nights, easing each
-site's brightness between nights (cloudy nights hold the last clear value at
-low opacity); a percentile slider hides sites below a chosen radiant-heat
-percentile. Clicking pins a per-overpass chart, the
+a sparkline of the nightly values. A timeline strip shows the radiant heat seen
+each night; click a night, or drag to average a range. Play animates the range,
+easing each site's brightness between nights (cloudy nights hold the last clear
+value at low opacity); a percentile slider hides sites below a chosen
+radiant-heat percentile. `build_viewer.py` builds from the run with the latest
+end date and longest span unless `start`/`end` are given. Clicking pins a per-overpass chart, the
 matched EOG MYC25Q4 2025 flare, GFW structure IDs and a satellite-view link.
 The side panel ranks the strongest flares, totals by region, and compares the
 run with MYC25Q4.
@@ -196,3 +198,57 @@ catalogs.
 VIIRS 375 m active fire (free via NASA FIRMS) is a baseline. In the 2013
 comparison, Nightfire found 94% (1319/1400) of the combined detections and
 VIIRS active fire 59% (822/1400).
+
+## Runs
+
+| Nights | Granules | Downloaded | Wall time (12 workers) | Flaring site-nights | Flaring sites |
+| --- | --- | --- | --- | --- | --- |
+| 2026-10-29 – 11-04 (7) | 4,551 | 32 GB | 21 min | 1,804 | 506 |
+| 2026-10-06 – 11-04 (30) | 19,443 | 143 GB | 71 min for the 23 new nights | 7,691 | 758 |
+
+SNPP has no data in NOAA's bucket after 2026-11-02 15:32 UTC (no passes after
+12:51 UTC on night passes over sites).
+
+GFW sites with a detection on ≥1 clear night, by EOG MYC25Q4 2025 persistence
+regime (sites within 1 km of an MYC site):
+
+| Regime | 7 nights | 30 nights |
+| --- | --- | --- |
+| persistent | 71% (235/331) | 85% (283/332) |
+| intermittent | 31% (54/174) | 50% (88/175) |
+| sporadic | 11% (8/72) | 18% (13/72) |
+| undetected | 2.3% (3/130) | 3.8% (5/131) |
+
+Annualised volume vs MYC25Q4 2025 at sites positive in both: log-log r = 0.42
+(n = 297) for 7 nights, 0.52 (n = 384) for 30 nights; median ratio 0.83 in both.
+
+## Review (2026-11-07)
+
+GPT-6.1 Sol and Claude Opus 5.5 reviewed the 7-night run independently against
+the papers. Both judged regional totals and persistent flares usable, and
+per-site nightly volumes and the flaring status of sites with another site
+within 2 km (3,858 of 7,637) not yet reliable. Opus 5.5 reproduced site 4279's
+radiant heat (93.5 MW) from raw NOAA radiances and found totals of 10.7 vs
+10.8 BCM/yr against MYC25Q4 flares within 2 km of a GFW site.
+
+Fixes, in order:
+
+1. Choose site pixels with finite radiance: 11% of site-overpasses (21,205 /
+   189,764) used bow-tie-deleted pixels, adding false clear zeros. Deduplicate
+   the 1,292 records repeated in adjacent granules.
+2. Cluster connected hot pixels, keep M10 local maxima (top-hat), compute RH75%
+   per cluster, then assign each cluster to one site: 12.7% of detections
+   (501/3,935) sit within 3 km of a ≥5× brighter detection at another site.
+3. Test saturation on raw radiance with the QF1 flags; fit M11-M13 when M10
+   saturates instead of dropping the pixel.
+4. Clip the ±2-pixel search window at row/column 1 (434 records could never
+   detect).
+5. Treat a cloud-flagged detection as clear only when the cloud flag is
+   isolated; 30% of detections (1,180/3,935) carry 18% of radiant heat.
+6. Add M11-only and M12+M13 triggers with an adjacency filter.
+7. Noise-weighted fit residuals, M7/M8 for SWIR-only pixels, fit-quality
+   rejection.
+8. Validation: one-to-one matching at 2 km, pooled clear-sky means,
+   per-overpass detection frequency vs MYC `n_det / n_clear`.
+9. Flag non-upstream flares (for example Das Island, Khafji) before reporting
+   offshore oil volumes.

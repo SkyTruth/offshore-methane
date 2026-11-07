@@ -27,6 +27,13 @@ OUT_DIR = HERE / "outputs"
 TEMPLATE = HERE / "viewer_template.html"
 BASEMAP_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json"
 BCM_PER_MW_YEAR = 0.0116
+STATUS = (
+    "First pass. A two-model review (GPT-6.1 Sol, Claude Opus 5.5, 7 Nov 2026) "
+    "found regional totals and persistent flares usable; per-site nightly volumes "
+    "and the flaring status of sites with another site within 2 km are not yet "
+    "reliable (bow-tie pixels, glow split between neighbours, cloud-flagged "
+    "detections counted as clear)."
+)
 SATELLITES = ["SNPP", "NOAA-20", "NOAA-21"]
 STATUS_CODE = {
     "flaring": "F",
@@ -189,6 +196,7 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
             },
             "bcm_per_mw_year": BCM_PER_MW_YEAR,
             "notes": " ".join(notes),
+            "status": STATUS,
             "validation": {
                 "matched": int(len(matched)),
                 "observed": int(len(observed)),

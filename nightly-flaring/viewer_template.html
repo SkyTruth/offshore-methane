@@ -59,6 +59,10 @@ h1 {
 h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45); }
 .sub { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
 .sub b { color: var(--ink); font-weight: 600; }
+.pill {
+  display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--flare-3);
+  color: var(--flare-5); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; vertical-align: 1px;
+}
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--panel); }
 .seg button {
@@ -428,7 +432,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
   document.getElementById("sub").append(
     "VIIRS night passes over ", el("b", { text: fmtInt(META.n_sites) }), " GFW offshore oil sites · ",
     el("b", { text: rangeLabel(0, NN - 1) + ", " + dateOf(NIGHTS[NN - 1]).getUTCFullYear() }),
-    " · " + NN + " nights, one value per site per night");
+    " · " + NN + " nights, one value per site per night",
+    META.status ? el("span", { class: "pill", title: META.status, text: "first pass" }) : null);
 
   // ---------- map ----------
   const wrap = document.getElementById("mapwrap");
@@ -923,6 +928,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function renderMethod() {
     const ul = document.getElementById("method");
     const li = (b, t) => ul.append(el("li", null, el("b", { text: b }), " " + t));
+    if (META.status) li("Status.", META.status);
     li("Detection.", "M10 (1.6 µm) above its aggregation-zone mean + 4σ within 2 pixels of a site, confirmed in M11, M12 or M13; single-curve Planck fit for temperature and source area (after Elvidge et al. 2013, 2019).");
     li("Value.", "Radiant heat sums the brightest pixel's scan neighbours above 75% of its heat. A night's value is the mean over clear passes, counting clear passes with no detection as 0; a range mean averages nights with a clear pass.");
     li("Gas volume.", "Annualised with EOG's John Zink calibration, " + SLOPE + " BCM/yr per MW (MYC25Q4). Single nights are noisy; read volumes as rough rates.");
