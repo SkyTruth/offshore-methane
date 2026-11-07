@@ -80,6 +80,13 @@ h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45)
 .seg button:hover { color: var(--ink); background: var(--raise); }
 .seg button[aria-pressed="true"] { color: var(--night); background: var(--flare-5); font-weight: 650; }
 .seg .wk { color: inherit; opacity: 0.7; margin-right: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.pct {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel);
+  padding: 4px 10px; font-size: 12.5px; color: var(--ink-2);
+}
+.pct input { width: 150px; max-width: 40vw; accent-color: var(--flare-4); margin: 0; }
+.pct output { font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 21ch; }
 
 .app { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 12px; }
 .mapwrap { position: relative; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--sea); }
@@ -209,6 +216,10 @@ details.card li b { color: var(--ink); font-weight: 600; }
       <button type="button" id="show-all" aria-pressed="true">All sites</button>
       <button type="button" id="show-flaring" aria-pressed="false">Flaring only</button>
     </div>
+    <label class="pct" for="pct">Hide below
+      <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out">
+      <output id="pct-out" for="pct"></output>
+    </label>
   </div>
 </header>
 
@@ -286,7 +297,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   });
   const BY_ID = new Map(S.map(s => [s.id, s]));
 
-  const state = { night: -1, flaringOnly: false, selected: null, hover: null, hl: null };
+  const state = { night: -1, flaringOnly: false, selected: null, hover: null, hl: null, pct: 0, thr: null, nFl: 0 };
 
   function statusOf(s) {
     if (state.night < 0) return s.nFlare ? "F" : s.nClear ? "C" : s.nObs ? "K" : "N";
@@ -295,6 +306,19 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function valueOf(s) {
     if (state.night < 0) return s.nFlare ? s.mean : null;
     return s.st[state.night] === "F" ? s.rh[state.night] : null;
+  }
+  // Percentile cut over flaring sites in the current view (mean or one night).
+  function computeThreshold() {
+    const vals = S.filter(s => statusOf(s) === "F").map(valueOf).sort(d3.ascending);
+    state.nFl = vals.length;
+    state.thr = state.pct > 0 && vals.length ? d3.quantileSorted(vals, state.pct / 100) : null;
+  }
+  function visible(s) {
+    const st = statusOf(s);
+    if (st === "N") return false;
+    if (state.flaringOnly && st !== "F") return false;
+    if (state.thr != null) return st === "F" && valueOf(s) >= state.thr;
+    return true;
   }
 
   // ---------- formatting ----------
@@ -413,9 +437,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const pts = [], flares = [];
     const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
     for (const s of S) {
+      if (!visible(s)) continue;
       const st = statusOf(s);
-      if (st === "N") continue;
-      if (state.flaringOnly && st !== "F") continue;
       const x = T.applyX(s.px), y = T.applyY(s.py);
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       pts.push([x, y, s]);
@@ -640,14 +663,16 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function renderTiles() {
     const box = document.getElementById("tiles");
     box.replaceChildren();
-    const fl = S.filter(s => statusOf(s) === "F");
+    const fl = S.filter(s => statusOf(s) === "F" && visible(s));
     const clear = S.filter(s => { const st = statusOf(s); return st === "F" || st === "C"; });
     const mw = d3.sum(fl, valueOf);
     const tile = (lbl, num, unit, ctx) => box.append(el("div", { class: "tile" },
       el("div", { class: "lbl", text: lbl }), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
       el("div", { class: "ctx", text: ctx })));
-    tile("Flaring sites", fmtInt(fl.length), null, "of " + fmtInt(clear.length) + " seen in clear sky");
-    tile("Radiant heat", fmtMW(mw), "MW", state.night < 0 ? "sum of site means" : "sum this night");
+    tile(state.thr != null ? "Flaring sites shown" : "Flaring sites", fmtInt(fl.length), null,
+      state.thr != null ? "of " + fmtInt(state.nFl) + " flaring, ≥ " + fmtMW(state.thr) + " MW"
+        : "of " + fmtInt(clear.length) + " seen in clear sky");
+    tile("Radiant heat", fmtMW(mw), "MW", (state.night < 0 ? "sum of site means" : "sum this night") + (state.thr != null ? ", shown sites" : ""));
     tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised, " + SLOPE + " BCM/yr per MW");
     const seen = S.filter(s => s.nObs).length;
     tile(state.night < 0 ? "Sites observed" : "Clear this night", fmtInt(state.night < 0 ? seen : clear.length), null,
@@ -656,7 +681,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const rankBox = document.getElementById("rank");
   function renderRank() {
     rankBox.replaceChildren();
-    const fl = S.filter(s => statusOf(s) === "F").sort((a, b) => valueOf(b) - valueOf(a)).slice(0, 25);
+    const fl = S.filter(s => statusOf(s) === "F" && visible(s)).sort((a, b) => valueOf(b) - valueOf(a)).slice(0, 25);
     document.getElementById("rank-aside").textContent = state.night < 0 ? NN + "-night mean, MW" : dayLabel(NIGHTS[state.night], true).join(" ") + ", MW";
     fl.forEach((s, i) => {
       const b = el("button", { type: "button", class: s === state.selected ? "on" : "" },
@@ -676,7 +701,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function renderRegions() {
     const t = document.getElementById("regions");
     t.replaceChildren();
-    const groups = d3.rollups(S.filter(s => statusOf(s) === "F"), v => [v.length, d3.sum(v, valueOf)], s => s.region)
+    const groups = d3.rollups(S.filter(s => statusOf(s) === "F" && visible(s)), v => [v.length, d3.sum(v, valueOf)], s => s.region)
       .sort((a, b) => b[1][1] - a[1][1]);
     const bounds = new Map(D.regions.map(r => [r[0], r.slice(1)]));
     t.append(el("thead", null, el("tr", null, el("th", { text: "Region" }), el("th", { text: "Flaring" }), el("th", { text: "MW" }), el("th", { text: "BCM/yr" }))));
@@ -753,7 +778,18 @@ details.card li b { color: var(--ink); font-weight: 600; }
   document.getElementById("zout").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 0.5));
   document.getElementById("zreset").addEventListener("click", () => go(worldView()));
 
+  const pctIn = document.getElementById("pct"), pctOut = document.getElementById("pct-out");
+  const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+  pctIn.addEventListener("input", () => { state.pct = Number(pctIn.value); refresh(); });
+  function renderPct() {
+    if (state.thr == null) { pctOut.textContent = "off · all sites"; return; }
+    const shown = S.filter(s => statusOf(s) === "F" && visible(s)).length;
+    pctOut.textContent = ordinal(state.pct) + " pct · ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(shown) + " sites";
+  }
+
   function refresh() {
+    computeThreshold();
+    renderPct();
     nightBtns.forEach(([i, b]) => b.setAttribute("aria-pressed", String(i === state.night)));
     showAll.setAttribute("aria-pressed", String(!state.flaringOnly));
     showFl.setAttribute("aria-pressed", String(state.flaringOnly));
