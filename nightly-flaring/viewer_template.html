@@ -1,0 +1,767 @@
+<title>Nightly Offshore Flaring</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a night-watch console. Map fills the left; a ranked readout panel on the
+   right; stacks to map-then-panel on phones. Single deliberate dark world: flares
+   glow on one amber ramp over a night ocean. */
+:root {
+  color-scheme: dark;
+  --night: #091017;
+  --sea: #0b141c;
+  --land: #17212b;
+  --coast: #2a3744;
+  --panel: #0e1821;
+  --raise: #132130;
+  --rule: #1e2c39;
+  --ink: #e3e9ee;
+  --ink-2: #9aa8b4;
+  --ink-3: #66747f;
+  --flare-1: #5e2b10;
+  --flare-2: #923f13;
+  --flare-3: #c95d18;
+  --flare-4: #f28d27;
+  --flare-5: #ffbc5f;
+  --flare-6: #ffe4b0;
+  --clear: #4a6a80;
+  --cloud: #3a4753;
+  --focus: #7ad5e9;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 14px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; }
+.brand { min-width: 0; }
+h1 {
+  margin: 0;
+  font-stretch: 72%;
+  font-weight: 760;
+  font-size: 26px;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45); }
+.sub { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
+.sub b { color: var(--ink); font-weight: 600; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.seg button {
+  border: 0;
+  background: transparent;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--rule);
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--ink); background: var(--raise); }
+.seg button[aria-pressed="true"] { color: var(--night); background: var(--flare-5); font-weight: 650; }
+.seg .wk { color: inherit; opacity: 0.7; margin-right: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 12px; }
+.mapwrap { position: relative; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--sea); }
+#map { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#map.dragging { cursor: grabbing; }
+.legend {
+  position: absolute; left: 10px; bottom: 10px;
+  background: rgba(9, 16, 23, 0.86); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 8px 10px; display: grid; gap: 6px; font-size: 11.5px; color: var(--ink-2);
+  max-width: calc(100% - 20px);
+}
+.legend .lt { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.legend .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.legend .k { display: inline-flex; align-items: center; gap: 5px; }
+.legend svg { display: block; }
+.zoomctl { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.zoomctl button {
+  min-width: 34px; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--rule);
+  background: rgba(9, 16, 23, 0.86); color: var(--ink); cursor: pointer; font-size: 13px;
+}
+.zoomctl button:hover { border-color: var(--ink-3); }
+.tip {
+  position: absolute; z-index: 5; pointer-events: none; width: 252px;
+  background: rgba(10, 18, 26, 0.96); border: 1px solid var(--coast); border-radius: 9px;
+  padding: 10px 11px 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.tip .v { font-family: var(--mono); font-size: 19px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tip .u { font-size: 11.5px; color: var(--ink-2); margin-left: 4px; }
+.tip .nm { font-size: 12.5px; color: var(--ink-2); margin-top: 1px; }
+.tip .nm b { color: var(--ink); font-weight: 600; }
+.tip dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+.tip dt { color: var(--ink-3); }
+.tip dd { margin: 0; text-align: right; font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.tip .hint { margin-top: 6px; font-size: 11px; color: var(--ink-3); }
+
+.panel { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 2px; }
+.panel > * { flex-shrink: 0; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 12px 13px; min-width: 0; }
+h2 {
+  margin: 0 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-2);
+  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+}
+h2 .aside { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-3); font-size: 11.5px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+.tile { background: var(--panel); padding: 10px 12px; min-width: 0; }
+.tile .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.tile .num { font-family: var(--mono); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.tile .num small { font-size: 12px; color: var(--ink-2); font-weight: 400; margin-left: 3px; }
+.tile .ctx { font-size: 11.5px; color: var(--ink-2); }
+
+ol.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+ol.rank button {
+  width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) 72px 82px; align-items: center; gap: 8px;
+  border: 0; border-radius: 6px; background: transparent; padding: 5px 6px; cursor: pointer; text-align: left;
+}
+ol.rank button:hover, ol.rank button.on { background: var(--raise); }
+ol.rank .i { font-family: var(--mono); font-size: 11px; color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
+ol.rank .n { min-width: 0; }
+ol.rank .n b { display: block; font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ol.rank .n span { display: block; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ol.rank .val { font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+ol.rank .val small { display: block; font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
+
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: right; font-weight: 500; color: var(--ink-3); font-size: 11px; padding: 4px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td { padding: 5px 6px; border-bottom: 1px solid var(--rule); text-align: right; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+td:first-child { font-family: var(--display); font-size: 12.5px; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: var(--raise); }
+tr.click:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.detail-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.detail-head h3 { margin: 0; font-size: 16px; font-stretch: 85%; font-weight: 700; }
+.detail-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
+.close { border: 1px solid var(--rule); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; color: var(--ink-2); }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.facts div { min-width: 0; }
+.facts .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.facts .num { font-family: var(--mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.note { font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
+.note b { color: var(--ink); font-weight: 600; }
+.chartkey { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--ink-2); margin-top: 4px; }
+.chartkey span { display: inline-flex; align-items: center; gap: 5px; }
+.links { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; }
+a { color: var(--focus); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.mono { font-family: var(--mono); font-size: 11.5px; }
+.copy { border: 1px solid var(--rule); background: transparent; color: var(--ink-2); border-radius: 5px; padding: 0 6px; cursor: pointer; font-size: 11px; }
+
+.val-grid { display: grid; gap: 6px; }
+.bar { display: grid; grid-template-columns: 92px minmax(0, 1fr) 70px; gap: 8px; align-items: center; font-size: 12px; }
+.bar .track { height: 8px; background: var(--raise); border-radius: 4px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--flare-4); border-radius: 4px; }
+.bar .pct { font-family: var(--mono); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.bar .pct small { color: var(--ink-3); }
+
+details.card summary { cursor: pointer; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-2); }
+details.card ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 12.5px; display: grid; gap: 5px; }
+details.card li b { color: var(--ink); font-weight: 600; }
+.foot { font-size: 11.5px; color: var(--ink-3); }
+
+@media (max-width: 900px) {
+  html, body { height: auto; }
+  .app { display: flex; flex-direction: column; }
+  .mapwrap { height: 62vh; min-height: 340px; }
+  .panel { overflow: visible; }
+  h1 { font-size: 22px; }
+}
+@media (max-width: 420px) {
+  .facts { grid-template-columns: 1fr 1fr; }
+  ol.rank button { grid-template-columns: 20px minmax(0, 1fr) 82px; }
+  ol.rank .spark { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="top">
+  <div class="brand">
+    <h1>Nightly Offshore <span class="glow">Flaring</span></h1>
+    <p class="sub" id="sub"></p>
+  </div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Night shown" id="nights"></div>
+    <div class="seg" role="group" aria-label="Sites shown">
+      <button type="button" id="show-all" aria-pressed="true">All sites</button>
+      <button type="button" id="show-flaring" aria-pressed="false">Flaring only</button>
+    </div>
+  </div>
+</header>
+
+<main class="app">
+  <section class="mapwrap" id="mapwrap">
+    <canvas id="map" role="img" aria-label="Map of offshore oil sites coloured by flare radiant heat"></canvas>
+    <div class="zoomctl">
+      <button type="button" id="zin" aria-label="Zoom in">+</button>
+      <button type="button" id="zout" aria-label="Zoom out">−</button>
+      <button type="button" id="zreset">World</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="tip" id="tip" hidden></div>
+  </section>
+
+  <aside class="panel" aria-label="Flaring summary">
+    <div class="tiles" id="tiles"></div>
+
+    <section class="card" id="detail" hidden></section>
+
+    <section class="card">
+      <h2>Strongest flares <span class="aside" id="rank-aside"></span></h2>
+      <ol class="rank" id="rank"></ol>
+    </section>
+
+    <section class="card">
+      <h2>By region <span class="aside">click to zoom</span></h2>
+      <div class="tbl-wrap"><table id="regions"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Against EOG's 2025 catalog</h2>
+      <div id="validation"></div>
+    </section>
+
+    <details class="card">
+      <summary>Method and caveats</summary>
+      <ul id="method"></ul>
+    </details>
+
+    <p class="foot" id="foot"></p>
+  </aside>
+</main>
+
+<script type="application/json" id="flaring-data">__FLARING_DATA__</script>
+<script type="application/json" id="basemap">__BASEMAP_TOPOJSON__</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("flaring-data").textContent);
+  const TOPO = JSON.parse(document.getElementById("basemap").textContent);
+  const META = D.meta, NIGHTS = D.nights, NN = NIGHTS.length, SLOPE = META.bcm_per_mw_year;
+  const CSS = getComputedStyle(document.documentElement);
+  const C = {};
+  ["sea", "land", "coast", "clear", "cloud", "focus", "ink", "ink-2", "ink-3", "rule", "raise",
+   "flare-1", "flare-2", "flare-3", "flare-4", "flare-5", "flare-6"].forEach(k => {
+    C[k] = CSS.getPropertyValue("--" + k).trim();
+  });
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const SVGNS = "http://www.w3.org/2000/svg";
+
+  // ---------- data ----------
+  const S = D.sites.map(r => ({
+    id: r[0], lat: r[1], lon: r[2], nstruct: r[3], st: r[4], rh: r[5], tmax: r[6], mean: r[7],
+    region: r[8], mycRegime: r[9], mycBcm: r[10], mycIso: r[11], mycClass: r[12], structs: r[13],
+  }));
+  const count = (s, set) => { let n = 0; for (const ch of s) if (set.includes(ch)) n++; return n; };
+  S.forEach(s => {
+    s.nFlare = count(s.st, "F");
+    s.nClear = count(s.st, "FC");
+    s.nObs = count(s.st, "FCK");
+    s.name = s.region + (s.mycIso ? " · " + s.mycIso : "");
+  });
+  const BY_ID = new Map(S.map(s => [s.id, s]));
+
+  const state = { night: -1, flaringOnly: false, selected: null, hover: null, hl: null };
+
+  function statusOf(s) {
+    if (state.night < 0) return s.nFlare ? "F" : s.nClear ? "C" : s.nObs ? "K" : "N";
+    return s.st[state.night];
+  }
+  function valueOf(s) {
+    if (state.night < 0) return s.nFlare ? s.mean : null;
+    return s.st[state.night] === "F" ? s.rh[state.night] : null;
+  }
+
+  // ---------- formatting ----------
+  const fmtMW = v => v == null ? "–" : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3);
+  const fmtInt = d3.format(",");
+  const mcm = mw => mw * SLOPE * 1000; // million m3 per year
+  const fmtMcm = v => v >= 100 ? d3.format(",.0f")(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  const dayLabel = (iso, withMonth) => {
+    const d = new Date(iso + "T00:00:00Z");
+    const wd = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+    const md = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    return withMonth ? [wd, md] : [wd, String(d.getUTCDate())];
+  };
+  const rangeText = () => {
+    const a = new Date(NIGHTS[0] + "T00:00:00Z"), b = new Date(NIGHTS[NN - 1] + "T00:00:00Z");
+    const o = { month: "short", day: "numeric", timeZone: "UTC" };
+    return a.toLocaleDateString("en-US", o) + " – " + b.toLocaleDateString("en-US", { ...o, year: "numeric" });
+  };
+  function el(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") e.className = v; else if (k === "text") e.textContent = v; else e.setAttribute(k, v);
+    }
+    for (const k of kids) if (k != null) e.append(k);
+    return e;
+  }
+  function svg(tag, attrs) {
+    const e = document.createElementNS(SVGNS, tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  }
+
+  // ---------- colour & size ----------
+  const ramp = d3.interpolateRgbBasis([C["flare-2"], C["flare-3"], C["flare-4"], C["flare-5"], C["flare-6"]]);
+  const tScale = d3.scaleLog().domain([0.05, 60]).range([0, 1]).clamp(true);
+  const colorOf = v => ramp(tScale(Math.max(v, 0.05)));
+  const radiusOf = v => Math.min(2.4 + 2.3 * Math.sqrt(Math.max(v, 0)), 22);
+
+  // ---------- header & controls ----------
+  document.getElementById("sub").append(
+    "VIIRS night passes over ", el("b", { text: fmtInt(META.n_sites) }), " GFW offshore oil sites · ",
+    el("b", { text: rangeText() }), " · one value per site per night");
+
+  const nightBox = document.getElementById("nights");
+  const nightBtns = [];
+  const mkNight = (i, label) => {
+    const b = el("button", { type: "button", "aria-pressed": String(i === state.night) });
+    if (Array.isArray(label)) b.append(el("span", { class: "wk", text: label[0] }), label[1]); else b.append(label);
+    b.addEventListener("click", () => { state.night = i; refresh(); });
+    nightBtns.push([i, b]);
+    nightBox.append(b);
+  };
+  mkNight(-1, NN + "-night mean");
+  NIGHTS.forEach((n, i) => mkNight(i, dayLabel(n, false)));
+  const showAll = document.getElementById("show-all"), showFl = document.getElementById("show-flaring");
+  showAll.addEventListener("click", () => { state.flaringOnly = false; refresh(); });
+  showFl.addEventListener("click", () => { state.flaringOnly = true; refresh(); });
+
+  // ---------- map ----------
+  const wrap = document.getElementById("mapwrap");
+  const canvas = document.getElementById("map");
+  const ctx = canvas.getContext("2d");
+  const proj = d3.geoMercator().scale(256 / (2 * Math.PI)).translate([128, 128]).precision(0.1);
+  const countries = topojson.feature(TOPO, TOPO.objects.countries);
+  const borders = topojson.mesh(TOPO, TOPO.objects.countries, (a, b) => a !== b);
+  const coast = topojson.mesh(TOPO, TOPO.objects.countries, (a, b) => a === b);
+  const gpath = d3.geoPath(proj);
+  const landP = new Path2D(gpath(countries));
+  const borderP = new Path2D(gpath(borders));
+  const coastP = new Path2D(gpath(coast));
+  S.forEach(s => { const p = proj([s.lon, s.lat]); s.px = p[0]; s.py = p[1]; });
+
+  let W = 0, H = 0, dpr = 1, T = d3.zoomIdentity, quad = null, kWorld = 1;
+  const zoom = d3.zoom().scaleExtent([1, 4000]).on("zoom", e => { T = e.transform; draw(); hideTip(); })
+    .on("start", () => canvas.classList.add("dragging")).on("end", () => canvas.classList.remove("dragging"));
+  const csel = d3.select(canvas).call(zoom).on("dblclick.zoom", null);
+
+  function fit(x0, y0, x1, y1, pad) {
+    pad = pad == null ? 0.08 : pad;
+    const k = Math.min(W / ((x1 - x0) * (1 + 2 * pad)), H / ((y1 - y0) * (1 + 2 * pad)));
+    return d3.zoomIdentity.translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2).scale(k);
+  }
+  function worldView() {
+    const obs = S.filter(s => s.nObs);
+    const xs = d3.extent(obs, s => s.px), ys = d3.extent(obs, s => s.py);
+    return fit(xs[0], ys[0], xs[1], ys[1], 0.05);
+  }
+  function go(t, ms) {
+    csel.transition().duration(reduceMotion ? 0 : (ms == null ? 650 : ms)).call(zoom.transform, t);
+  }
+  function resize() {
+    const r = wrap.getBoundingClientRect();
+    const first = W === 0;
+    const cx = W ? T.invertX(W / 2) : 0, cy = H ? T.invertY(H / 2) : 0;
+    W = Math.max(r.width, 10); H = Math.max(r.height, 10); dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    kWorld = Math.min(W, H) / 256;
+    zoom.scaleExtent([kWorld * 0.9, kWorld * 6000]).translateExtent([[-40, -10], [296, 266]]);
+    if (first) { T = worldView(); csel.call(zoom.transform, T); }
+    else { csel.call(zoom.transform, d3.zoomIdentity.translate(W / 2 - T.k * cx, H / 2 - T.k * cy).scale(T.k)); }
+    draw();
+  }
+  new ResizeObserver(resize).observe(wrap);
+
+  function draw() {
+    if (!W) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.sea; ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(T.x, T.y); ctx.scale(T.k, T.k);
+    ctx.fillStyle = C.land; ctx.fill(landP);
+    ctx.lineWidth = 0.8 / T.k; ctx.strokeStyle = C.coast; ctx.stroke(coastP);
+    ctx.lineWidth = 0.6 / T.k; ctx.setLineDash([2 / T.k, 2 / T.k]); ctx.stroke(borderP); ctx.setLineDash([]);
+    ctx.restore();
+
+    const pts = [], flares = [];
+    const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
+    for (const s of S) {
+      const st = statusOf(s);
+      if (st === "N") continue;
+      if (state.flaringOnly && st !== "F") continue;
+      const x = T.applyX(s.px), y = T.applyY(s.py);
+      if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
+      pts.push([x, y, s]);
+      if (st === "F") { flares.push([x, y, s, valueOf(s)]); continue; }
+      ctx.fillStyle = st === "C" ? C.clear : C.cloud;
+      ctx.beginPath(); ctx.arc(x, y, dot, 0, 2 * Math.PI); ctx.fill();
+    }
+    flares.sort((a, b) => a[3] - b[3]);
+    ctx.globalCompositeOperation = "lighter";
+    for (const [x, y, , v] of flares) {
+      const r = radiusOf(v) * 2.6, c = d3.color(colorOf(v));
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      c.opacity = 0.42; g.addColorStop(0, c.formatRgb());
+      c.opacity = 0; g.addColorStop(1, c.formatRgb());
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(9,16,23,0.9)";
+    for (const [x, y, , v] of flares) {
+      ctx.fillStyle = colorOf(v);
+      ctx.beginPath(); ctx.arc(x, y, radiusOf(v), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    }
+    for (const s of [state.selected, state.hl, state.hover]) {
+      if (!s) continue;
+      const x = T.applyX(s.px), y = T.applyY(s.py), v = valueOf(s);
+      const r = (v != null ? radiusOf(v) : dot) + 4;
+      ctx.lineWidth = s === state.selected ? 2 : 1.5; ctx.strokeStyle = C.focus;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke();
+    }
+    quad = d3.quadtree().x(d => d[0]).y(d => d[1]).addAll(pts);
+  }
+
+  // ---------- sparkline ----------
+  function spark(s, w, h, opts) {
+    opts = opts || {};
+    const padX = 5, top = 6, bot = opts.axis ? 15 : 5;
+    const ph = h - top - bot;
+    const max = Math.max(d3.max(s.rh, v => v || 0) || 0, 0.1);
+    const x = i => padX + (NN === 1 ? 0 : i * (w - 2 * padX) / (NN - 1));
+    const y = v => top + ph - (v / max) * ph;
+    const root = svg("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}`, "aria-hidden": "true" });
+    root.append(svg("line", { x1: padX, x2: w - padX, y1: top + ph + 0.5, y2: top + ph + 0.5, stroke: C.rule, "stroke-width": 1 }));
+    if (state.night >= 0) {
+      root.append(svg("line", { x1: x(state.night), x2: x(state.night), y1: top - 2, y2: top + ph, stroke: C["ink-3"], "stroke-width": 1, "stroke-dasharray": "2 2" }));
+    }
+    const vals = s.rh.map((v, i) => (s.st[i] === "F" || s.st[i] === "C") ? (v || 0) : null);
+    const area = d3.area().defined(v => v != null).x((v, i) => x(i)).y0(top + ph).y1(v => y(v)).curve(d3.curveMonotoneX);
+    const line = d3.line().defined(v => v != null).x((v, i) => x(i)).y(v => y(v)).curve(d3.curveMonotoneX);
+    const fillC = d3.color(C["flare-4"]); fillC.opacity = 0.18;
+    root.append(svg("path", { d: area(vals) || "", fill: fillC.formatRgb(), stroke: "none" }));
+    root.append(svg("path", { d: line(vals) || "", fill: "none", stroke: C["flare-4"], "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    let last = -1;
+    vals.forEach((v, i) => { if (v != null) last = i; });
+    s.st.split("").forEach((ch, i) => {
+      if (ch === "F") {
+        root.append(svg("circle", { cx: x(i), cy: y(vals[i]), r: i === last ? 3.6 : 2.6, fill: C["flare-5"], stroke: C.sea, "stroke-width": 1 }));
+      } else if (ch === "C") {
+        root.append(svg("circle", { cx: x(i), cy: y(0), r: 2.4, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 }));
+      } else if (ch === "K") {
+        const cx = x(i), cy = top + ph;
+        root.append(svg("path", { d: `M${cx - 2.5},${cy - 2.5}L${cx + 2.5},${cy + 2.5}M${cx + 2.5},${cy - 2.5}L${cx - 2.5},${cy + 2.5}`, stroke: C["ink-3"], "stroke-width": 1.3 }));
+      }
+    });
+    if (opts.axis) {
+      [0, NN - 1].forEach(i => {
+        const t = svg("text", { x: x(i), y: h - 3, "text-anchor": i === 0 ? "start" : "end", fill: C["ink-3"], "font-size": 10, "font-family": "IBM Plex Mono, monospace" });
+        t.textContent = dayLabel(NIGHTS[i], true)[1];
+        root.append(t);
+      });
+      const t = svg("text", { x: padX, y: top + 3, fill: C["ink-3"], "font-size": 10, "font-family": "IBM Plex Mono, monospace", "dominant-baseline": "hanging" });
+      t.textContent = "max " + fmtMW(max) + " MW";
+      root.append(t);
+    }
+    return root;
+  }
+
+  // ---------- tooltip ----------
+  const tip = document.getElementById("tip");
+  function hideTip() { tip.hidden = true; if (state.hover) { state.hover = null; draw(); } }
+  function siteFacts(s) {
+    const dl = el("dl");
+    const add = (k, v) => dl.append(el("dt", { text: k }), el("dd", { text: v }));
+    add("Flaring nights", s.nFlare + " of " + s.nClear + " clear");
+    if (s.nFlare) add("Gas flared (est.)", fmtMcm(mcm(s.mean)) + " M m³/yr");
+    if (s.tmax) add("Peak temperature", fmtInt(s.tmax) + " K");
+    add("GFW structures", String(s.nstruct));
+    add("EOG 2025", s.mycRegime ? s.mycRegime + (s.mycBcm != null ? ", " + (s.mycBcm * 1000).toFixed(0) + " M m³" : "") : "no flare ≤1 km");
+    return dl;
+  }
+  function showTip(s, mx, my) {
+    tip.replaceChildren();
+    const v = valueOf(s), st = statusOf(s);
+    const head = el("div");
+    if (st === "F") head.append(el("span", { class: "v", text: fmtMW(v) }), el("span", { class: "u", text: state.night < 0 ? "MW mean radiant heat" : "MW radiant heat" }));
+    else head.append(el("span", { class: "v", text: st === "C" ? "No flare" : st === "K" ? "Cloudy" : "Not observed" }),
+      el("span", { class: "u", text: state.night < 0 ? "this week" : dayLabel(NIGHTS[state.night], true).join(" ") }));
+    tip.append(head, el("div", { class: "nm" }, el("b", { text: s.name }), " · site " + s.id));
+    tip.append(spark(s, 228, 62, { axis: true }));
+    tip.append(siteFacts(s));
+    tip.append(el("div", { class: "hint", text: "Click for overpass detail" }));
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = mx + 16, topY = my + 14;
+    if (left + tw > W - 6) left = mx - tw - 16;
+    if (topY + th > H - 6) topY = Math.max(6, my - th - 14);
+    tip.style.left = Math.max(6, left) + "px"; tip.style.top = topY + "px";
+  }
+  canvas.addEventListener("pointermove", e => {
+    if (e.buttons) return;
+    const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const hit = quad && quad.find(mx, my, 14);
+    const s = hit ? hit[2] : null;
+    if (s !== state.hover) { state.hover = s; draw(); }
+    if (s) showTip(s, mx, my); else tip.hidden = true;
+  });
+  canvas.addEventListener("pointerleave", hideTip);
+  canvas.addEventListener("click", e => {
+    const r = canvas.getBoundingClientRect();
+    const hit = quad && quad.find(e.clientX - r.left, e.clientY - r.top, 14);
+    select(hit ? hit[2] : null, false);
+  });
+
+  // ---------- detail ----------
+  const detail = document.getElementById("detail");
+  function overpassChart(s, w, h) {
+    const rows = (D.detail[String(s.id)] || []);
+    const t0 = 0, t1 = NN * 1440 + 1440;
+    const padL = 34, padR = 6, top = 8, bot = 18, ph = h - top - bot;
+    const max = Math.max(d3.max(rows, r => r[2]) || 0, 0.1);
+    const x = d3.scaleLinear().domain([t0 + 720, t0 + 720 + NN * 1440]).range([padL, w - padR]);
+    const y = d3.scaleLinear().domain([0, max]).nice(3).range([top + ph, top]);
+    const root = svg("svg", { width: "100%", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Radiant heat at each satellite overpass" });
+    NIGHTS.forEach((n, i) => {
+      const a = x(720 + i * 1440), b = x(720 + (i + 1) * 1440);
+      if (i % 2 === 0) root.append(svg("rect", { x: a, y: top, width: b - a, height: ph, fill: C.raise, opacity: 0.55 }));
+      const t = svg("text", { x: (a + b) / 2, y: h - 4, "text-anchor": "middle", fill: C["ink-3"], "font-size": 10, "font-family": "IBM Plex Mono, monospace" });
+      t.textContent = dayLabel(n, false).join(" ");
+      root.append(t);
+    });
+    y.ticks(3).forEach(v => {
+      root.append(svg("line", { x1: padL, x2: w - padR, y1: y(v), y2: y(v), stroke: C.rule, "stroke-width": 1 }));
+      const t = svg("text", { x: padL - 5, y: y(v) + 3, "text-anchor": "end", fill: C["ink-3"], "font-size": 10, "font-family": "IBM Plex Mono, monospace" });
+      t.textContent = fmtMW(v);
+      root.append(t);
+    });
+    // nightly mean as a step per night
+    s.rh.forEach((v, i) => {
+      if (v == null) return;
+      root.append(svg("line", { x1: x(720 + i * 1440) + 3, x2: x(720 + (i + 1) * 1440) - 3, y1: y(v), y2: y(v), stroke: C["flare-4"], "stroke-width": 2, "stroke-linecap": "round", opacity: 0.9 }));
+    });
+    rows.forEach(r => {
+      const [tm, sat, rh, det, cloud, temp] = r;
+      const cx = x(tm), when = new Date(Date.parse(NIGHTS[0] + "T00:00:00Z") + tm * 60000);
+      const label = D.satellites[sat] + " · " + when.toISOString().slice(5, 16).replace("T", " ") + " UTC · " +
+        (det ? fmtMW(rh) + " MW, " + fmtInt(temp) + " K" : (cloud === 0 || cloud === 1) ? "clear, no detection" : "cloudy");
+      let m;
+      if (det) m = svg("circle", { cx, cy: y(rh), r: 3.4, fill: C["flare-5"], stroke: C.sea, "stroke-width": 1 });
+      else if (cloud === 0 || cloud === 1) m = svg("circle", { cx, cy: y(0), r: 2.6, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 });
+      else m = svg("path", { d: `M${cx - 2.5},${y(0) - 2.5}L${cx + 2.5},${y(0) + 2.5}M${cx + 2.5},${y(0) - 2.5}L${cx - 2.5},${y(0) + 2.5}`, stroke: C["ink-3"], "stroke-width": 1.3 });
+      const ttl = svg("title"); ttl.textContent = label; m.append(ttl);
+      root.append(m);
+    });
+    return root;
+  }
+  function renderDetail() {
+    const s = state.selected;
+    detail.hidden = !s;
+    detail.replaceChildren();
+    if (!s) return;
+    const close = el("button", { type: "button", class: "close", "aria-label": "Close site detail", text: "Close" });
+    close.addEventListener("click", () => select(null, false));
+    detail.append(el("div", { class: "detail-head" },
+      el("div", null, el("h3", { text: s.name }), el("p", { text: "Site " + s.id + " · " + s.lat.toFixed(4) + ", " + s.lon.toFixed(4) })),
+      close));
+    const facts = el("div", { class: "facts" });
+    const fact = (l, v) => facts.append(el("div", null, el("div", { class: "lbl", text: l }), el("div", { class: "num", text: v })));
+    fact("Mean heat", s.nFlare ? fmtMW(s.mean) + " MW" : "–");
+    fact("Gas flared", s.nFlare ? fmtMcm(mcm(s.mean)) + " M m³/yr" : "–");
+    fact("Flaring nights", s.nFlare + "/" + s.nClear);
+    detail.append(facts);
+    detail.append(overpassChart(s, 360, 150));
+    const key = el("div", { class: "chartkey" });
+    const keySvg = kind => {
+      const k = svg("svg", { width: 10, height: 10, viewBox: "0 0 10 10" });
+      if (kind === "det") k.append(svg("circle", { cx: 5, cy: 5, r: 3.4, fill: C["flare-5"] }));
+      if (kind === "clr") k.append(svg("circle", { cx: 5, cy: 5, r: 2.8, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 }));
+      if (kind === "cld") k.append(svg("path", { d: "M2.5,2.5L7.5,7.5M7.5,2.5L2.5,7.5", stroke: C["ink-3"], "stroke-width": 1.3 }));
+      if (kind === "mean") k.append(svg("line", { x1: 0, x2: 10, y1: 5, y2: 5, stroke: C["flare-4"], "stroke-width": 2 }));
+      return k;
+    };
+    key.append(el("span", null, keySvg("det"), "Detection"), el("span", null, keySvg("clr"), "Clear, no flare"),
+      el("span", null, keySvg("cld"), "Cloudy"), el("span", null, keySvg("mean"), "Nightly clear-sky mean"));
+    detail.append(key);
+    const eog = el("p", { class: "note" });
+    if (s.mycRegime) eog.append("EOG MYC25Q4 2025: ", el("b", { text: s.mycRegime }), " " + (s.mycClass || "") + " flare, ",
+      el("b", { text: (s.mycBcm * 1000).toFixed(0) + " M m³" }), " flared in 2025 (matched within 1 km).");
+    else eog.append("No EOG MYC25Q4 2025 upstream flare within 1 km.");
+    detail.append(eog);
+    detail.append(el("p", { class: "note", text: "GFW structure IDs: " + s.structs.join(", ") + (s.nstruct > s.structs.length ? " …" : "") }));
+    const coords = s.lat.toFixed(5) + ", " + s.lon.toFixed(5);
+    const copy = el("button", { type: "button", class: "copy", text: "Copy" });
+    copy.addEventListener("click", () => {
+      navigator.clipboard.writeText(coords).then(() => { copy.textContent = "Copied"; }, () => { copy.textContent = "Select text"; });
+    });
+    detail.append(el("div", { class: "links" },
+      el("span", null, el("span", { class: "mono", text: coords }), " ", copy),
+      el("a", { href: "https://www.google.com/maps/@" + s.lat + "," + s.lon + ",15z/data=!3m1!1e3", target: "_blank", rel: "noopener", text: "Satellite view ↗" })));
+  }
+  function select(s, zoomTo) {
+    state.selected = s;
+    renderDetail();
+    renderRank();
+    if (s && zoomTo) {
+      const k = Math.max(T.k, kWorld * 60);
+      go(d3.zoomIdentity.translate(W / 2 - k * s.px, H / 2 - k * s.py).scale(k));
+    } else draw();
+    if (s && window.matchMedia("(max-width: 900px)").matches) detail.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
+  }
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && state.selected) select(null, false); });
+
+  // ---------- panel: tiles, rank, regions ----------
+  function renderTiles() {
+    const box = document.getElementById("tiles");
+    box.replaceChildren();
+    const fl = S.filter(s => statusOf(s) === "F");
+    const clear = S.filter(s => { const st = statusOf(s); return st === "F" || st === "C"; });
+    const mw = d3.sum(fl, valueOf);
+    const tile = (lbl, num, unit, ctx) => box.append(el("div", { class: "tile" },
+      el("div", { class: "lbl", text: lbl }), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
+      el("div", { class: "ctx", text: ctx })));
+    tile("Flaring sites", fmtInt(fl.length), null, "of " + fmtInt(clear.length) + " seen in clear sky");
+    tile("Radiant heat", fmtMW(mw), "MW", state.night < 0 ? "sum of site means" : "sum this night");
+    tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised, " + SLOPE + " BCM/yr per MW");
+    const seen = S.filter(s => s.nObs).length;
+    tile(state.night < 0 ? "Sites observed" : "Clear this night", fmtInt(state.night < 0 ? seen : clear.length), null,
+      "of " + fmtInt(META.n_sites) + " oil sites");
+  }
+  const rankBox = document.getElementById("rank");
+  function renderRank() {
+    rankBox.replaceChildren();
+    const fl = S.filter(s => statusOf(s) === "F").sort((a, b) => valueOf(b) - valueOf(a)).slice(0, 25);
+    document.getElementById("rank-aside").textContent = state.night < 0 ? NN + "-night mean, MW" : dayLabel(NIGHTS[state.night], true).join(" ") + ", MW";
+    fl.forEach((s, i) => {
+      const b = el("button", { type: "button", class: s === state.selected ? "on" : "" },
+        el("span", { class: "i", text: String(i + 1) }),
+        el("span", { class: "n" }, el("b", { text: s.name }), el("span", { text: "site " + s.id + " · " + s.nFlare + "/" + s.nClear + " nights" })),
+        el("span", { class: "spark" }, spark(s, 72, 24)),
+        el("span", { class: "val" }, fmtMW(valueOf(s)), el("small", { text: fmtMcm(mcm(valueOf(s))) + " M m³/yr" })));
+      b.addEventListener("click", () => select(s, true));
+      b.addEventListener("pointerenter", () => { state.hl = s; draw(); });
+      b.addEventListener("pointerleave", () => { state.hl = null; draw(); });
+      b.addEventListener("focus", () => { state.hl = s; draw(); });
+      b.addEventListener("blur", () => { state.hl = null; draw(); });
+      rankBox.append(el("li", null, b));
+    });
+    if (!fl.length) rankBox.append(el("li", { class: "foot", text: "No flares detected for this selection." }));
+  }
+  function renderRegions() {
+    const t = document.getElementById("regions");
+    t.replaceChildren();
+    const groups = d3.rollups(S.filter(s => statusOf(s) === "F"), v => [v.length, d3.sum(v, valueOf)], s => s.region)
+      .sort((a, b) => b[1][1] - a[1][1]);
+    const bounds = new Map(D.regions.map(r => [r[0], r.slice(1)]));
+    t.append(el("thead", null, el("tr", null, el("th", { text: "Region" }), el("th", { text: "Flaring" }), el("th", { text: "MW" }), el("th", { text: "BCM/yr" }))));
+    const tb = el("tbody");
+    for (const [name, [n, mw]] of groups) {
+      const tr = el("tr", { class: bounds.has(name) ? "click" : "", tabindex: bounds.has(name) ? "0" : "-1" },
+        el("td", { text: name }), el("td", { text: fmtInt(n) }), el("td", { text: fmtMW(mw) }), el("td", { text: (mw * SLOPE).toFixed(3) }));
+      const zoomTo = () => {
+        const b = bounds.get(name); if (!b) return;
+        const p0 = proj([b[0], b[3]]), p1 = proj([b[2], b[1]]);
+        go(fit(p0[0], p0[1], p1[0], p1[1], 0.04));
+      };
+      tr.addEventListener("click", zoomTo);
+      tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); zoomTo(); } });
+      tb.append(tr);
+    }
+    t.append(tb);
+  }
+
+  // ---------- legend ----------
+  function renderLegend() {
+    const lg = document.getElementById("legend");
+    lg.replaceChildren();
+    lg.append(el("div", { class: "lt", text: state.night < 0 ? "Mean radiant heat (MW)" : "Radiant heat (MW)" }));
+    const row = el("div", { class: "row" });
+    [0.2, 2, 20, 60].forEach(v => {
+      const r = radiusOf(v), s = svg("svg", { width: 2 * r + 4, height: 2 * r + 4 });
+      s.append(svg("circle", { cx: r + 2, cy: r + 2, r, fill: colorOf(v), stroke: "rgba(9,16,23,0.9)", "stroke-width": 1.5 }));
+      row.append(el("span", { class: "k" }, s, fmtMW(v)));
+    });
+    lg.append(row);
+    const row2 = el("div", { class: "row" });
+    const dotK = c => { const s = svg("svg", { width: 8, height: 8 }); s.append(svg("circle", { cx: 4, cy: 4, r: 2.6, fill: c })); return s; };
+    row2.append(el("span", { class: "k" }, dotK(C.clear), "clear, no flare"), el("span", { class: "k" }, dotK(C.cloud), "cloudy every pass"));
+    lg.append(row2);
+  }
+
+  // ---------- validation & method ----------
+  function renderValidation() {
+    const v = META.validation, box = document.getElementById("validation");
+    box.append(el("p", { class: "note" }, el("b", { text: fmtInt(v.matched) }), " of " + fmtInt(v.observed) +
+      " oil sites seen in clear sky this week sit within 1 km of an EOG upstream flare from 2025. Share flagged flaring on at least one night, by EOG's 2025 persistence class:"));
+    const grid = el("div", { class: "val-grid" });
+    ["persistent", "intermittent", "sporadic", "undetected", "insufficient_observations"].forEach(k => {
+      if (!v.by_regime[k]) return;
+      const [hit, n] = v.by_regime[k], pct = n ? hit / n : 0;
+      grid.append(el("div", { class: "bar" }, el("span", { text: k.replace("_", " ") }),
+        el("span", { class: "track" }, el("span", { class: "fill", style: "display:block;width:" + (pct * 100).toFixed(1) + "%" })),
+        el("span", { class: "pct" }, (pct * 100).toFixed(0) + "% ", el("small", { text: hit + "/" + n }))));
+    });
+    box.append(grid);
+    const p = el("p", { class: "note" });
+    if (v.log_r != null) p.append("Annualised volume vs EOG 2025, log-log r = ", el("b", { text: v.log_r.toFixed(2) }), " (n = " + v.n_both + "). ");
+    p.append(el("b", { text: fmtInt(v.unmatched_flaring) }), " flaring sites have no EOG 2025 flare within 1 km.");
+    box.append(p);
+  }
+  function renderMethod() {
+    const ul = document.getElementById("method");
+    const li = (b, t) => ul.append(el("li", null, el("b", { text: b }), " " + t));
+    li("Detection.", "M10 (1.6 µm) above its aggregation-zone mean + 4σ within 2 pixels of a site, confirmed in M11, M12 or M13; single-curve Planck fit for temperature and source area (after Elvidge et al. 2013, 2019).");
+    li("Value.", "Radiant heat sums the brightest pixel's scan neighbours above 75% of its heat. A night's value is the mean over clear passes, counting clear passes with no detection as 0.");
+    li("Gas volume.", "Annualised with EOG's John Zink calibration, " + SLOPE + " BCM/yr per MW (MYC25Q4). Single nights are noisy; read volumes as rough rates.");
+    li("Clear sky.", "NOAA enterprise cloud mask at the site pixel (clear or probably clear), solar zenith ≥ 97°. A detection counts as clear.");
+    li("Satellites.", "SNPP " + fmtInt(META.by_satellite.SNPP) + ", NOAA-20 " + fmtInt(META.by_satellite["NOAA-20"]) + ", NOAA-21 " + fmtInt(META.by_satellite["NOAA-21"]) + " site passes. SNPP delivered no data after 2 Nov 15:32 UTC.");
+    li("Sites.", "GFW fixed infrastructure labelled oil and active in the latest month, merged within 750 m (" + fmtInt(META.n_structures) + " structures → " + fmtInt(META.n_sites) + " sites). Region names come from bounding boxes; country codes from the matched EOG flare.");
+    li("Not yet modelled.", "Spectral response, dual-curve background fit, atmospheric correction, cross-satellite calibration, glow filtering and isolated-cloud clearing.");
+  }
+  document.getElementById("foot").textContent =
+    "NOAA VIIRS SDRs (NOAA Open Data Dissemination), " + fmtInt(META.granules) + " granules / " + META.gb + " GB read. " +
+    "GFW fixed infrastructure. EOG MYC25Q4 (CC BY-NC 4.0). Generated " + META.generated + ".";
+
+  // ---------- zoom buttons ----------
+  document.getElementById("zin").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 2));
+  document.getElementById("zout").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 0.5));
+  document.getElementById("zreset").addEventListener("click", () => go(worldView()));
+
+  function refresh() {
+    nightBtns.forEach(([i, b]) => b.setAttribute("aria-pressed", String(i === state.night)));
+    showAll.setAttribute("aria-pressed", String(!state.flaringOnly));
+    showFl.setAttribute("aria-pressed", String(state.flaringOnly));
+    renderTiles(); renderRank(); renderRegions(); renderLegend(); renderDetail();
+    draw();
+  }
+  renderValidation();
+  renderMethod();
+  refresh();
+})();
+</script>

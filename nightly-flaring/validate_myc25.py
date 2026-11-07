@@ -62,7 +62,7 @@ def match_sites(
     dist = 2 * EARTH_RADIUS_M * np.arcsin(np.clip(chord / 2, 0, 1))
     hit = dist <= match_m
     per_site["myc_dist_m"] = np.where(hit, dist, np.nan)
-    for col in ("flare_id", "regime", "bcm", "upstream_class"):
+    for col in ("flare_id", "regime", "bcm", "upstream_class", "country_iso"):
         per_site[f"myc_{col}"] = np.where(hit, myc[col].to_numpy()[j], None)
     return per_site
 

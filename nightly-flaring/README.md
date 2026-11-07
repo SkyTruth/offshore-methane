@@ -23,6 +23,8 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `nightfire.py` | Physics: Planck function, zone thresholds, Planck fit, pixel area, radiant heat, solar zenith. |
 | `nodd.py` | NOAA bucket listing, granule index, HTTP byte-range file object for h5py. |
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
+| `build_viewer.py` | Builds `outputs/flaring_viewer.html`, a self-contained map viewer (data and basemap inlined). |
+| `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
 | `outputs/` | Generated CSVs and the per-granule cache (git-ignored). |
 
@@ -45,8 +47,16 @@ Manager as `production-gfw-infra-api-key`) in the shell or the repo-root `.env`.
 .venv/bin/python granule_coverage.py     # -> outputs/granule_sites_<date>.csv
 .venv/bin/python -c "import pipeline; pipeline.main(start='2026-10-29', end='2026-11-04', workers=12)"
 .venv/bin/python validate_myc25.py
+.venv/bin/python build_viewer.py         # -> outputs/flaring_viewer.html
 .venv/bin/python -m pytest -q tests
 ```
+
+The viewer maps every site for the selected night (or the 7-night mean):
+flaring sites glow on an amber scale sized by radiant heat, and hovering shows
+a sparkline of the nightly values. Clicking pins a per-overpass chart, the
+matched EOG MYC25Q4 2025 flare, GFW structure IDs and a satellite-view link.
+The side panel ranks the strongest flares, totals by region, and compares the
+run with MYC25Q4.
 
 Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
