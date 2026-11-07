@@ -53,7 +53,10 @@ Manager as `production-gfw-infra-api-key`) in the shell or the repo-root `.env`.
 
 The viewer maps every site for the selected night (or the 7-night mean):
 flaring sites glow on an amber scale sized by radiant heat, and hovering shows
-a sparkline of the nightly values. Clicking pins a per-overpass chart, the
+a sparkline of the nightly values. Play animates the nights, easing each
+site's brightness between nights (cloudy nights hold the last clear value at
+low opacity); a percentile slider hides sites below a chosen radiant-heat
+percentile. Clicking pins a per-overpass chart, the
 matched EOG MYC25Q4 2025 flare, GFW structure IDs and a satellite-view link.
 The side panel ranks the strongest flares, totals by region, and compares the
 run with MYC25Q4.

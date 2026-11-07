@@ -80,6 +80,22 @@ h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45)
 .seg button:hover { color: var(--ink); background: var(--raise); }
 .seg button[aria-pressed="true"] { color: var(--night); background: var(--flare-5); font-weight: 650; }
 .seg .wk { color: inherit; opacity: 0.7; margin-right: 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.player {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); padding: 3px 10px 3px 3px;
+}
+.player button {
+  border: 0; border-radius: 6px; background: var(--flare-4); color: var(--night); font-weight: 650;
+  padding: 4px 10px; cursor: pointer; font-size: 12.5px; min-width: 78px; text-align: left;
+}
+.player button[aria-pressed="true"] { background: var(--raise); color: var(--ink); }
+.player input { width: 120px; max-width: 30vw; accent-color: var(--flare-4); margin: 0; }
+.clock {
+  position: absolute; left: 10px; top: 10px; pointer-events: none;
+  background: rgba(9, 16, 23, 0.78); border: 1px solid var(--rule); border-radius: 8px; padding: 6px 11px 7px;
+}
+.clock .d { font-stretch: 75%; font-weight: 760; font-size: 22px; line-height: 1.1; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; }
+.clock .s { font-size: 11px; color: var(--ink-2); }
 .pct {
   display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
   border: 1px solid var(--rule); border-radius: 8px; background: var(--panel);
@@ -211,6 +227,10 @@ details.card li b { color: var(--ink); font-weight: 600; }
     <p class="sub" id="sub"></p>
   </div>
   <div class="controls">
+    <div class="player">
+      <button type="button" id="play" aria-pressed="false">▶ Play</button>
+      <input type="range" id="scrub" min="0" max="6" step="0.01" value="0" aria-label="Night timeline">
+    </div>
     <div class="seg" role="group" aria-label="Night shown" id="nights"></div>
     <div class="seg" role="group" aria-label="Sites shown">
       <button type="button" id="show-all" aria-pressed="true">All sites</button>
@@ -231,6 +251,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
       <button type="button" id="zout" aria-label="Zoom out">−</button>
       <button type="button" id="zreset">World</button>
     </div>
+    <div class="clock" id="clock" aria-live="polite"></div>
     <div class="legend" id="legend"></div>
     <div class="tip" id="tip" hidden></div>
   </section>
@@ -297,7 +318,22 @@ details.card li b { color: var(--ink); font-weight: 600; }
   });
   const BY_ID = new Map(S.map(s => [s.id, s]));
 
-  const state = { night: -1, flaringOnly: false, selected: null, hover: null, hl: null, pct: 0, thr: null, nFl: 0 };
+  const state = { night: -1, flaringOnly: false, selected: null, hover: null, hl: null, pct: 0, thr: null, nFl: 0, animT: null };
+
+  // Animation frame at fractional night t: ease between adjacent nights' values.
+  // Cloudy or unobserved nights hold the neighbouring clear value at low opacity.
+  const nightVal = (s, n) => s.st[n] === "F" ? s.rh[n] : s.st[n] === "C" ? 0 : null;
+  function frameValue(s, t) {
+    const tt = Math.max(0, Math.min(t, NN - 1));
+    const i = Math.floor(tt), j = Math.min(i + 1, NN - 1), f = tt - i, k = Math.round(tt);
+    let a = nightVal(s, i), b = nightVal(s, j);
+    if (a == null && b == null) return { st: s.st[k], v: null, alpha: 1 };
+    if (a == null) a = b;
+    if (b == null) b = a;
+    const e = reduceMotion ? (f < 0.5 ? 0 : 1) : f * f * (3 - 2 * f);
+    const known = s.st[k] === "F" || s.st[k] === "C";
+    return { st: s.st[k], v: a + (b - a) * e, alpha: known ? 1 : 0.32 };
+  }
 
   function statusOf(s) {
     if (state.night < 0) return s.nFlare ? "F" : s.nClear ? "C" : s.nObs ? "K" : "N";
@@ -367,7 +403,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const mkNight = (i, label) => {
     const b = el("button", { type: "button", "aria-pressed": String(i === state.night) });
     if (Array.isArray(label)) b.append(el("span", { class: "wk", text: label[0] }), label[1]); else b.append(label);
-    b.addEventListener("click", () => { state.night = i; refresh(); });
+    b.addEventListener("click", () => { pause(); state.animT = null; state.night = i; refresh(); });
     nightBtns.push([i, b]);
     nightBox.append(b);
   };
@@ -437,30 +473,46 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const pts = [], flares = [];
     const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
     for (const s of S) {
-      if (!visible(s)) continue;
-      const st = statusOf(s);
+      let st, v, alpha = 1;
+      if (state.animT != null) {
+        const fv = frameValue(s, state.animT);
+        v = fv.v; alpha = fv.alpha; st = fv.st;
+        const lit = v != null && v > 0.01;
+        if (lit) {
+          if (state.thr != null && v < state.thr) continue;
+          st = "F";
+        } else {
+          if (st === "N" || state.flaringOnly || state.thr != null) continue;
+          if (st === "F") st = "C";
+        }
+      } else {
+        if (!visible(s)) continue;
+        st = statusOf(s); v = valueOf(s);
+      }
       const x = T.applyX(s.px), y = T.applyY(s.py);
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       pts.push([x, y, s]);
-      if (st === "F") { flares.push([x, y, s, valueOf(s)]); continue; }
+      if (st === "F") { flares.push([x, y, s, v, alpha]); continue; }
       ctx.fillStyle = st === "C" ? C.clear : C.cloud;
       ctx.beginPath(); ctx.arc(x, y, dot, 0, 2 * Math.PI); ctx.fill();
     }
     flares.sort((a, b) => a[3] - b[3]);
     ctx.globalCompositeOperation = "lighter";
-    for (const [x, y, , v] of flares) {
+    for (const [x, y, , v, alpha] of flares) {
       const r = radiusOf(v) * 2.6, c = d3.color(colorOf(v));
       const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      c.opacity = 0.42; g.addColorStop(0, c.formatRgb());
+      c.opacity = 0.42 * alpha; g.addColorStop(0, c.formatRgb());
       c.opacity = 0; g.addColorStop(1, c.formatRgb());
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
     }
     ctx.globalCompositeOperation = "source-over";
     ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(9,16,23,0.9)";
-    for (const [x, y, , v] of flares) {
+    for (const [x, y, , v, alpha] of flares) {
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = colorOf(v);
       ctx.beginPath(); ctx.arc(x, y, radiusOf(v), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
     }
+    ctx.globalAlpha = 1;
     for (const s of [state.selected, state.hl, state.hover]) {
       if (!s) continue;
       const x = T.applyX(s.px), y = T.applyY(s.py), v = valueOf(s);
@@ -787,13 +839,70 @@ details.card li b { color: var(--ink); font-weight: 600; }
     pctOut.textContent = ordinal(state.pct) + " pct · ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(shown) + " sites";
   }
 
-  function refresh() {
+  // ---------- night animation ----------
+  const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub");
+  const clock = document.getElementById("clock");
+  scrub.max = String(NN - 1);
+  const MS_PER_NIGHT = 1500, END_HOLD = 0.6;
+  let raf = null, lastTs = null, stepAcc = 0;
+  function updateClock() {
+    clock.replaceChildren();
+    if (state.night < 0 && state.animT == null) {
+      clock.append(el("div", { class: "d", text: NN + "-night mean" }), el("div", { class: "s", text: "clear-sky mean per site" }));
+      return;
+    }
+    const k = Math.max(0, state.night), [wd, md] = dayLabel(NIGHTS[k], true);
+    clock.append(el("div", { class: "d", text: wd + " " + md }),
+      el("div", { class: "s", text: "night " + (k + 1) + " of " + NN + " · passes near 01:30 local" }));
+  }
+  function setFrame(t) {
+    state.animT = t;
+    const k = Math.min(NN - 1, Math.round(Math.min(t, NN - 1)));
+    scrub.value = String(Math.min(t, NN - 1));
+    if (k !== state.night) { state.night = k; refreshPanels(); }
+    updateClock();
+    draw();
+  }
+  function tick(ts) {
+    const dt = lastTs == null ? 0 : Math.min(ts - lastTs, 100);
+    lastTs = ts;
+    let t = state.animT;
+    if (reduceMotion) {
+      stepAcc += dt;
+      if (stepAcc >= MS_PER_NIGHT) { stepAcc = 0; t = Math.floor(t) + 1; }
+    } else t += dt / MS_PER_NIGHT;
+    if (t > NN - 1 + END_HOLD) t = 0;
+    setFrame(t);
+    raf = requestAnimationFrame(tick);
+  }
+  function play() {
+    if (raf) return;
+    if (state.animT == null || state.animT >= NN - 1) state.animT = state.night >= 0 && state.night < NN - 1 ? state.night : 0;
+    lastTs = null; stepAcc = 0;
+    playBtn.setAttribute("aria-pressed", "true"); playBtn.textContent = "❚❚ Pause";
+    setFrame(state.animT);
+    raf = requestAnimationFrame(tick);
+  }
+  function pause() {
+    if (raf) cancelAnimationFrame(raf);
+    raf = null;
+    playBtn.setAttribute("aria-pressed", "false"); playBtn.textContent = "▶ Play";
+  }
+  playBtn.addEventListener("click", () => (raf ? pause() : play()));
+  scrub.addEventListener("input", () => { pause(); setFrame(Number(scrub.value)); });
+
+  function refreshPanels() {
     computeThreshold();
     renderPct();
     nightBtns.forEach(([i, b]) => b.setAttribute("aria-pressed", String(i === state.night)));
     showAll.setAttribute("aria-pressed", String(!state.flaringOnly));
     showFl.setAttribute("aria-pressed", String(state.flaringOnly));
-    renderTiles(); renderRank(); renderRegions(); renderLegend(); renderDetail();
+    renderTiles(); renderRank(); renderRegions(); renderLegend();
+  }
+  function refresh() {
+    refreshPanels();
+    renderDetail();
+    updateClock();
     draw();
   }
   renderValidation();
