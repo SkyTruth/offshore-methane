@@ -98,10 +98,33 @@ def _cache_path(job: dict, cache_dir: Path) -> Path:
     return cache_dir / job["satellite"] / f"{job['gid']}.csv"
 
 
-def run_jobs(jobs: list[dict], cache_dir: Path, workers: int = 8) -> pd.DataFrame:
-    """Process granules in parallel, caching one CSV per granule."""
-    todo = [j for j in jobs if not _cache_path(j, cache_dir).exists()]
-    print(f"{len(jobs)} granules, {len(jobs) - len(todo)} cached, {len(todo)} to run")
+def run_jobs(
+    jobs: list[dict], cache_dir: Path, workers: int = 8, attempts: int = 3
+) -> pd.DataFrame:
+    """Process granules in parallel, caching one CSV per granule.
+
+    Failed granules (usually transient network errors) are retried up to
+    ``attempts`` passes; any still missing are reported and left uncached.
+    """
+    for attempt in range(1, attempts + 1):
+        todo = [j for j in jobs if not _cache_path(j, cache_dir).exists()]
+        print(
+            f"pass {attempt}: {len(jobs)} granules, "
+            f"{len(jobs) - len(todo)} cached, {len(todo)} to run"
+        )
+        if not todo or not _run_pass(todo, cache_dir, workers):
+            break
+    frames = [
+        pd.read_csv(p)
+        for p in (_cache_path(j, cache_dir) for j in jobs)
+        if p.exists() and p.stat().st_size > 0
+    ]
+    frames = [f for f in frames if len(f)]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
+    """One parallel pass over ``todo``; returns the number of failed granules."""
     t0, done, nbytes, errors = time.time(), 0, 0, []
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(granule.process_granule, j): j for j in todo}
@@ -128,14 +151,8 @@ def run_jobs(jobs: list[dict], cache_dir: Path, workers: int = 8) -> pd.DataFram
                     f"(observed-site granules), {mins:.1f} min"
                 )
     if errors:
-        print(f"{len(errors)} granules failed; rerun to retry them")
-    frames = [
-        pd.read_csv(p)
-        for p in (_cache_path(j, cache_dir) for j in jobs)
-        if p.exists() and p.stat().st_size > 0
-    ]
-    frames = [f for f in frames if len(f)]
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        print(f"{len(errors)} granules failed this pass")
+    return len(errors)
 
 
 def site_nights(

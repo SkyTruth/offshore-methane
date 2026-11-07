@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -160,6 +160,20 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
         ((observed["nights_flaring"] > 0) & observed["myc_flare_id"].isna()).sum()
     )
 
+    # Flag satellites whose passes stop or start well inside the period.
+    notes = []
+    period_end = pd.Timestamp(night_list[-1]) + pd.Timedelta(days=1, hours=12)
+    period_start = pd.Timestamp(night_list[0]) + pd.Timedelta(hours=12)
+    for sat in SATELLITES:
+        ts = pd.to_datetime(over.loc[over["satellite"] == sat, "time_utc"])
+        if ts.empty:
+            notes.append(f"{sat} returned no passes in this period.")
+            continue
+        if ts.max() < period_end - pd.Timedelta(days=1):
+            notes.append(f"{sat} has no passes after {ts.max():%-d %b %H:%M} UTC.")
+        if ts.min() > period_start + pd.Timedelta(days=1):
+            notes.append(f"{sat} has no passes before {ts.min():%-d %b %H:%M} UTC.")
+
     return {
         "meta": {
             "start": night_list[0],
@@ -174,6 +188,7 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
                 s: int((over["satellite"] == s).sum()) for s in SATELLITES
             },
             "bcm_per_mw_year": BCM_PER_MW_YEAR,
+            "notes": " ".join(notes),
             "validation": {
                 "matched": int(len(matched)),
                 "observed": int(len(observed)),
@@ -191,12 +206,27 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
     }
 
 
+def latest_run(out_dir: Path = OUT_DIR) -> str:
+    """Tag of the run with the latest end date, longest span on ties."""
+    tags = [
+        p.stem.removeprefix("site_nights_")
+        for p in out_dir.glob("site_nights_*_*.csv")
+        if (out_dir / p.name.replace("site_nights_", "overpasses_")).exists()
+    ]
+    if not tags:
+        raise FileNotFoundError(f"no site_nights_<start>_<end>.csv in {out_dir}")
+    # latest end date first, then the earliest start (longest span)
+    return min(tags, key=lambda tg: (-date.fromisoformat(tg[11:]).toordinal(), tg[:10]))
+
+
 def main(
-    start: str = "2026-10-29",
-    end: str = "2026-11-04",
+    start: str | None = None,
+    end: str | None = None,
     out_html: Path | None = None,
 ) -> Path:
-    tag = f"{start}_{end}"
+    """Build the viewer for ``start``..``end`` (default: the latest, longest run)."""
+    tag = f"{start}_{end}" if start and end else latest_run()
+    print(f"building viewer for run {tag}")
     data = build_data(tag)
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.read_text()
