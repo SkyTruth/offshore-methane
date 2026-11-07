@@ -1,0 +1,5 @@
+# On top of the repo's `methane` env (numpy, pandas, scipy, shapely, python-dotenv)
+h5py
+mapbox-vector-tile
+requests
+scikit-learn
