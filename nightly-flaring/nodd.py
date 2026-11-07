@@ -20,6 +20,8 @@ BUCKETS = {
 }
 PRODUCTS = {
     "geo": "VIIRS-MOD-GEO-TC",
+    "M7": "VIIRS-M7-SDR",
+    "M8": "VIIRS-M8-SDR",
     "M10": "VIIRS-M10-SDR",
     "M11": "VIIRS-M11-SDR",
     "M12": "VIIRS-M12-SDR",

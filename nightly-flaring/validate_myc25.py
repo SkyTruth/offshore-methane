@@ -2,8 +2,8 @@
 """Compare a site-night run with EOG's MYC25Q4 annual upstream flare sites.
 
 Downloads ``annual_flare_site_records.csv`` (CC BY-NC 4.0) from Zenodo into
-``outputs/`` once, matches each GFW site to the nearest MYC25Q4 site within
-``match_m``, and reports detection rates and volume agreement by MYC regime.
+``outputs/`` once, matches GFW and MYC25Q4 sites one-to-one within 2 km, and reports
+pooled clear-overpass detection rates and volume agreement by annual MYC regime.
 """
 
 from __future__ import annotations
@@ -41,70 +41,158 @@ def _xyz(lat, lon) -> np.ndarray:
     )
 
 
+def pooled_observations(nights: pd.DataFrame, over: pd.DataFrame) -> pd.DataFrame:
+    """Pool deduplicated strict clear observations within the local-night period."""
+    from pipeline import dedupe_overpasses, strict_clear
+
+    sites = nights[["site_id", "lat", "lon"]].drop_duplicates("site_id")
+    obs = dedupe_overpasses(over).merge(sites[["site_id", "lon"]], on="site_id")
+    local = pd.to_datetime(obs.time_utc) + pd.to_timedelta(obs.lon / 15, "h")
+    obs["night"] = (local - pd.Timedelta(hours=12)).dt.strftime("%Y-%m-%d")
+    obs = obs.merge(
+        nights[["site_id", "night"]].astype({"night": str}), on=["site_id", "night"]
+    )
+    obs = obs[strict_clear(obs)].copy()
+    obs["rh_clear"] = obs.rh_mw.where(obs.detected, 0.0)
+    pooled = obs.groupby("site_id").agg(
+        clear_overpasses=("detected", "size"),
+        detections=("detected", "sum"),
+        rh_sum=("rh_clear", "sum"),
+    )
+    counts = (
+        obs.groupby(["site_id", "night"])
+        .detected.max()
+        .groupby("site_id")
+        .agg(nights_clear="size", nights_flaring="sum")
+    )
+    result = sites.merge(pooled.join(counts), on="site_id", how="left")
+    for col in ("clear_overpasses", "detections", "nights_clear", "nights_flaring"):
+        result[col] = result[col].fillna(0).astype(int)
+    result["rh_mw"] = result.rh_sum / result.clear_overpasses.replace(0, np.nan)
+    result["bcm_per_year"] = 0.0116 * result.rh_mw
+    result["det_freq"] = result.detections / result.clear_overpasses.replace(0, np.nan)
+    return result
+
+
 def match_sites(
-    nights: pd.DataFrame, myc: pd.DataFrame, match_m: float
+    nights: pd.DataFrame,
+    myc: pd.DataFrame,
+    match_m: float = 2000.0,
+    overpasses: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Per GFW site: 7-night summary plus the nearest MYC site within match_m."""
-    per_site = (
-        nights.groupby(["site_id", "lat", "lon"])
-        .agg(
-            nights_clear=("n_clear", lambda s: int((s > 0).sum())),
-            nights_flaring=("n_detected", lambda s: int((s > 0).sum())),
-            rh_sum=("rh_mw", lambda s: float(np.nansum(s))),
-            nights_with_value=("rh_mw", lambda s: int(s.notna().sum())),
-        )
-        .reset_index()
-    )
-    per_site["bcm_per_year"] = (
-        0.0116 * per_site["rh_sum"] / per_site["nights_with_value"].replace(0, np.nan)
-    )
-    chord, j = cKDTree(_xyz(myc.lat, myc.lon)).query(_xyz(per_site.lat, per_site.lon))
-    dist = 2 * EARTH_RADIUS_M * np.arcsin(np.clip(chord / 2, 0, 1))
-    hit = dist <= match_m
-    per_site["myc_dist_m"] = np.where(hit, dist, np.nan)
-    for col in ("flare_id", "regime", "bcm", "upstream_class", "country_iso"):
-        per_site[f"myc_{col}"] = np.where(hit, myc[col].to_numpy()[j], None)
+    """Greedily accept nearest pairs within radius, using each site once."""
+    if overpasses is None:
+        raise ValueError("overpasses are required for pooled clear-sky validation")
+    per_site = pooled_observations(nights, overpasses)
+    tree = cKDTree(_xyz(myc.lat, myc.lon))
+    xyz = _xyz(per_site.lat, per_site.lon)
+    pairs = []
+    radius = 2 * np.sin(match_m / (2 * EARTH_RADIUS_M))
+    for i, candidates in enumerate(tree.query_ball_point(xyz, radius)):
+        for j in candidates:
+            chord = np.linalg.norm(xyz[i] - tree.data[j])
+            pairs.append((2 * EARTH_RADIUS_M * np.arcsin(min(chord / 2, 1)), i, j))
+    used_i, used_j, selected = set(), set(), {}
+    for distance, i, j in sorted(pairs):
+        if i not in used_i and j not in used_j:
+            used_i.add(i)
+            used_j.add(j)
+            selected[i] = (distance, j)
+    per_site["myc_dist_m"] = [
+        selected.get(i, (np.nan, None))[0] for i in range(len(per_site))
+    ]
+    for col in (
+        "flare_id",
+        "regime",
+        "bcm",
+        "upstream_class",
+        "country_iso",
+        "n_det",
+        "n_clear",
+    ):
+        per_site[f"myc_{col}"] = [
+            myc.iloc[selected[i][1]][col] if i in selected else None
+            for i in range(len(per_site))
+        ]
+    per_site["myc_det_freq"] = pd.to_numeric(per_site.myc_n_det) / pd.to_numeric(
+        per_site.myc_n_clear
+    ).replace(0, np.nan)
     return per_site
 
 
-def main(
-    site_nights_csv: Path = OUT_DIR / "site_nights_2026-10-29_2026-11-04.csv",
-    year: int = 2025,
-    match_m: float = 1000.0,
-) -> pd.DataFrame:
-    nights = pd.read_csv(site_nights_csv)
-    sites = match_sites(nights, load_myc(year), match_m)
-    observed = sites[sites["nights_clear"] > 0]
-    matched = observed[observed["myc_flare_id"].notna()]
-    print(
-        f"{len(sites)} GFW sites, {len(observed)} with >=1 clear night, "
-        f"{len(matched)} of those within {match_m:.0f} m of a MYC25Q4 {year} site"
-    )
-    flaring = observed["nights_flaring"] > 0
-    print(
-        f"flaring on >=1 night: {int(flaring.sum())} sites; "
-        f"{int((flaring & observed['myc_flare_id'].notna()).sum())} of them match MYC"
-    )
-    table = (
-        matched.assign(detected=matched["nights_flaring"] > 0)
-        .groupby("myc_regime")["detected"]
-        .agg(["sum", "size"])
-    )
-    table["rate"] = table["sum"] / table["size"]
-    print("MYC regime -> GFW sites with a detection on >=1 clear night")
-    print(table.to_string())
-    both = matched[
-        (matched["myc_bcm"].astype(float) > 0) & (matched["bcm_per_year"] > 0)
+def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
+    """Comparable totals use matched sites observed on at least one clear night."""
+    from regions import region_of
+
+    observed = sites[sites.nights_clear > 0]
+    matched = observed[observed.myc_flare_id.notna()].copy()
+    both = matched[(matched.myc_bcm.astype(float) > 0) & (matched.bcm_per_year > 0)]
+    persistent = matched[
+        (matched.myc_regime == "persistent") & matched.myc_det_freq.notna()
     ]
-    if len(both) > 2:
-        x = np.log10(both["myc_bcm"].astype(float))
-        y = np.log10(both["bcm_per_year"])
-        print(
-            f"volume, sites positive in both (n={len(both)}): "
-            f"log10 r={np.corrcoef(x, y)[0, 1]:.2f}, "
-            f"median ratio ours/MYC={np.median(10 ** (y - x)):.2f}"
+    matched["region"] = [region_of(r.lat, r.lon) for r in matched.itertuples()]
+    return dict(
+        matched=len(matched),
+        observed=len(observed),
+        match_m=match_m,
+        by_regime={
+            regime: [int((g.nights_flaring > 0).sum()), len(g)]
+            for regime, g in matched.groupby("myc_regime")
+        },
+        log_r=float(
+            np.corrcoef(
+                np.log10(both.myc_bcm.astype(float)), np.log10(both.bcm_per_year)
+            )[0, 1]
         )
-    sites.to_csv(Path(site_nights_csv).with_name("validation_myc25.csv"), index=False)
+        if len(both) > 2
+        else None,
+        n_both=len(both),
+        median_ratio=float(np.median(both.bcm_per_year / both.myc_bcm.astype(float)))
+        if len(both)
+        else None,
+        unmatched_flaring=int(
+            ((observed.nights_flaring > 0) & observed.myc_flare_id.isna()).sum()
+        ),
+        det_freq=dict(
+            ours=float(persistent.det_freq.median()) if len(persistent) else None,
+            myc=float(persistent.myc_det_freq.median()) if len(persistent) else None,
+            n=len(persistent),
+        ),
+        regions=[
+            [
+                name,
+                float(g.bcm_per_year.sum()),
+                float(g.myc_bcm.astype(float).sum()),
+                len(g),
+            ]
+            for name, g in matched.groupby("region")
+        ],
+    )
+
+
+def main(
+    tag: str = "2026-10-29_2026-10-29",
+    out_dir: Path = OUT_DIR,
+    year: int = 2025,
+    match_m: float = 2000.0,
+    site_nights_csv: Path | None = None,
+    overpasses_csv: Path | None = None,
+) -> pd.DataFrame:
+    """Validate one run against annual MYC regimes (default last available year)."""
+    import json
+
+    nights = pd.read_csv(site_nights_csv or out_dir / f"site_nights_{tag}.csv")
+    over = pd.read_csv(overpasses_csv or out_dir / f"overpasses_{tag}.csv")
+    sites = match_sites(nights, load_myc(year), match_m, over)
+    summary = validation_summary(sites, match_m)
+    print(f"MYC25Q4 {year}; run {tag} (short-period rates vs annual reference)")
+    print(json.dumps(summary, indent=2))
+    for regime, (detected, observed) in summary["by_regime"].items():
+        print(f"{regime}: {detected}/{observed} = {detected / observed:.1%}")
+    sites.to_csv(out_dir / f"validation_myc25_{tag}.csv", index=False)
+    (out_dir / f"validation_summary_{tag}.json").write_text(
+        json.dumps(summary, indent=2)
+    )
     return sites
 
 

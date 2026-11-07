@@ -22,54 +22,29 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import validate_myc25  # noqa: E402
+from regions import REGIONS, region_of  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 TEMPLATE = HERE / "viewer_template.html"
 BASEMAP_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json"
 BCM_PER_MW_YEAR = 0.0116
+STATUS_LABEL = "v3 · review fixes"
 STATUS = (
-    "First pass. A two-model review (GPT-6.1 Sol, Claude Opus 5.5, 7 Nov 2026) "
-    "found regional totals and persistent flares usable; per-site nightly volumes "
-    "and the flaring status of sites with another site within 2 km are not yet "
-    "reliable (bow-tie pixels, glow split between neighbours, cloud-flagged "
-    "detections counted as clear)."
+    "Pipeline v3: fixes from the 7 Nov 2026 two-model review (GPT-6.1 Sol, Claude "
+    "Opus 5.5) applied: finite-radiance site pixels, flare clusters with a glow "
+    "test assigned to one site, strict cloud rule, noise-weighted fits with M7/M8 "
+    "and QF1 saturation, one-to-one validation. Not yet: M11-only and MWIR-only "
+    "triggers, atmospheric correction, cross-satellite calibration, non-upstream "
+    "flagging."
 )
 SATELLITES = ["SNPP", "NOAA-20", "NOAA-21"]
 STATUS_CODE = {
     "flaring": "F",
+    "flaring_cloud": "D",
     "clear_no_flare": "C",
     "cloudy": "K",
     "not_observed": "N",
 }
-# name, lon_min, lat_min, lon_max, lat_max (first match wins)
-REGIONS = [
-    ("Persian Gulf", 47.0, 23.0, 57.5, 30.6),
-    ("Caspian Sea", 46.0, 36.5, 55.0, 47.5),
-    ("Red Sea & Suez", 32.0, 12.0, 44.0, 31.0),
-    ("Gulf of Mexico", -98.5, 17.0, -80.0, 31.0),
-    ("North Sea", -4.5, 50.5, 10.0, 62.5),
-    ("Norwegian & Barents Sea", 0.0, 62.5, 45.0, 75.0),
-    ("Gulf of Guinea", -4.0, -7.0, 14.0, 7.5),
-    ("Angola & Congo", 8.0, -18.0, 14.5, -7.0),
-    ("Brazil", -50.0, -30.0, -34.0, 0.0),
-    ("Trinidad & Venezuela", -72.0, 8.0, -58.0, 13.5),
-    ("Mediterranean", -6.0, 30.0, 36.0, 46.0),
-    ("Bohai & Yellow Sea", 117.0, 33.0, 126.0, 41.5),
-    ("South China Sea", 105.0, 5.0, 122.0, 23.0),
-    ("Gulf of Thailand", 99.0, 5.0, 105.0, 14.0),
-    ("Malaysia & Indonesia", 95.0, -9.0, 125.0, 7.5),
-    ("India & Bay of Bengal", 66.0, 5.0, 95.0, 25.0),
-    ("Australia & Timor Sea", 110.0, -40.0, 155.0, -8.0),
-    ("Alaska & Cook Inlet", -170.0, 55.0, -140.0, 72.0),
-    ("Sakhalin", 140.0, 45.0, 146.0, 55.0),
-]
-
-
-def region_of(lat: float, lon: float) -> str:
-    for name, x0, y0, x1, y1 in REGIONS:
-        if x0 <= lon <= x1 and y0 <= lat <= y1:
-            return name
-    return "Other"
 
 
 def load_basemap(out_dir: Path = OUT_DIR) -> str:
@@ -89,11 +64,17 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
     nights = pd.read_csv(out_dir / f"site_nights_{tag}.csv")
     over = pd.read_csv(out_dir / f"overpasses_{tag}.csv")
     per_granule = over.groupby(["satellite", "granule"])["bytes_granule"].max()
-    sites = pd.read_csv(out_dir / "gfw_oil_sites.csv").set_index("site_id")
+    sites_path = out_dir / "gfw_oil_sites.csv"
+    if not sites_path.exists():
+        sites_path = OUT_DIR / "gfw_oil_sites.csv"
+    sites = pd.read_csv(sites_path).set_index("site_id")
     night_list = sorted(nights["night"].unique())
     nidx = {n: i for i, n in enumerate(night_list)}
 
-    myc = validate_myc25.match_sites(nights, validate_myc25.load_myc(2025), 1000.0)
+    myc = validate_myc25.match_sites(
+        nights, validate_myc25.load_myc(2025), 2000.0, over
+    )
+    validation = validate_myc25.validation_summary(myc, 2000.0)
     myc = myc.set_index("site_id")
 
     # Per-overpass detail (solar zenith >= 97, as in the nightly aggregation).
@@ -106,7 +87,9 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
     over = over[over["night"].isin(nidx)]
     t0 = pd.Timestamp(night_list[0])
     over["tmin"] = ((t - t0).dt.total_seconds() / 60).round().astype(int)
-    flaring_ids = set(nights.loc[nights["status"] == "flaring", "site_id"])
+    flaring_ids = set(
+        nights.loc[nights["status"].isin(["flaring", "flaring_cloud"]), "site_id"]
+    )
     detail = {}
     for sid, g in over[over["site_id"].isin(flaring_ids)].groupby("site_id"):
         detail[str(int(sid))] = [
@@ -149,24 +132,6 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
             ]
         )
 
-    # Validation summary against MYC25Q4 2025.
-    observed = myc[myc["nights_clear"] > 0]
-    matched = observed[observed["myc_flare_id"].notna()]
-    by_regime = {}
-    for regime, g in matched.groupby("myc_regime"):
-        by_regime[regime] = [int((g["nights_flaring"] > 0).sum()), int(len(g))]
-    both = matched[
-        (matched["myc_bcm"].astype(float) > 0) & (matched["bcm_per_year"] > 0)
-    ]
-    log_r = None
-    if len(both) > 2:
-        x = np.log10(both["myc_bcm"].astype(float))
-        y = np.log10(both["bcm_per_year"])
-        log_r = round(float(np.corrcoef(x, y)[0, 1]), 2)
-    unmatched_flaring = int(
-        ((observed["nights_flaring"] > 0) & observed["myc_flare_id"].isna()).sum()
-    )
-
     # Flag satellites whose passes stop or start well inside the period.
     notes = []
     period_end = pd.Timestamp(night_list[-1]) + pd.Timedelta(days=1, hours=12)
@@ -197,14 +162,8 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
             "bcm_per_mw_year": BCM_PER_MW_YEAR,
             "notes": " ".join(notes),
             "status": STATUS,
-            "validation": {
-                "matched": int(len(matched)),
-                "observed": int(len(observed)),
-                "by_regime": by_regime,
-                "log_r": log_r,
-                "n_both": int(len(both)),
-                "unmatched_flaring": unmatched_flaring,
-            },
+            "status_label": STATUS_LABEL,
+            "validation": validation,
         },
         "nights": night_list,
         "satellites": SATELLITES,

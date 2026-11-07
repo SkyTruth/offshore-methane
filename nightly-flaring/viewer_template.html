@@ -345,18 +345,20 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function computeRange() {
     const [a, b] = state.range;
     for (const s of S) {
-      let sum = 0, nC = 0, nF = 0, nO = 0;
+      let sum = 0, nC = 0, nF = 0, nO = 0, nD = 0;
       for (let i = a; i <= b; i++) {
         const ch = s.st[i];
         if (ch === "F") { sum += s.rh[i] || 0; nC++; nF++; nO++; }
         else if (ch === "C") { nC++; nO++; }
         else if (ch === "K") nO++;
+        else if (ch === "D") { nD++; nO++; if (s.rh[i] != null) { nC++; sum += s.rh[i]; } }
       }
-      s.rFlare = nF; s.rClear = nC; s.rObs = nO; s.rMean = nC ? sum / nC : null;
+      s.rFlare = nF; s.rClear = nC; s.rObs = nO; s.rCloudFlare = nD; s.rMean = nC ? sum / nC : null;
     }
   }
+  // F flaring (clear sky), D seen lit through cloud, C clear no flare, K cloudy, N not observed
   function statusOf(s) {
-    if (state.night < 0) return s.rFlare ? "F" : s.rClear ? "C" : s.rObs ? "K" : "N";
+    if (state.night < 0) return s.rFlare ? "F" : s.rCloudFlare ? "D" : s.rClear ? "C" : s.rObs ? "K" : "N";
     return s.st[state.night];
   }
   function valueOf(s) {
@@ -371,7 +373,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function visible(s) {
     const st = statusOf(s);
     if (st === "N") return false;
-    if (state.flaringOnly && st !== "F") return false;
+    if (state.flaringOnly && st !== "F" && st !== "D") return false;
     if (state.thr != null) return st === "F" && valueOf(s) >= state.thr;
     return true;
   }
@@ -433,7 +435,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     "VIIRS night passes over ", el("b", { text: fmtInt(META.n_sites) }), " GFW offshore oil sites · ",
     el("b", { text: rangeLabel(0, NN - 1) + ", " + dateOf(NIGHTS[NN - 1]).getUTCFullYear() }),
     " · " + NN + " nights, one value per site per night",
-    META.status ? el("span", { class: "pill", title: META.status, text: "first pass" }) : null);
+    META.status ? el("span", { class: "pill", title: META.status, text: META.status_label || "draft" }) : null);
 
   // ---------- map ----------
   const wrap = document.getElementById("mapwrap");
@@ -489,7 +491,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     ctx.lineWidth = 0.6 / T.k; ctx.setLineDash([2 / T.k, 2 / T.k]); ctx.stroke(borderP); ctx.setLineDash([]);
     ctx.restore();
 
-    const pts = [], flares = [];
+    const pts = [], flares = [], rings = [];
     const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
     for (const s of S) {
       let st, v, alpha = 1;
@@ -501,7 +503,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
           if (state.thr != null && v < state.thr) continue;
           st = "F";
         } else {
-          if (st === "N" || state.flaringOnly || state.thr != null) continue;
+          if (st === "N" || state.thr != null) continue;
+          if (state.flaringOnly && st !== "D") continue;
           if (st === "F") st = "C";
         }
       } else {
@@ -512,9 +515,12 @@ details.card li b { color: var(--ink); font-weight: 600; }
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       pts.push([x, y, s]);
       if (st === "F") { flares.push([x, y, s, v, alpha]); continue; }
+      if (st === "D") { rings.push([x, y]); continue; }
       ctx.fillStyle = st === "C" ? C.clear : C.cloud;
       ctx.beginPath(); ctx.arc(x, y, dot, 0, 2 * Math.PI); ctx.fill();
     }
+    ctx.lineWidth = 1.3; ctx.strokeStyle = C["flare-4"];
+    for (const [x, y] of rings) { ctx.beginPath(); ctx.arc(x, y, dot + 2.2, 0, 2 * Math.PI); ctx.stroke(); }
     flares.sort((a, b) => a[3] - b[3]);
     ctx.globalCompositeOperation = "lighter";
     for (const [x, y, , v, alpha] of flares) {
@@ -574,6 +580,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
         root.append(svg("circle", { cx: x(i), cy: y(vals[i]), r: i === last ? 3.2 : (LONG ? 1.8 : 2.6), fill: C["flare-5"], stroke: C.sea, "stroke-width": LONG ? 0.6 : 1 }));
       } else if (ch === "C" && !small && !LONG) {
         root.append(svg("circle", { cx: x(i), cy: y(0), r: 2.4, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 }));
+      } else if (ch === "D" && !small) {
+        root.append(svg("circle", { cx: x(i), cy: top + ph, r: LONG ? 1.8 : 2.4, fill: C.sea, stroke: C["flare-4"], "stroke-width": 1.2 }));
       } else if (ch === "K" && !small) {
         root.append(LONG ? svg("line", { x1: x(i), x2: x(i), y1: top + ph + 2, y2: top + ph + 5, stroke: C["ink-3"], "stroke-width": 1 })
           : cross(x(i), top + ph, 2.5, C["ink-3"]));
@@ -594,6 +602,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const dl = el("dl");
     const add = (k, v) => dl.append(el("dt", { text: k }), el("dd", { text: v }));
     add("Flaring nights", s.rFlare + " of " + s.rClear + " clear");
+    if (s.rCloudFlare) add("Lit through cloud", s.rCloudFlare + (s.rCloudFlare === 1 ? " night" : " nights"));
     if (s.rFlare) add("Gas flared (est.)", fmtMcm(mcm(s.rMean)) + " M m³/yr");
     if (s.tmax) add("Peak temperature", fmtInt(s.tmax) + " K");
     add("GFW structures", String(s.nstruct));
@@ -605,7 +614,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const v = valueOf(s), st = statusOf(s);
     const head = el("div");
     if (st === "F") head.append(el("span", { class: "v", text: fmtMW(v) }), el("span", { class: "u", text: state.night < 0 ? "MW mean radiant heat" : "MW radiant heat" }));
-    else head.append(el("span", { class: "v", text: st === "C" ? "No flare" : st === "K" ? "Cloudy" : "Not observed" }),
+    else head.append(el("span", { class: "v", text: st === "C" ? "No flare" : st === "D" ? "Lit, cloudy" : st === "K" ? "Cloudy" : "Not observed" }),
       el("span", { class: "u", text: state.night < 0 ? rangeLabel(...state.range) : wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]) }));
     tip.append(head, el("div", { class: "nm" }, el("b", { text: s.name }), " · site " + s.id));
     tip.append(spark(s, 238, 62, { axis: true }));
@@ -840,9 +849,10 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const tile = (lbl, num, unit, sub) => box.append(el("div", { class: "tile" },
       el("div", { class: "lbl", text: lbl }), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
       el("div", { class: "ctx", text: sub })));
+    const lit = S.filter(s => statusOf(s) === "D" && visible(s)).length;
     tile(state.thr != null ? "Flaring sites shown" : "Flaring sites", fmtInt(fl.length), null,
       state.thr != null ? "of " + fmtInt(state.nFl) + " flaring, ≥ " + fmtMW(state.thr) + " MW"
-        : "of " + fmtInt(clear.length) + " seen in clear sky");
+        : "of " + fmtInt(clear.length) + " seen in clear sky" + (lit ? "; " + fmtInt(lit) + " more lit under cloud" : ""));
     tile("Radiant heat", fmtMW(mw), "MW", (state.night < 0 ? "sum of site means" : "sum this night") + (state.thr != null ? ", shown sites" : ""));
     tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised, " + SLOPE + " BCM/yr per MW");
     const seen = S.filter(s => statusOf(s) !== "N").length;
@@ -904,13 +914,17 @@ details.card li b { color: var(--ink); font-weight: 600; }
     lg.append(row);
     const row2 = el("div", { class: "row" });
     const dotK = c => { const s = svg("svg", { width: 8, height: 8 }); s.append(svg("circle", { cx: 4, cy: 4, r: 2.6, fill: c })); return s; };
-    row2.append(el("span", { class: "k" }, dotK(C.clear), "clear, no flare"), el("span", { class: "k" }, dotK(C.cloud), "cloudy every pass"));
+    const ringK = () => { const s = svg("svg", { width: 10, height: 10 }); s.append(svg("circle", { cx: 5, cy: 5, r: 3.6, fill: "none", stroke: C["flare-4"], "stroke-width": 1.3 })); return s; };
+    row2.append(el("span", { class: "k" }, ringK(), "lit, seen through cloud"),
+      el("span", { class: "k" }, dotK(C.clear), "clear, no flare"), el("span", { class: "k" }, dotK(C.cloud), "cloudy every pass"));
     lg.append(row2);
   }
   function renderValidation() {
     const v = META.validation, box = document.getElementById("validation");
+    const km = ((v.match_m || 1000) / 1000).toFixed(0);
     box.append(el("p", { class: "note" }, el("b", { text: fmtInt(v.matched) }), " of " + fmtInt(v.observed) +
-      " oil sites seen in clear sky over the whole period sit within 1 km of an EOG upstream flare from 2025. Share flagged flaring on at least one night, by EOG's 2025 persistence class:"));
+      " oil sites seen in clear sky over the whole period match an EOG 2025 upstream flare within " + km +
+      " km (one-to-one). Share flagged flaring on at least one clear night, by EOG's 2025 persistence class:"));
     const grid = el("div", { class: "val-grid" });
     ["persistent", "intermittent", "sporadic", "undetected", "insufficient_observations"].forEach(k => {
       if (!v.by_regime[k]) return;
@@ -921,22 +935,44 @@ details.card li b { color: var(--ink); font-weight: 600; }
     });
     box.append(grid);
     const p = el("p", { class: "note" });
-    if (v.log_r != null) p.append("Annualised volume vs EOG 2025, log-log r = ", el("b", { text: v.log_r.toFixed(2) }), " (n = " + v.n_both + "). ");
-    p.append(el("b", { text: fmtInt(v.unmatched_flaring) }), " flaring sites have no EOG 2025 flare within 1 km.");
+    if (v.log_r != null) {
+      p.append("Pooled clear-sky volume vs EOG 2025: log-log r = ", el("b", { text: v.log_r.toFixed(2) }),
+        ", median ratio " + (v.median_ratio != null ? v.median_ratio.toFixed(2) : "–") + " (n = " + v.n_both + "). ");
+    }
+    if (v.det_freq && v.det_freq.n) {
+      p.append("At persistent flares, the median share of clear passes with a detection is ",
+        el("b", { text: (v.det_freq.ours * 100).toFixed(0) + "%" }), " here vs " + (v.det_freq.myc * 100).toFixed(0) +
+        "% in EOG 2025 (n = " + v.det_freq.n + "). ");
+    }
+    p.append(el("b", { text: fmtInt(v.unmatched_flaring) }), " flaring sites have no EOG 2025 flare within " + km + " km.");
     box.append(p);
+    if (v.regions && v.regions.length) {
+      const t = el("table");
+      t.append(el("thead", null, el("tr", null, el("th", { text: "Matched sites by region" }), el("th", { text: "Here" }),
+        el("th", { text: "EOG 2025" }), el("th", { text: "Sites" }))));
+      const tb = el("tbody");
+      v.regions.slice().sort((a, b) => b[2] - a[2]).forEach(([name, ours, myc, n]) => {
+        tb.append(el("tr", null, el("td", { text: name }), el("td", { text: ours.toFixed(2) }),
+          el("td", { text: myc.toFixed(2) }), el("td", { text: fmtInt(n) })));
+      });
+      t.append(tb);
+      box.append(el("p", { class: "note", text: "Annual gas flared, BCM/yr (here: pooled clear-sky mean × " + SLOPE + "):" }),
+        el("div", { class: "tbl-wrap" }, t));
+    }
   }
   function renderMethod() {
     const ul = document.getElementById("method");
     const li = (b, t) => ul.append(el("li", null, el("b", { text: b }), " " + t));
     if (META.status) li("Status.", META.status);
-    li("Detection.", "M10 (1.6 µm) above its aggregation-zone mean + 4σ within 2 pixels of a site, confirmed in M11, M12 or M13; single-curve Planck fit for temperature and source area (after Elvidge et al. 2013, 2019).");
-    li("Value.", "Radiant heat sums the brightest pixel's scan neighbours above 75% of its heat. A night's value is the mean over clear passes, counting clear passes with no detection as 0; a range mean averages nights with a clear pass.");
+    li("Detection.", "M10 (1.6 µm) above its aggregation-zone mean + 4σ; hot pixels grouped into clusters within each 16-line scan, kept only when the peak is the brightest M10 pixel within 2 pixels (glow test), confirmed in at least one of M7, M8, M11, M12, M13, and assigned whole to the nearest site within 2 km (after Elvidge et al. 2013, 2019; Zhizhin et al. 2026).");
+    li("Fit.", "Single-curve Planck fit per pixel for temperature and source area, weighted by each band's background noise plus a 10% model error; bands are eliminated on large negative residuals and failed fits fall back to 1810 K from M10. Saturated bands are dropped using raw radiance and the SDR QF1 flags.");
+    li("Value.", "Radiant heat sums a cluster's pixels above 75% of its brightest (RH75%). A night's value is the mean over clear passes, counting clear passes with no detection as 0; a range mean averages nights with a clear pass.");
     li("Gas volume.", "Annualised with EOG's John Zink calibration, " + SLOPE + " BCM/yr per MW (MYC25Q4). Single nights are noisy; read volumes as rough rates.");
-    li("Clear sky.", "NOAA enterprise cloud mask at the site pixel (clear or probably clear), solar zenith ≥ 97°. A detection counts as clear.");
+    li("Clear sky.", "NOAA enterprise cloud mask at the site pixel (clear or probably clear), solar zenith ≥ 97°. A detection under cloud counts as clear only when at least 6 of its 8 neighbours are clear; otherwise the night shows as lit through cloud and carries no clear-sky value. Bow-tie-deleted pixels and passes repeated in adjacent granules are excluded.");
     li("Satellites.", "SNPP " + fmtInt(META.by_satellite.SNPP) + ", NOAA-20 " + fmtInt(META.by_satellite["NOAA-20"]) + ", NOAA-21 " + fmtInt(META.by_satellite["NOAA-21"]) + " site passes. " + (META.notes || ""));
     li("Timeline.", "Bars sum the radiant heat of every site seen flaring that night, so cloudy nights and missing satellite passes lower them.");
     li("Sites.", "GFW fixed infrastructure labelled oil and active in the latest month, merged within 750 m (" + fmtInt(META.n_structures) + " structures → " + fmtInt(META.n_sites) + " sites). Region names come from bounding boxes; country codes from the matched EOG flare.");
-    li("Not yet modelled.", "Spectral response, dual-curve background fit, atmospheric correction, cross-satellite calibration, glow filtering and isolated-cloud clearing.");
+    li("Not yet modelled.", "M11-only and mid-infrared-only triggers, spectral response, dual-curve background fit, atmospheric correction, cross-satellite calibration, and flagging of non-upstream flares (refineries, terminals) among GFW oil sites.");
   }
   document.getElementById("foot").textContent =
     "NOAA VIIRS SDRs (NOAA Open Data Dissemination), " + fmtInt(META.granules) + " granules / " + META.gb + " GB read. " +

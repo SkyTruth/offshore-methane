@@ -7,7 +7,7 @@
 3. One row per site per local night: mean clear-sky radiant heat (MW, clear
    non-detections count as 0) and the matching BCM/yr rate.
 
-Per-granule results are cached under ``outputs/overpasses/`` so reruns resume.
+Per-granule results are cached under ``out_dir/overpasses_v3/`` to resume.
 Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 """
 
@@ -33,6 +33,7 @@ import nodd  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 SITES_CSV = OUT_DIR / "gfw_oil_sites.csv"
+PIPELINE_VERSION = "v3"
 SZA_CLEAR = 97.0  # clear-overpass rule (MYC25Q4 README)
 BCM_PER_MW_YEAR = 0.0116  # John Zink calibration slope (MYC25Q4 README)
 SLICE_MARGIN = timedelta(seconds=20)
@@ -155,25 +156,70 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
     return len(errors)
 
 
+def dedupe_overpasses(over: pd.DataFrame) -> pd.DataFrame:
+    """Collapse same-satellite/site runs with consecutive gaps <10 s.
+
+    Keep the smallest site-pixel distance; ties keep the earliest record.
+    """
+    if over.empty:
+        return over.copy()
+    ordered = over.copy()
+    ordered["_time"] = pd.to_datetime(ordered["time_utc"])
+    ordered = ordered.sort_values(["satellite", "site_id", "_time"], kind="stable")
+    gap = ordered.groupby(["satellite", "site_id"])["_time"].diff()
+    ordered["_observation"] = (gap.isna() | (gap >= pd.Timedelta(seconds=10))).cumsum()
+    return (
+        ordered.sort_values("dist_m", kind="stable")
+        .drop_duplicates("_observation")
+        .sort_values("_time", kind="stable")
+        .drop(columns=["_time", "_observation"])
+        .reset_index(drop=True)
+    )
+
+
+def strict_clear(over: pd.DataFrame) -> pd.Series:
+    """Shared clear-overpass rule, including isolated cloudy detections."""
+    return (over["sza"] >= SZA_CLEAR) & (
+        over["cloud_mask"].isin([0, 1])
+        | (over["detected"] & (over["cloud_clear_neighbors"] >= 6))
+    )
+
+
 def site_nights(
     over: pd.DataFrame, sites: pd.DataFrame, start: date, end: date
 ) -> pd.DataFrame:
-    """One row per site per local night (evening date)."""
+    """One row per site per local night using strict cloud clearing.
+
+    Detections under non-isolated cloud are excluded from the clear-sky value
+    (``rh_mw``) but recorded in ``n_detected_cloud``; a night whose only
+    detections are such is ``flaring_cloud`` (the flare was lit, its clear-sky
+    heat is unmeasured). Detclear columns retain the old detected-or-clear rule
+    for comparison. Counts follow deduplication.
+    """
+    over = dedupe_overpasses(over)
     over = over.merge(sites[["site_id", "lon"]], on="site_id")
     local = pd.to_datetime(over["time_utc"]) + pd.to_timedelta(over["lon"] / 15, "h")
     over["night"] = (local - pd.Timedelta(hours=12)).dt.date
     over = over[(over["sza"] >= SZA_CLEAR)].copy()
-    over["clear"] = over["detected"] | over["cloud_mask"].isin([0, 1])
+    over["clear_detclear"] = over["detected"] | over["cloud_mask"].isin([0, 1])
+    over["clear"] = strict_clear(over)
+    over["detected_strict"] = over["detected"] & over["clear"]
+    over["detected_cloud"] = over["detected"] & ~over["clear"]
+    over["rh_detclear"] = over["rh_mw"].where(over["clear_detclear"], 0.0)
+    over["temp_strict"] = over["temp_k"].where(over["detected_strict"])
     over["rh_clear"] = over["rh_mw"].where(over["clear"], 0.0)
     agg = (
         over.groupby(["night", "site_id"])
         .agg(
             n_overpasses=("clear", "size"),
             n_clear=("clear", "sum"),
-            n_detected=("detected", "sum"),
+            n_detected=("detected_strict", "sum"),
+            n_detected_cloud=("detected_cloud", "sum"),
+            n_clear_detclear=("clear_detclear", "sum"),
+            rh_sum_detclear=("rh_detclear", "sum"),
             rh_sum=("rh_clear", "sum"),
-            rh_max_mw=("rh_mw", "max"),
-            temp_k=("temp_k", "max"),
+            rh_max_mw=("rh_clear", "max"),
+            temp_k=("temp_strict", "max"),
         )
         .reset_index()
     )
@@ -182,13 +228,19 @@ def site_nights(
     ).to_frame(index=False)
     out = grid.merge(agg, on=["night", "site_id"], how="left")
     out = out.merge(sites[["site_id", "lat", "lon"]], on="site_id")
-    for col in ("n_overpasses", "n_clear", "n_detected"):
+    counts = ("n_overpasses", "n_clear", "n_detected", "n_detected_cloud")
+    for col in (*counts, "n_clear_detclear"):
         out[col] = out[col].fillna(0).astype(int)
     out["rh_mw"] = (out["rh_sum"] / out["n_clear"]).where(out["n_clear"] > 0)
     out["bcm_per_year"] = BCM_PER_MW_YEAR * out["rh_mw"]
+    out["rh_mw_detclear"] = (out["rh_sum_detclear"] / out["n_clear_detclear"]).where(
+        out["n_clear_detclear"] > 0
+    )
+    out["bcm_per_year_detclear"] = BCM_PER_MW_YEAR * out["rh_mw_detclear"]
     out["status"] = "not_observed"
     out.loc[out["n_overpasses"] > 0, "status"] = "cloudy"
     out.loc[out["n_clear"] > 0, "status"] = "clear_no_flare"
+    out.loc[out["n_detected_cloud"] > 0, "status"] = "flaring_cloud"
     out.loc[out["n_detected"] > 0, "status"] = "flaring"
     cols = [
         "night",
@@ -203,6 +255,10 @@ def site_nights(
         "n_overpasses",
         "n_clear",
         "n_detected",
+        "n_detected_cloud",
+        "n_clear_detclear",
+        "rh_mw_detclear",
+        "bcm_per_year_detclear",
     ]
     return out[cols].sort_values(["night", "site_id"]).reset_index(drop=True)
 
@@ -217,11 +273,12 @@ def main(
 ) -> pd.DataFrame:
     """Run nights ``start``..``end`` (inclusive, local evening dates)."""
     d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+    out_dir.mkdir(parents=True, exist_ok=True)
     sites = pd.read_csv(sites_csv)
     jobs = build_jobs(sites, d0, d1)
     if max_granules:
         jobs = jobs[:max_granules]
-    over = run_jobs(jobs, out_dir / "overpasses", workers)
+    over = run_jobs(jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", workers)
     tag = f"{start}_{end}"
     over.to_csv(out_dir / f"overpasses_{tag}.csv", index=False)
     nights = site_nights(over, sites, d0, d1)

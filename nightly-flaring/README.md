@@ -67,37 +67,61 @@ Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day bucket retention.
 
-## Pipeline (first pass)
+## Pipeline (v3)
 
 1. **Granule selection**: NASA CMR footprints of the 6-minute geolocation
    granules, split into four slices, select the NOAA 86 s granules (±20 s) and
    the sites each one can see.
-2. **Site pixel**: nearest valid pixel in the terrain-corrected geolocation
-   (`GMTCO`) within 1.2 km; sites on the granule border are left to the
-   neighbouring granule.
-3. **Detection (stage 1, every granule)**: M10 radiance above the
-   aggregation-zone mean + 4σ (one 4σ clip of bright pixels stands in for the
-   2013 DN > 100 screen), solar zenith ≥ 95°, within ±2 pixels of a site.
-4. **Confirmation and fit (stage 2, only granules with a candidate)**: M11
-   (zone mean + 4σ), M12/M13 (10×10 local background + 3σ, background
-   subtracted). Pixels with M10 plus at least one other band get a
-   single-curve Planck fit for temperature and emission scaling factor;
-   saturated bands are dropped. M10-only pixels are counted
-   (`n_hot_m10`) but not treated as detections.
-5. **Per overpass**: hot pixels are assigned to the nearest site within 2 km.
-   Radiant heat sums the pixels in the brightest pixel's scan with RH ≥ 0.75 ×
-   max (RH75%, Zhizhin 2025). The cloud mask (NOAA enterprise `JRR-CloudMask`)
-   is read at the site pixel.
-6. **Per night** (`site_nights_<start>_<end>.csv`): overpasses with solar zenith
-   ≥ 97° are pooled across SNPP, NOAA-20 and NOAA-21. Clear = detected or cloud
-   mask clear/probably clear. `rh_mw` = Σ RH over clear overpasses / clear
-   overpasses (clear non-detections are 0); `bcm_per_year` = 0.0116 × `rh_mw`.
-   `status` is `flaring`, `clear_no_flare`, `cloudy` or `not_observed`.
+2. **Site pixel**: nearest finite-M10, valid geolocation pixel within 1.2 km;
+   sites on the outermost granule border are left to the neighbouring granule.
+3. **Detection (stage 1)**: M10 radiance above the aggregation-zone mean + 4σ,
+   solar zenith ≥ 95°. Label 8-connected hot pixels separately in each 16-line
+   scan. Select full clusters touching a clipped ±2-pixel site window. Reject a
+   cluster if any M10 pixel in the peak's same-scan ±2 window is brighter.
+4. **Confirmation and fit (stage 2)**: fit every selected cluster pixel using
+   M7/M8/M10/M11 (zone mean + 4σ), and background-subtracted M12/M13 (local mean +
+   3σ). Drop saturated bands using raw radiance, before background subtraction.
+   QF1 bits 2–3 also exclude partially/fully saturated bands. Missing M7/M8
+   files are optional. At least two unsaturated bands confirm a candidate;
+   M10 need not survive. Fit residuals are divided by the same clipped zone SD
+   (M7/M8/M10/M11) or local background SD (M12/M13), floored at 1e-6
+   radiance units for uniform scenes. Minimise weighted squared residuals;
+   while chi-square / max(n_bands−2, 1) > 9 and >2 bands remain, remove the
+   most negative (observed−model)/SD residual and refit. Threshold 9 is a local
+   three-sigma quality tolerance, not the papers’ unscaled SSR=2. Reject failed
+   convergence, T outside 600–3500 K (broad combustion range), ESF outside
+   (0,1], or remaining chi-square above 9. Rejected fits pin T=1810 K using
+   usable M10; otherwise leave unfitted. Records carry `fit_flag`: `ok`,
+   `eliminated:<bands>`, or `pinned`. A cluster
+   is a detection only when its M10 peak is confirmed and fitted.
+5. **Per overpass**: compute RH75% separately for each confirmed cluster (sum
+   fitted pixels with RH ≥ 0.75 × cluster maximum RH). Assign the entire cluster
+   to the site nearest its M10 peak, within 2 km. Use the maximum cluster RH75%
+   per site, with temperature and source area from that cluster's M10 peak.
+   `n_clusters` counts confirmed assigned clusters, including scan copies;
+   `n_hot_m10` and `n_fitted` count their hot and fitted pixels. Read the cloud
+   flag and the eight-neighbour clear/probably-clear count at the site pixel.
+6. **Per night**: deduplicate same-satellite/site records in runs of consecutive
+   time gaps <10 s, retaining smallest `dist_m` (earliest on ties), then pool
+   overpasses with solar zenith ≥ 97°. Clear = cloud mask 0/1 OR a detection
+   surrounded by ≥6 clear/probably-clear neighbours. `rh_mw` averages over strict
+   clear observations, including clear non-detections as zero; `n_detected`,
+   `rh_max_mw`, `temp_k`, and status also use strict clearing. Detections only
+   under non-isolated cloud yield `cloudy` unless another observation is clear.
+   `n_clear_detclear`, `rh_mw_detclear`, `bcm_per_year_detclear` preserve the old
+   detected-OR-cloud-0/1 rule on the same deduplicated observations. Volume rate
+   is 0.0116 × mean RH. Other statuses: `flaring`, `clear_no_flare`,
+   `not_observed`.
+
+Per-granule caches are versioned as `overpasses_v3`; `out_dir` contains both
+that cache and the final CSVs. Development runs use `outputs/dev_v3`, preserving
+v1/v2 outputs and caches.
 
 Simplifications versus EOG: Planck at band centres (no spectral response),
 single-curve fit with background subtraction instead of the dual-curve fit, no
-M7/M8/DNB, no atmospheric correction, no top-hat glow filter, no isolated-cloud
-clearing, and no cross-satellite calibration.
+DNB, no atmospheric correction, and no cross-satellite calibration. The
+local-maximum window and isolated-cloud neighbour threshold are explicit local
+choices because their exact operational parameters are not published.
 
 ## Points of interest
 
@@ -252,3 +276,23 @@ Fixes, in order:
    per-overpass detection frequency vs MYC `n_det / n_clear`.
 9. Flag non-upstream flares (for example Das Island, Khafji) before reporting
    offshore oil volumes.
+
+## Round 3 validation
+
+`validate_myc25.main(tag='2026-10-29_2026-10-29',
+out_dir=OUT_DIR / 'dev_v3')` writes `validation_myc25_<tag>.csv` and
+`validation_summary_<tag>.json`. Matches are one-to-one, accepting shortest
+pairs first within 2 km. Period means pool all deduplicated strict clear
+overpasses, including clear zeros, rather than averaging nightly means.
+Persistent-site detection frequencies compare detections/clear overpasses
+with MYC n_det/n_clear. Regime counts and regional totals use matched sites
+with at least one clear night; regional MYC totals use those same sites.
+The default reference year is 2025, the latest annual catalog, so a one-night
+2026 comparison is a diagnostic rather than annual validation.
+
+QF1 layout source: [JPSS VIIRS SDR Data Dictionary Part 6, revision L](https://www.nesdis.noaa.gov/s3/2024-01/474-00448-02-06_JPSS-VIIRS-SDR-DD-Part-6_L.pdf).
+Bits 2–3 encode none/some/all saturation as 0/1/2. Revision L labels the
+partial state unimplemented: QF1 cannot guarantee detection of all subpixel
+saturation; weighted negative-residual elimination is also needed.
+`verify_qf1.main()` downloads one M12 granule and records flag counts and
+raw-radiance agreement under `outputs/dev_v3/`.

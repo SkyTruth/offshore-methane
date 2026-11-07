@@ -18,7 +18,7 @@ def test_fit_planck_recovers_temperature_and_esf(temp):
     bands = ["M10", "M11", "M12", "M13"]
     esf = 2e-5
     obs = [esf * float(nf.planck(nf.BAND_UM[b], temp)) for b in bands]
-    t, e, ssr, used = nf.fit_planck(bands, obs)
+    t, e, ssr, used, flag = nf.fit_planck(bands, obs)
     assert t == pytest.approx(temp, rel=0.01)
     assert e == pytest.approx(esf, rel=0.05)
     assert used == bands
@@ -29,8 +29,8 @@ def test_fit_planck_drops_band_with_negative_outlier():
     bands = ["M10", "M11", "M12", "M13"]
     esf, temp = 1e-3, 1700.0
     obs = [esf * float(nf.planck(nf.BAND_UM[b], temp)) for b in bands]
-    obs[1] -= 10.0  # M11 far below the curve
-    t, _, _, used = nf.fit_planck(bands, obs)
+    obs[1] *= 0.3  # M11 far below the curve (beyond the 10% model error)
+    t, _, _, used, flag = nf.fit_planck(bands, obs, [0.01] * 4)
     assert "M11" not in used
     assert t == pytest.approx(temp, rel=0.02)
 
@@ -78,6 +78,9 @@ def test_site_nights_mean_counts_clear_non_detections_as_zero():
     over = pd.DataFrame(
         {
             "site_id": [1, 1, 1, 2],
+            "satellite": ["SNPP"] * 4,
+            "dist_m": [100.0] * 4,
+            "cloud_clear_neighbors": [0] * 4,
             "time_utc": [
                 "2026-11-02T01:30:00",
                 "2026-11-02T02:20:00",

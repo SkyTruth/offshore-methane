@@ -15,8 +15,15 @@ H, C, KB = 6.62607015e-34, 2.99792458e8, 1.380649e-23
 EARTH_RADIUS_M = 6_371_000.0
 
 # Band centres (um) and full-pixel saturation radiances (Elvidge 2019 Table 1).
-BAND_UM = {"M10": 1.61, "M11": 2.25, "M12": 3.70, "M13": 4.05}
-SATURATION = {"M10": 85.44, "M11": 38.16, "M12": 4.41, "M13": 404.3}
+BAND_UM = {"M7": 0.865, "M8": 1.24, "M10": 1.61, "M11": 2.25, "M12": 3.70, "M13": 4.05}
+SATURATION = {
+    "M7": 349.0,
+    "M8": 197.88,
+    "M10": 85.44,
+    "M11": 38.16,
+    "M12": 4.41,
+    "M13": 404.3,
+}
 
 UINT16_FILL_MIN = 65528  # SDR uint16 values >= this are fill codes
 FLOAT_FILL_MAX = -900.0  # SDR float fills are -999.x
@@ -46,15 +53,16 @@ def sdr_radiance(raw: np.ndarray, factors: np.ndarray | None) -> np.ndarray:
     return out
 
 
-def zone_thresholds(
+def zone_statistics(
     values: np.ndarray, usable: np.ndarray, n_sigma: float = 4.0
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Per-column threshold: zone mean + n_sigma * SD over usable pixels.
 
     Bright outliers are excluded from the background by one 4-sigma clip, which
     stands in for the 2013 paper's fixed DN > 100 screen.
     """
     thr = np.full(values.shape[1], np.inf)
+    noise = np.full(values.shape[1], np.nan)
     for c0, c1 in ZONES:
         v = values[:, c0:c1][usable[:, c0:c1]]
         if v.size < 100:
@@ -62,7 +70,15 @@ def zone_thresholds(
         mu, sd = v.mean(), v.std()
         v = v[v <= mu + 4 * sd]
         thr[c0:c1] = v.mean() + n_sigma * v.std()
-    return thr
+        noise[c0:c1] = v.std()
+    return thr, noise
+
+
+def zone_thresholds(
+    values: np.ndarray, usable: np.ndarray, n_sigma: float = 4.0
+) -> np.ndarray:
+    """Thresholds from the same clipped statistics used for fit noise."""
+    return zone_statistics(values, usable, n_sigma)[0]
 
 
 def local_background(
@@ -79,39 +95,82 @@ def local_background(
     return np.nan, np.nan
 
 
-def fit_planck(
-    bands: list[str], radiance: list[float], t0: float = 1000.0
-) -> tuple[float, float, float, list[str]]:
-    """Single-curve Planck fit for temperature and emission scaling factor.
+# Local quality choices: chi-square per max(n-2, 1) <= 9 (3-sigma RMS).
+# Two-band fits have no residual degrees of freedom; use denominator one.
+FIT_CHI2_MAX = 9.0
+FIT_T_MIN, FIT_T_MAX = 600.0, 3500.0
+NOISE_FLOOR = 1e-6  # radiance units; guards uniform synthetic/background scenes
+# Relative model error added in quadrature to each band's noise: band-centre
+# Planck (no spectral response), no atmospheric correction and calibration
+# (~2-5%). Without it bright flares fail chi-square on model error alone and
+# lose good bands to elimination (100% of fits above 20 MW on 2026-10-29).
+MODEL_REL_ERROR = 0.10
 
-    Nelder-Mead on (T, log ESF), minimising the sum of squared radiance
-    residuals. While SSR > 2 and more than two bands remain, the band with the
-    most negative residual is dropped and the fit repeated (Elvidge 2019).
-    Returns (T, ESF, SSR, bands used).
+
+def fit_planck(
+    bands: list[str],
+    radiance: list[float],
+    noise: list[float] | None = None,
+    t0: float = 1000.0,
+) -> tuple[float, float, float, list[str], str]:
+    """Noise-weighted fit, negative obs-model residual elimination, or M10 pin.
+
+    Return T, ESF, reduced chi-square, used bands, fit flag. Rejected fits
+    without usable M10 return NaNs and 'unfitted'. The pin is a constrained
+    estimate rather than an accepted spectral fit.
     """
+    original = dict(zip(bands, radiance))
     bands, obs = list(bands), np.asarray(radiance, dtype=float)
-    while True:
+    sd = np.asarray(noise if noise is not None else np.ones(len(obs)), dtype=float)
+    valid = np.isfinite(obs) & np.isfinite(sd) & (sd >= 0)
+    bands = [b for b, good in zip(bands, valid) if good]
+    obs, sd = obs[valid], np.maximum(sd[valid], NOISE_FLOOR)
+    sd = np.hypot(sd, MODEL_REL_ERROR * np.abs(obs))
+    usable_m10 = "M10" in bands and original["M10"] > 0
+    dropped = []
+    chi = np.inf
+    while len(bands) >= 2:
         wl = np.array([BAND_UM[b] for b in bands])
 
-        def ssr(p, wl=wl, obs=obs):
+        def objective(p):
             t = np.clip(p[0], 300.0, 5000.0)
-            return float(np.sum((np.exp(p[1]) * planck(wl, t) - obs) ** 2))
+            model = np.exp(np.clip(p[1], -100, 10)) * planck(wl, t)
+            return float(np.sum(((model - obs) / sd) ** 2))
 
-        i10 = bands.index("M10") if "M10" in bands else 0
-        esf0 = max(obs[i10], 1e-9) / planck(wl[i10], t0)
+        esf0 = max(obs[0], 1e-9) / planck(wl[0], t0)
         res = minimize(
-            ssr,
-            x0=[t0, np.log(esf0)],
+            objective,
+            [t0, np.log(esf0)],
             method="Nelder-Mead",
-            options={"xatol": 0.1, "fatol": 1e-12, "maxiter": 2000},
+            options={"xatol": 0.001, "fatol": 1e-10, "maxiter": 2000},
         )
-        t, esf = float(np.clip(res.x[0], 300.0, 5000.0)), float(np.exp(res.x[1]))
-        if res.fun <= 2.0 or len(bands) <= 2:
-            return t, esf, float(res.fun), bands
-        resid = obs - esf * planck(wl, t)
-        drop = int(np.argmin(resid))
-        bands.pop(drop)
-        obs = np.delete(obs, drop)
+        t, esf = float(res.x[0]), float(np.exp(np.clip(res.x[1], -100, 10)))
+        chi = float(res.fun) / max(len(bands) - 2, 1)
+        if chi > FIT_CHI2_MAX and len(bands) > 2:
+            drop = int(np.argmin((obs - esf * planck(wl, np.clip(t, 300, 5000))) / sd))
+            dropped.append(bands.pop(drop))
+            obs, sd = np.delete(obs, drop), np.delete(sd, drop)
+            continue
+        if (
+            res.success
+            and FIT_T_MIN <= t <= FIT_T_MAX
+            and 0 < esf <= 1
+            and np.isfinite(chi)
+            and chi <= FIT_CHI2_MAX
+        ):
+            return (
+                t,
+                esf,
+                chi,
+                bands,
+                ("eliminated:" + "+".join(dropped) if dropped else "ok"),
+            )
+        break
+    if usable_m10:
+        esf = original["M10"] / float(planck(BAND_UM["M10"], FLARE_T_DEFAULT))
+        if 0 < esf <= 1:
+            return FLARE_T_DEFAULT, esf, chi, ["M10", "T1810"], "pinned"
+    return np.nan, np.nan, chi, [], "unfitted"
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> np.ndarray:
