@@ -12,6 +12,10 @@ for nonprofits and commercial users (price unpublished; contact eog@mines.edu).
 Annual data (MYC25Q4, 2012-2025, 27,229 upstream sites) remains free on Zenodo
 under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 
+**Viewer:** https://skytruth.github.io/offshore-methane/ (30-night v5 run).
+**How it works:** [docs/explainer.md](docs/explainer.md), also the viewer's
+"How it works" tab.
+
 ## Contents
 
 | File | Purpose |
@@ -25,10 +29,10 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
-| `build_viewer.py` | Builds `outputs/flaring_viewer.html`, a self-contained map viewer (data and basemap inlined). |
+| `build_viewer.py` | Builds the self-contained viewer (data, basemap and explainer inlined); `publish_pages` deploys it to GitHub Pages (D51). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
-| `docs/` | `reviews.md` (council findings) and `decisions.md` (local choices with evidence). |
+| `docs/` | `explainer.md` and its figures (`explainer/`, from `make_figures.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
 | `outputs/` | Generated CSVs and the per-granule cache (git-ignored). |
 
 ## Running

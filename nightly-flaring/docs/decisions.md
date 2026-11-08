@@ -676,6 +676,23 @@ view-angle effects and non-upstream classification remain deferred. The
   expire needs the NASA archive (O11).
 - **Status:** active (v5).
 
+### D51 Viewer published on GitHub Pages, with the explainer as a tab (v5)
+- **Choice:** the flaring viewer moves from a private Claude artifact to
+  GitHub Pages at https://skytruth.github.io/offshore-methane/, built from the
+  30-night v5 run. `build_viewer.publish_pages` pushes the built file as a
+  single parentless commit (`index.html`, `.nojekyll`) to `gh-pages`, so the
+  branch never accumulates copies of the inlined data. The page carries a
+  "How it works" tab rendered from `docs/explainer.md`, with the SVG figures
+  from `docs/explainer/make_figures.py` inlined; `#how-it-works` opens it.
+- **Alternatives:** keep the Claude artifact (private; user asked to move);
+  commit the built page to `main` or build it in GitHub Actions (the data are
+  git-ignored run outputs, so CI cannot build it).
+- **Why:** the user asked for a deployed GitHub page. The repository is public,
+  so the page is public. It shows EOG MYC25Q4 values (CC BY-NC 4.0) and
+  site positions derived from GFW fixed infrastructure, both attributed in the
+  page footer.
+- **Status:** active. The Claude artifact (v3 data) is no longer updated.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

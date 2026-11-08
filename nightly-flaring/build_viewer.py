@@ -1,18 +1,23 @@
 # %%
 """Build the self-contained flaring map viewer from a pipeline run.
 
-Reads ``outputs/site_nights_<tag>.csv`` and ``outputs/overpasses_<tag>.csv``,
+Reads ``<run>/site_nights_<tag>.csv`` and ``<run>/overpasses_<tag>.csv``,
 matches sites to EOG's MYC25Q4 annual catalog (``validate_myc25.py``), and
-writes one HTML file with the data and a 1:50m country basemap inlined.
+writes one HTML file with the data, a 1:50m country basemap and the
+"How it works" explainer (``docs/explainer.md`` with its SVG figures) inlined.
+``publish_pages`` pushes that file to the repo's GitHub Pages branch.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import markdown
 import numpy as np
 import pandas as pd
 import requests
@@ -26,16 +31,19 @@ from regions import REGIONS, region_of  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 TEMPLATE = HERE / "viewer_template.html"
+EXPLAINER = HERE / "docs" / "explainer.md"
+REPO_BLOB = "https://github.com/SkyTruth/offshore-methane/blob/nightly-flaring/nightly-flaring/docs/"
+PAGES_URL = "https://skytruth.github.io/offshore-methane/"
 BASEMAP_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json"
 BCM_PER_MW_YEAR = 0.0116
-STATUS_LABEL = "v3 · review fixes"
+STATUS_LABEL = "v5 · reviewed"
 STATUS = (
-    "Pipeline v3: fixes from the 7 Nov 2026 two-model review (GPT-6.1 Sol, Claude "
-    "Opus 5.5) applied: finite-radiance site pixels, flare clusters with a glow "
-    "test assigned to one site, strict cloud rule, noise-weighted fits with M7/M8 "
-    "and QF1 saturation, one-to-one validation. Not yet: M11-only and MWIR-only "
-    "triggers, atmospheric correction, cross-satellite calibration, non-upstream "
-    "flagging."
+    "Pipeline v5 (8 Nov 2026), after five two-model reviews (GPT-6.1 Sol, Claude "
+    "Opus 5.5): physical fit limits, peak-anchored RH75%, bow-tie copies paired "
+    "and averaged, one source per flare assigned by its centre, strict cloud rule. "
+    "Review 5 passed the 30-night run for backfill. Not yet: M11-only and "
+    "mid-infrared-only triggers, atmospheric correction, view-angle and "
+    "cross-satellite calibration, non-upstream flagging."
 )
 SATELLITES = ["SNPP", "NOAA-20", "NOAA-21"]
 STATUS_CODE = {
@@ -173,6 +181,34 @@ def build_data(tag: str, out_dir: Path = OUT_DIR) -> dict:
     }
 
 
+def explainer_html(path: Path = EXPLAINER) -> str:
+    """Render the explainer Markdown with its SVG figures inlined.
+
+    Image paragraphs become <figure> elements holding the SVG source, italic
+    "Figure n." paragraphs become captions, tables get a scroll wrapper, and
+    links to other repository docs point at GitHub.
+    """
+    html = markdown.markdown(path.read_text(), extensions=["tables", "sane_lists"])
+
+    def figure(m: re.Match) -> str:
+        svg = (path.parent / m.group(2)).read_text().strip()
+        return f"<figure>{svg}</figure>"
+
+    html = re.sub(
+        r'<p><img alt="([^"]*)" src="(explainer/[^"]+\.svg)" ?/?></p>', figure, html
+    )
+    html = html.replace("<p><em>Figure", '<p class="cap"><em>Figure')
+    html = html.replace("<table>", '<div class="tbl-wrap"><table>').replace(
+        "</table>", "</table></div>"
+    )
+    html = re.sub(
+        r'href="(?!https?:|#)([^"]+)"',
+        lambda m: f'href="{REPO_BLOB}{m.group(1)}" target="_blank" rel="noopener"',
+        html,
+    )
+    return html
+
+
 def latest_run(out_dir: Path = OUT_DIR) -> str:
     """Tag of the run with the latest end date, longest span on ties."""
     tags = [
@@ -190,19 +226,55 @@ def main(
     start: str | None = None,
     end: str | None = None,
     out_html: Path | None = None,
+    run_dir: Path = OUT_DIR,
 ) -> Path:
-    """Build the viewer for ``start``..``end`` (default: the latest, longest run)."""
-    tag = f"{start}_{end}" if start and end else latest_run()
-    print(f"building viewer for run {tag}")
-    data = build_data(tag)
+    """Build the viewer for ``start``..``end`` in ``run_dir`` (default: latest run)."""
+    tag = f"{start}_{end}" if start and end else latest_run(run_dir)
+    print(f"building viewer for run {tag} in {run_dir}")
+    data = build_data(tag, run_dir)
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.read_text()
+    html = html.replace("__EXPLAINER_HTML__", explainer_html())
     html = html.replace("__FLARING_DATA__", blob)
     html = html.replace("__BASEMAP_TOPOJSON__", load_basemap().replace("</", "<\\/"))
     out_html = out_html or OUT_DIR / "flaring_viewer.html"
     out_html.write_text(html)
     print(f"wrote {out_html} ({out_html.stat().st_size / 1e6:.1f} MB)")
     return out_html
+
+
+def _git(*args: str, stdin: str | None = None) -> str:
+    return subprocess.run(
+        ["git", "-C", str(HERE), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def publish_pages(
+    html_path: Path = OUT_DIR / "flaring_viewer.html",
+    branch: str = "gh-pages",
+    remote: str = "origin",
+) -> str:
+    """Push ``html_path`` as ``index.html`` to ``branch`` for GitHub Pages.
+
+    Each publish is a single parentless commit holding only ``index.html``
+    and ``.nojekyll``, force-pushed, so the branch never accumulates copies
+    of the inlined data. The working tree and current branch are untouched.
+    """
+    page = _git("hash-object", "-w", str(html_path))
+    empty = _git("hash-object", "-w", "--stdin", stdin="")
+    tree = _git(
+        "mktree", stdin=f"100644 blob {page}\tindex.html\n100644 blob {empty}\t.nojekyll\n"
+    )
+    source = _git("rev-parse", "--short", "HEAD")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    commit = _git("commit-tree", tree, "-m", f"Publish flaring viewer from {source} ({stamp})")
+    _git("push", "--force", remote, f"{commit}:refs/heads/{branch}")
+    print(f"pushed {commit[:10]} to {remote}/{branch}; site: {PAGES_URL}")
+    return commit
 
 
 # %%
