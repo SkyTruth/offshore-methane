@@ -225,57 +225,86 @@ VIIRS active fire 59% (822/1400).
 
 ## Runs
 
-| Nights | Granules | Downloaded | Wall time (12 workers) | Flaring site-nights | Flaring sites |
-| --- | --- | --- | --- | --- | --- |
-| 2026-10-29 – 11-04 (7) | 4,551 | 32 GB | 21 min | 1,804 | 506 |
-| 2026-10-06 – 11-04 (30) | 19,443 | 143 GB | 71 min for the 23 new nights | 7,691 | 758 |
+| Pipeline | Nights | Granules | Downloaded | Wall time (12 workers) | Flaring site-nights | Flaring sites |
+| --- | --- | --- | --- | --- | --- | --- |
+| v1 | 2026-10-29 – 11-04 (7) | 4,551 | 32 GB | 21 min | 1,804 | 506 |
+| v1 | 2026-10-06 – 11-04 (30) | 19,443 | 143 GB | 71 min for 23 new nights | 7,691 | 758 |
+| v3 | 2026-10-06 – 11-04 (30) | 19,443 | 167 GB | 105 min | 4,060 clear + 1,634 lit under cloud | 504 clear (558 incl. cloud) |
 
-SNPP has no data in NOAA's bucket after 2026-11-02 15:32 UTC (no passes after
-12:51 UTC on night passes over sites).
+SNPP has no data in NOAA's bucket after 2026-11-02 15:32 UTC (no night passes
+over sites after 12:51 UTC). v1 outputs are kept in `outputs/v1/`.
 
 GFW sites with a detection on ≥1 clear night, by EOG MYC25Q4 2025 persistence
-regime (sites within 1 km of an MYC site):
+regime. v1 matched every GFW site within 1 km of a MYC site (many-to-one); v3
+matches one-to-one within 2 km and uses the strict cloud rule, so the columns
+are not strictly comparable.
 
-| Regime | 7 nights | 30 nights |
-| --- | --- | --- |
-| persistent | 71% (235/331) | 85% (283/332) |
-| intermittent | 31% (54/174) | 50% (88/175) |
-| sporadic | 11% (8/72) | 18% (13/72) |
-| undetected | 2.3% (3/130) | 3.8% (5/131) |
+| Regime | v1, 7 nights | v1, 30 nights | v3, 30 nights |
+| --- | --- | --- | --- |
+| persistent | 71% (235/331) | 85% (283/332) | 79% (283/356) |
+| intermittent | 31% (54/174) | 50% (88/175) | 42% (71/171) |
+| sporadic | 11% (8/72) | 18% (13/72) | 16% (11/67) |
+| undetected | 2.3% (3/130) | 3.8% (5/131) | 2.5% (3/118) |
 
-Annualised volume vs MYC25Q4 2025 at sites positive in both: log-log r = 0.42
-(n = 297) for 7 nights, 0.52 (n = 384) for 30 nights; median ratio 0.83 in both.
+Annualised volume vs MYC25Q4 2025 at sites positive in both: v1 log-log r =
+0.42 (n = 297, 7 nights) and 0.52 (n = 384, 30 nights), median ratio 0.83 (mean
+of nightly means); v3 r = 0.51 (n = 365), median ratio 0.66 (pooled clear-sky
+mean). Flaring sites with no MYC flare nearby: v1 369 (1 km), v3 136 (2 km).
 
-## Review (2026-11-07)
+## Review (2026-11-07) and v3
 
-GPT-6.1 Sol and Claude Opus 5.5 reviewed the 7-night run independently against
-the papers. Both judged regional totals and persistent flares usable, and
-per-site nightly volumes and the flaring status of sites with another site
+GPT-6.1 Sol and Claude Opus 5.5 reviewed the 7-night v1 run independently
+against the papers. Both judged regional totals and persistent flares usable,
+and per-site nightly volumes and the flaring status of sites with another site
 within 2 km (3,858 of 7,637) not yet reliable. Opus 5.5 reproduced site 4279's
-radiant heat (93.5 MW) from raw NOAA radiances and found totals of 10.7 vs
-10.8 BCM/yr against MYC25Q4 flares within 2 km of a GFW site.
+radiant heat (93.5 MW) from raw NOAA radiances.
 
-Fixes, in order:
+Fixes, with their status in v3 (commit `4238bf1`, implemented in three rounds
+with GPT-6.1 Sol):
 
-1. Choose site pixels with finite radiance: 11% of site-overpasses (21,205 /
-   189,764) used bow-tie-deleted pixels, adding false clear zeros. Deduplicate
-   the 1,292 records repeated in adjacent granules.
-2. Cluster connected hot pixels, keep M10 local maxima (top-hat), compute RH75%
-   per cluster, then assign each cluster to one site: 12.7% of detections
-   (501/3,935) sit within 3 km of a ≥5× brighter detection at another site.
-3. Test saturation on raw radiance with the QF1 flags; fit M11-M13 when M10
-   saturates instead of dropping the pixel.
-4. Clip the ±2-pixel search window at row/column 1 (434 records could never
-   detect).
-5. Treat a cloud-flagged detection as clear only when the cloud flag is
-   isolated; 30% of detections (1,180/3,935) carry 18% of radiant heat.
-6. Add M11-only and M12+M13 triggers with an adjacency filter.
-7. Noise-weighted fit residuals, M7/M8 for SWIR-only pixels, fit-quality
-   rejection.
-8. Validation: one-to-one matching at 2 km, pooled clear-sky means,
-   per-overpass detection frequency vs MYC `n_det / n_clear`.
-9. Flag non-upstream flares (for example Das Island, Khafji) before reporting
-   offshore oil volumes.
+1. Applied. Site pixels need finite M10 radiance (v1: 11% of site-overpasses,
+   21,205 / 189,764, used bow-tie-deleted pixels); passes repeated in adjacent
+   granules (<10 s) are deduplicated.
+2. Applied. Scan-separated 8-connected clusters, kept only when the peak is the
+   brightest M10 pixel within 2 pixels; RH75% per cluster; each cluster to one
+   site; per-site value is the strongest cluster (v1: 12.7% of detections,
+   501/3,935, sat within 3 km of a ≥5× brighter detection at another site).
+3. Applied. Saturation from raw radiance and QF1 bits 2-3; a saturated M10 no
+   longer drops the pixel.
+4. Applied. ±2-pixel window clipped at the array edge.
+5. Applied. A cloud-flagged detection counts as clear only with ≥6 of 8 clear
+   neighbours; otherwise the night is `flaring_cloud` (lit, no clear-sky value).
+   `*_detclear` columns keep the v1 rule.
+6. Open. M11-only and M12+M13 triggers.
+7. Applied. Noise-weighted fit with a 10% relative model error (without it,
+   100% of fits above 20 MW eliminated bands on model error), residual band
+   elimination, physical/convergence rejection, `fit_flag`; M7/M8 in stage 2.
+8. Applied. One-to-one matching at 2 km, pooled clear-sky means, per-pass
+   detection frequency, regional totals (`validation_summary_<tag>.json`).
+9. Open. Flag non-upstream flares (for example Das Island, Khafji).
+
+v1 → v3 over the same 30 nights:
+
+| Measure | v1 | v3 |
+| --- | --- | --- |
+| Flaring site-nights | 7,691 | 4,060 clear + 1,634 lit under cloud |
+| Sites flaring on ≥1 night | 758 | 504 clear, 558 incl. cloud |
+| Sum of 30-night site means | 915 MW (10.6 BCM/yr) | 944 MW (11.0 BCM/yr) |
+| Detection rows | 16,323 | 11,967 (33% cloud-flagged) |
+| Fit flags | none recorded | ok 98% (11,731), eliminated 1.5% (178), pinned 0.5% (58) |
+| Fits with M12 or M13 | 63% | 67% (M7/M8 in 66%) |
+| Temperature P5 / P50 / P95 | 1452 / 1797 / 2375 K | 1479 / 1748 / 2213 K |
+| Matched sites, 2 km one-to-one: ours vs MYC 2025 | n/a | 8.35 vs 10.60 BCM/yr (n = 712) |
+
+Matched regional totals (v3, BCM/yr, ours vs MYC 2025): Persian Gulf 3.70 vs
+3.81, Gulf of Guinea 1.43 vs 2.71, Gulf of Mexico 1.45 vs 1.79, South China
+Sea 0.31 vs 0.57, Malaysia & Indonesia 0.45 vs 0.56.
+
+Largest open gap: at the 356 matched persistent flares the median share of
+clear passes with a detection is 0.27 here vs 0.63 in MYC25Q4 (`n_det /
+n_clear`). Candidate causes: MYC counts detections whether or not the pass is
+clear, VNF triggers on M11 and M12+M13 as well as M10 (fix 6), and MYC
+association basins are wider than the 2 km nearest-site rule.
 
 ## Round 3 validation
 
