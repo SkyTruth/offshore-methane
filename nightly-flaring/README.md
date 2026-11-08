@@ -26,6 +26,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `build_viewer.py` | Builds `outputs/flaring_viewer.html`, a self-contained map viewer (data and basemap inlined). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
+| `docs/` | `reviews.md` (council findings) and `decisions.md` (local choices with evidence). |
 | `outputs/` | Generated CSVs and the per-granule cache (git-ignored). |
 
 ## Running
@@ -251,60 +252,13 @@ Annualised volume vs MYC25Q4 2025 at sites positive in both: v1 log-log r =
 of nightly means); v3 r = 0.51 (n = 365), median ratio 0.66 (pooled clear-sky
 mean). Flaring sites with no MYC flare nearby: v1 369 (1 km), v3 136 (2 km).
 
-## Review (2026-11-07) and v3
+## Reviews and decisions
 
-GPT-6.1 Sol and Claude Opus 5.5 reviewed the 7-night v1 run independently
-against the papers. Both judged regional totals and persistent flares usable,
-and per-site nightly volumes and the flaring status of sites with another site
-within 2 km (3,858 of 7,637) not yet reliable. Opus 5.5 reproduced site 4279's
-radiant heat (93.5 MW) from raw NOAA radiances.
-
-Fixes, with their status in v3 (commit `4238bf1`, implemented in three rounds
-with GPT-6.1 Sol):
-
-1. Applied. Site pixels need finite M10 radiance (v1: 11% of site-overpasses,
-   21,205 / 189,764, used bow-tie-deleted pixels); passes repeated in adjacent
-   granules (<10 s) are deduplicated.
-2. Applied. Scan-separated 8-connected clusters, kept only when the peak is the
-   brightest M10 pixel within 2 pixels; RH75% per cluster; each cluster to one
-   site; per-site value is the strongest cluster (v1: 12.7% of detections,
-   501/3,935, sat within 3 km of a ≥5× brighter detection at another site).
-3. Applied. Saturation from raw radiance and QF1 bits 2-3; a saturated M10 no
-   longer drops the pixel.
-4. Applied. ±2-pixel window clipped at the array edge.
-5. Applied. A cloud-flagged detection counts as clear only with ≥6 of 8 clear
-   neighbours; otherwise the night is `flaring_cloud` (lit, no clear-sky value).
-   `*_detclear` columns keep the v1 rule.
-6. Open. M11-only and M12+M13 triggers.
-7. Applied. Noise-weighted fit with a 10% relative model error (without it,
-   100% of fits above 20 MW eliminated bands on model error), residual band
-   elimination, physical/convergence rejection, `fit_flag`; M7/M8 in stage 2.
-8. Applied. One-to-one matching at 2 km, pooled clear-sky means, per-pass
-   detection frequency, regional totals (`validation_summary_<tag>.json`).
-9. Open. Flag non-upstream flares (for example Das Island, Khafji).
-
-v1 → v3 over the same 30 nights:
-
-| Measure | v1 | v3 |
-| --- | --- | --- |
-| Flaring site-nights | 7,691 | 4,060 clear + 1,634 lit under cloud |
-| Sites flaring on ≥1 night | 758 | 504 clear, 558 incl. cloud |
-| Sum of 30-night site means | 915 MW (10.6 BCM/yr) | 944 MW (11.0 BCM/yr) |
-| Detection rows | 16,323 | 11,967 (33% cloud-flagged) |
-| Fit flags | none recorded | ok 98% (11,731), eliminated 1.5% (178), pinned 0.5% (58) |
-| Fits with M12 or M13 | 63% | 67% (M7/M8 in 66%) |
-| Temperature P5 / P50 / P95 | 1452 / 1797 / 2375 K | 1479 / 1748 / 2213 K |
-| Matched sites, 2 km one-to-one: ours vs MYC 2025 | n/a | 8.35 vs 10.60 BCM/yr (n = 712) |
-
-Matched regional totals (v3, BCM/yr, ours vs MYC 2025): Persian Gulf 3.70 vs
-3.81, Gulf of Guinea 1.43 vs 2.71, Gulf of Mexico 1.45 vs 1.79, South China
-Sea 0.31 vs 0.57, Malaysia & Indonesia 0.45 vs 0.56.
-
-Largest open gap: at the 356 matched persistent flares the median share of
-clear passes with a detection is 0.27 here vs 0.63 in MYC25Q4 (`n_det /
-n_clear`). Candidate causes: MYC counts detections whether or not the pass is
-clear, VNF triggers on M11 and M12+M13 as well as M10 (fix 6), and MYC
-association basins are wider than the 2 km nearest-site rule.
+- [docs/reviews.md](docs/reviews.md): council reviews. Review 1 covers the
+  7-night v1 run and the v1 → v3 comparison; review 2 (2026-11-08) covers the
+  30-night v3 run, with 12 new bugs (B1–B12) and the agreed fix order.
+- [docs/decisions.md](docs/decisions.md): every local choice and departure from
+  the papers, with the reason and evidence, and which version introduced it.
 
 ## Round 3 validation
 
