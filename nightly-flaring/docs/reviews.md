@@ -6,6 +6,130 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 3: v4, development night and spot granules (2026-11-08)
+
+Code reviewed: commit `54dbe6e`. No 30-night v4 run exists; evidence is the
+2026-10-29 development night, the nine regression granules, and live v4 runs
+on spot granules (Sol 6, Opus 10). Both reviewers ran the 51 unit tests (all
+pass). Scratch: `/private/tmp/nf-review4-gpt61/`, `/private/tmp/nf-review4-opus55/`.
+
+### Verdicts
+
+- **Sol (7/10):** no-go for the 30-night rerun until band elimination selects
+  guard-valid alternatives (N1) and copy grouping cannot join two peaks from
+  one scan (N2). Then a diagnostic 30-night rerun; backfill waits for
+  attribution and RH-tail checks.
+- **Opus:** v4 fixes the fit failures behind v3's largest values and most
+  cross-site bow-tie double counting. Go for the rerun after two changes to
+  per-granule output (centroid site assignment for merged copies, N3, and a
+  per-granule copy table), because any later change there needs another full
+  run. No-go for the backfill until the rerun passes the checks listed below.
+
+### Review-2 bugs in v4
+
+| Bug | Sol | Opus |
+| --- | --- | --- |
+| B1 M7+M8-only fits | Fixed (site 3802 3,126.9 → 124.3 MW) | Fixed; all 8 v3 records resolve; M10+M7+M8 final sets still possible |
+| B2 RH75% threshold | Partly: fixed case, but a modified estimator (en2025 uses local RHmax) | Fixed in 6/6 cases checked, by the fit guards; cap excluded 0/1,114 dev pixels and 0 in 10 spot granules |
+| B3 Two-band fits | Fixed as a guardrail | Partly: reduced χ² still ≡ 0; 17/820 dev detections `pinned:two_band_range` |
+| B4 Low temperature | Partly: pinned, not excluded as in the catalog | Fixed: 0 fits below 1,200 K, 6/820 `pinned:low_t` |
+| B5 Copies at two sites | Partly (N2; strongest copy sets the site) | Largely fixed: 18 v3 dev detections that vanish are copies merged into a neighbour (293.7 MW); N3, N4 remain |
+| B6 Connected flares | Fixed for resolved maxima | Fixed, side effect N5 |
+| B7 Discarded sources | Partly | Fixed: 8/824 dev records have two sources |
+| B8 Peak location | Fixed | Fixed |
+| B9 Dedupe | Fixed | Fixed |
+| B10 Status docs | Fixed | Fixed |
+| B11 Greedy matching | Not fixed | Not fixed |
+| B12 Frequency definitions | Partly (N8) | Partly (N8) |
+
+### New findings
+
+| ID | Finding | Location | Evidence | Found by | Blocking |
+| --- | --- | --- | --- | --- | --- |
+| N1 | Leave-one-out ranks trials by χ² before the temperature/ESF guards, so it can keep a subset that then fails over one that passes | `nightfire.py:160–165` | Bands M10, M7, M11, M12 = 3.617259, 3.569423, 10.438807, 6.260087, noise 0.001: dropping M7 gives χ² 7.85 at 1,077 K and is chosen, then pinned; dropping M10 gives χ² 8.28 at 1,697 K, valid. *Checked.* | Sol | Rerun |
+| N2 | Transitive copy merging can join two peaks from the same scan | `granule.py:240–256` | Two scan-0 peaks 1.6 km apart and a scan-1 peak 0.8 km from each (1 km pixels) become one 20 MW source; the second scan-0 source is lost. Production incidence unmeasured. *Checked.* | Sol | Rerun |
+| N3 | A merged copy group takes the stronger copy's location, and so its site | `granule.py:259–261` | NOAA-21 `d20261030_t2118195`: copies 97.5 MW (161 m from site 4279) and 127.9 MW (860 m from 4281) merge and go to 4281; their centroid is 472 m from 4279, and MYC `s_9421` (0.727 BCM/yr) is 172 m from 4279. A pass 1.7 h later sends the flare to 4279. An RH-weighted centroid changes the site for 22% (8/37) of merged pairs in 10 spot granules; in the 2 of those 8 with one MYC flare nearby, MYC sides with the centroid. | Opus | Rerun |
+| N4 | Copies 1.0–1.35 pixel apart stay separate and count at two sites | `granule.py:251` | 45 adjacent-scan pairs with \|Δcol\| ≤ 1 and Δrow 4–10: 41 are ≤ 0.90 pixel apart with RH ratio ≤ 2.1 (one at 4.0); 1.06 pixel (sites 4197 + 4202, ratio 1.33, one MYC flare `m_208`) and 1.32 pixel (971 + 957, ratio 1.82) stay separate; pairs at 1.45 and 1.79 pixel have RH ratios 121 and 89. | Opus | Cheap to add |
+| N5 | Peak splitting has no prominence (saddle) test | `granule.py:148–159` | NOAA-21 `d20261030_t0748551` (cloud mask 3): one 48-pixel component with 0.19–0.56 MW peaks becomes 3 sources at 3 sites, plus 4 in neighbouring components. 65% (17/26) of split-tagged dev detections are cloud-flagged vs 29% (236/824) of all. Clear-sky splits also recover real flares (site 984 12.8 MW vs MYC `m_82` ≈ 13.6 MW). | Opus | Cheap to add |
+| N6 | RH75% sums pixels anywhere in the partition, not only those adjacent to the peak (en2025 merges adjacent pixels) | `granule.py:202` | Site 981: 1.64 MW from 9 pixels, 8.9× its 0.19 MW peak. | Opus | Cheap to add |
+| N7 | A merged group keeps the larger copy's RH | `granule.py:259` | Median RH75% ratio between merged copies 1.25 (n = 41); swath-edge merges read about 11% above the copies' mean (inferred). | Opus | Cheap to add |
+| N8 | MYC-centred frequency selects GFW sites within 2 km but counts their detections wherever the peak is | `validate_myc25.py:84–86` | 7 dev rows have peaks beyond 2 km of the MYC flare, e.g. `m_92`/site 989 at 2,574 m, `s_5353`/979 at 2,736 m (Sol). In dense fields a nearby site's detection can be a different flare (Opus). Detection-based clearing differs from the MYC README's cloud 0/1 rule. | Both | Validation |
+| N9 | Minor | `pipeline.py:65–66`, `granule.py:307–313`, `nightfire.py:150, 158` | Empty satellite skipped silently; `rh_mw` sums sources while `temp_k`/`area_m2` describe the strongest; `n_clusters` changed meaning; two-band χ² ≡ 0; M10+M7+M8 final sets allowed (v3: 19 such fits at 1,234–1,321 K, 479 MW). | Both | No |
+
+### Decisions D22–D32
+
+| D | Sol | Opus |
+| --- | --- | --- |
+| D22 fit guards | Change: rank only guard-valid trials (N1) | Agree; forbid final sets whose non-M10/M11 bands are only M7/M8. 1,200 K floor carries the volume effect (RH vs 1,810 K pin: 5.1× at 1,000 K, 2.4× at 1,200 K, 0.91× at 2,500 K) |
+| D23 RH75% | Change: label as a modified RH75 estimator; no cap in en2025 | Agree; add adjacency (N6); cap inert so far |
+| D24 split | Agree provisionally | Change: saddle test (saddle M10 ≤ 0.5 × lower peak), record prominence |
+| D25 merge and sum | Change: no unconstrained transitive unions; export constituent sources | Agree on merge-then-assign and summing; use RH-weighted centroid (N3) and mean RH (N7) |
+| D26 dedupe | Agree | Agree |
+| D27 status | Agree | Agree |
+| D28 frequency | Change: peak-radius leakage (N8); call detection-based clearing a sensitivity definition | Agree as an added metric; quote after optimal matching (B11) |
+| D29 outputs | Agree; add source provenance and rejected-fit temperatures | Agree; add a copy-level table |
+| D30 empty coverage | Agree; report skipped coverage | Agree; print skipped satellites and days |
+| D31 dev scope | Agree | Agree; the dev night is unrepresentative (local night +0.7% strict-clear RH; all 820 detections in those granules −8.8%) |
+| D32 one-pixel merge | Change: add group constraints; deviation from rs2019 | Agree over half-pixel; extend to < 1.5 pixel when \|Δcol\| ≤ 1, Δrow 4–10 and RH ratio < 3 |
+
+### Spot checks (v4 code, live)
+
+| Case | v3 | v4 |
+| --- | --- | --- |
+| NOAA-20 Oct 10, site 3802 | 3,126.9 MW, 916 K | 124.3 MW, 1,699 K |
+| NOAA-20 Oct 21, site 4500 | 595.0 MW (2 clusters) | 39.1 MW; copies 39.1/35.0 MW merged at 0.30 pixel |
+| NOAA-20 Nov 5, site 4279 | 645.1 MW | 21.9 MW |
+| NOAA-20 Oct 22, site 4452 | 149.8 MW, 1,234 K, M10+M7+M8 | 54.1 MW, 1,752 K, `eliminated:M7` |
+| NOAA-21 Oct 13, sites 3801 + 3804 | 165.7 + 150.2 MW | 165.7 MW at 3801 (merged at 0.81 pixel) |
+| NOAA-21 Oct 22, site 957 | 3.0 MW, 2,712 K, M10+M11 | 2.2 MW, `pinned:two_band_range` |
+| NOAA-21 Oct 30, sites 4279 / 4281 | 97.5 + 127.9 MW | 127.9 MW at 4281 only (N3) |
+| NOAA-20 Oct 30, site 4267 | 19.7 MW | 37.0 MW, two sources 1.53 pixel apart across a scan boundary (copy or distinct, unresolved) |
+
+### Expected 30-night effect versus v3 (inferred)
+
+- Sol: pooled volume 10–20% lower; replacing 14 selected granules in the v3
+  pool gives 11.20 → 9.89 BCM/yr (−11.6%), a non-representative sample.
+- Opus: detected RH −17% to −22% (M7+M8 records −6.5 GW; RH75%/peak > 3
+  records −3.4 to −3.9 GW; merges −6.2% and splits +1.9% over the dev
+  granules); detections within ±1%; sum of site means about 770–830 MW
+  (8.9–9.6 BCM/yr); matched total about 7.0–7.4 vs MYC 10.60 BCM/yr.
+
+### Gates
+
+- **Before the 30-night rerun:** N1, N2, N3, and a per-granule copy table
+  (peak row/col/lat/lon, scan, footprint, RH75%, peak RH, `n_rh75`,
+  temperature, bands, fit flag, cloud mask at the peak, component, M10
+  prominence, merge group, assigned site). Cheap to add in the same change:
+  N4 merge rule, N5 saddle test, N6 adjacency, N7 mean RH, D22 M7/M8 guard.
+- **Before the backfill, the rerun must show:** 0 final M7/M8-only or
+  M10+M7+M8 fits and 0 fits below 1,200 K; pinned fits ≤ about 4% (dev 3.6%,
+  30/824); every cap exclusion and every RH75%/peak > 3 record listed and
+  inspected; swath-edge share of same-pass detections at sites < 2 km apart
+  falling from 66% (of 203 pairs) towards the all-detection 35%; swath-edge
+  share of multi-source records near the all-detection share; cloud share of
+  split sources reported; a gap in the copy-distance histogram; totals in the
+  expected range; cross-satellite same-night pairs differing > 2× below v3's
+  26–34%; site flips listed at MYC flares with ≥ 2 GFW sites within 2 km;
+  complete satellite/granule coverage; no detections lost in dedupe.
+- **Deferred:** optimal MYC matching (B11), association basins, cloud-window
+  scaling, M11 and M12/M13 triggers, non-upstream flags, view-angle
+  normalisation, empty-coverage logging.
+
+## Main-session check of the v4 changes (2026-11-08)
+
+GPT-6.1 Sol implemented the v4 fixes; the main session checked the diff and
+the development outputs before the council review.
+
+- The dev-night comparison used `outputs/dev_v3/` as the v3 baseline. That
+  output predates the 10% model-error term: 103/369 eliminated fits against
+  4/369 in final v3 on the same night. The tables in `decisions.md` and the
+  README now use final v3 from the 30-night run.
+- With rs2019's half-pixel spacing, swath-edge bow-tie copies 0.50–0.83 pixel
+  apart stayed separate, and v4's per-site sum counted them twice: 22 sites
+  had more than one source, 53% (25/47) of those records at the swath edge
+  against 34% of all detections. The merge distance is now one pixel (D32):
+  4 sites with more than one source, 12% (1/8) at the swath edge.
+
 ## Review 2: v3, 30 nights (2026-11-08)
 
 Run reviewed: commit `414c198`, local nights 2026-10-06 – 11-04, 19,443
@@ -142,21 +266,6 @@ same geometry.
 | 7 | Non-upstream flags, upstream-only totals | Finding 9 | later |
 | 8 | Export peak location; prefer detected record in dedupe; settle `flaring_cloud` precedence; detection frequency under MYC's definition | B8, B9, B10, B12 | v4 (D26–D29) |
 | – | View-angle area normalisation | Deviation | later |
-
-## Main-session check of the v4 changes (2026-11-08)
-
-GPT-6.1 Sol implemented the v4 fixes; the main session checked the diff and
-the development outputs before the council review.
-
-- The dev-night comparison used `outputs/dev_v3/` as the v3 baseline. That
-  output predates the 10% model-error term: 103/369 eliminated fits against
-  4/369 in final v3 on the same night. The tables in `decisions.md` and the
-  README now use final v3 from the 30-night run.
-- With rs2019's half-pixel spacing, swath-edge bow-tie copies 0.50–0.83 pixel
-  apart stayed separate, and v4's per-site sum counted them twice: 22 sites
-  had more than one source, 53% (25/47) of those records at the swath edge
-  against 34% of all detections. The merge distance is now one pixel (D32):
-  4 sites with more than one source, 12% (1/8) at the swath edge.
 
 ## Review 1: v1, 7 nights (2026-11-07)
 

@@ -223,7 +223,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 0/378 retained fits below 1,200 K; 48 two-band fits span
   1,334.2–2,458.9 K; 13/378 fits pin (9 range, 3 low temperature, 1 bounds). The
   observed site-3802 regression recovers 1,699.2 K and 124.3191 MW (n=1 spectrum).
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (N1, M7/M8 guard; see reviews.md).
 
 ### D23 Peak-anchored RH75% (v4)
 - **Choice:** Threshold at 0.75 × the M10 peak pixel RH. Sum fitted pixels, including
@@ -237,7 +237,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 496 pixels summed across 402 sources, 0/1103 fitted pixels
   cap-excluded. Site 3804 falls from 1,775.8899 to 71.1207 MW (n=1 case); no cap
   exclusion occurs there. The synthetic cap test excludes 1/3 fitted pixels.
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (N6, estimator label; see reviews.md).
 
 ### D24 Separate connected maxima (v4)
 - **Choice:** Within each selected scan component, retain all M10 maxima passing the
@@ -250,7 +250,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 9 unique confirmed components split among 378 detection
   records; 22 sites have multiple sources (24/378 records). The seven-pixel bridge test
   produces two sources (n=1 component).
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (N5 saddle test; see reviews.md).
 
 ### D25 Merge scan copies and sum distinct sources (v4)
 - **Choice:** Union confirmed peaks in adjacent 16-line scans when geodesic peak
@@ -269,7 +269,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   11 copies; 24/378 detection records contain two sources. The under/over-half-pixel and
   three-copy-chain tests all pass (n=3 cases).
 - **Status:** merge distance superseded by D32 (v4); summing distinct sources
-  remains active.
+  remains active. Review 3 recommends changes (N2, N3, N7; see reviews.md).
 
 ### D26 Detection-first duplicate selection (v4)
 - **Choice:** Keep the same satellite/site consecutive-gap <10 s groups. Prefer detected
@@ -312,7 +312,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: old median 0.000 (n=182 persistent site rates); MYC-centred
   median 0.667 (n=231), pooled 53.5% (357/667 passes). V3 new-definition median is 0.667
   (n=229), pooled 52.2% (343/657).
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (N8; see reviews.md).
 
 ### D29 Peak and diagnostic outputs (v4)
 - **Choice:** Keep row/col and dist_m at the site pixel. Add strongest-source
@@ -328,7 +328,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: peak fields accompany all 378 detection records; 402 sources,
   413 pre-merge clusters, 496 retained RH pixels and 1,103 fitted pixels are
   represented. Nine split components are counted once by granule ID.
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (copy-level table; see reviews.md).
 
 ### D30 Empty coverage (v4)
 - **Choice:** Skip a satellite when CMR produces no site-bearing slices for the
@@ -339,7 +339,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Nine requested regression job builds cover ten site cases; empty SNPP
   coverage previously stopped a November build (n=1 observed failure). All ten
   comparisons now complete. The network-free all-empty-coverage test passes.
-- **Status:** active (v4).
+- **Status:** active (v4). Review 3 recommends changes (logging; see reviews.md).
 
 ### D31 Development scope and checks (v4)
 - **Choice:** Use v4 cache/output paths, the nine requested NOAA-20 granules and only
@@ -379,7 +379,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   `d20261022_t2126021`: the 4452/4531 pair becomes one 49.6 MW source at 4531,
   nearest the stronger copy; MYC flares there are below 0.001 BCM/yr.
 - **Status:** active (v4). Two distinct flares less than one pixel apart in
-  adjacent scans now merge; they are not resolvable at M-band resolution.
+  adjacent scans now merge; they are not resolvable at M-band resolution. Review 3 recommends changes (N2, N4; see reviews.md).
 
 ## V4 development evidence (2026-11-08)
 
