@@ -654,6 +654,28 @@ view-angle effects and non-upstream classification remain deferred. The
   job order.
 - **Status:** active (v5).
 
+### D50 NODD backfill scope and runner (v5)
+- **Choice:** after review 5's `BACKFILL: GO`, the v5 code runs local nights
+  2026-08-09 to 10-05 into `outputs/v5_backfill/` through `backfill.py`. The
+  runner warms the CMR cache in parallel, retries `pipeline.main` up to 5
+  times, validates, and runs detached with `status.json` showing the phase.
+  Started 2026-11-08 22:37 UTC with code `b0bd15d` plus `backfill.py`.
+  Together with `outputs/v5_30n/` this covers 88 nights (08-09 to 11-04).
+  Nights after 11-04 run as their own segment once at least 3 days old
+  (review 5, required item 2).
+- **Alternatives:** adding per-copy band radiances to the copy table first
+  (review 5, O11; about one night lost to NODD expiry while implementing);
+  starting at night 08-10, the first full NOAA-20/21 night.
+- **Why:** the user chose to start at once and iterate on design meanwhile.
+  NODD expires one night per day from the oldest end.
+- **Evidence:** NODD listing at 22:35 UTC: UTC 2026-08-09 holds 21 (NOAA-20)
+  and 22 (NOAA-21) M10 files and none for SNPP; UTC 08-10 is complete for
+  NOAA-20/21 and holds 170 SNPP files; SNPP is complete from UTC 08-11. Night
+  08-09 is therefore partial on all satellites, and night 08-10 is partial
+  on SNPP. Any change to fits or to the RH75% stencil after these UTC dates
+  expire needs the NASA archive (O11).
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

@@ -23,6 +23,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `nightfire.py` | Physics: Planck function, zone thresholds, Planck fit, pixel area, radiant heat, solar zenith. |
 | `nodd.py` | NOAA bucket listing, granule index, HTTP byte-range file object for h5py. |
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
+| `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
 | `build_viewer.py` | Builds `outputs/flaring_viewer.html`, a self-contained map viewer (data and basemap inlined). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
