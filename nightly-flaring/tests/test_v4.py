@@ -77,7 +77,9 @@ def test_elimination_stops_at_three_and_keeps_anchor(monkeypatch, n_bands):
     monkeypatch.setattr(nf, "minimize", minimize)
     bands = ["M10", "M7", "M8", "M11", "M12", "M13"][:n_bands]
     fit = nf.fit_planck(bands, [1] * n_bands, [0.01] * n_bands)
-    assert min(lengths) == 3 and fit[4] == "pinned:chi2"
+    assert min(lengths) == 3 and fit[4] == (
+        "pinned:band_set" if n_bands == 3 else "pinned:chi2"
+    )
 
 
 def pixel(rh):
@@ -98,8 +100,8 @@ def test_peak_rh_threshold_and_cap():
     sources = g.summarize_clusters(
         clusters, pixels, lat, lon, np.array([[1, lat[4, 3], lon[4, 3]]])
     )
-    assert sources[0]["rh_mw"] == 18
-    assert sources[0]["rh_peak_mw"] == 10 and sources[0]["n_rh75"] == 2
+    assert sources[0]["rh_mw"] == 10
+    assert sources[0]["rh_peak_mw"] == 10 and sources[0]["n_rh75"] == 1
     assert sources[0]["n_rh_cap_excluded"] == 1
 
 
@@ -132,7 +134,7 @@ def copies(distances):
 
 
 @pytest.mark.parametrize(
-    "distances,count", [([0, 999], 1), ([0, 1001], 2), ([0, 800, 1600], 1)]
+    "distances,count", [([0, 999], 1), ([0, 1501], 2), ([0, 800, 1600], 1)]
 )
 def test_bowtie_one_pixel_and_chains(distances, count):
     tree = cKDTree(g._unit_xyz([0], [0]))
@@ -141,7 +143,9 @@ def test_bowtie_one_pixel_and_chains(distances, count):
     assert sum(s["n_clusters"] for s in sources) == len(distances)
     summary = g.site_cluster_summary(sources, 0)
     assert summary["n_sources"] == count
-    assert summary["rh_mw"] == (3 if len(distances) == 3 or count == 2 else 2)
+    assert summary["rh_mw"] == (
+        3 if count == 2 else (2 if len(distances) == 3 else 1.5)
+    )
     assert summary["peak_row"] == (len(distances) - 1) * 16 + 4
 
 

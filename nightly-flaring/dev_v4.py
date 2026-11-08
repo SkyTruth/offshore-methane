@@ -30,7 +30,7 @@ def run_case(gid: str) -> list[dict]:
     jobs = [j for j in jobs if j["satellite"] == "NOAA-20" and j["gid"] == gid]
     if len(jobs) != 1:
         raise ValueError(f"{gid}: expected one job, got {len(jobs)}")
-    return granule.process_granule(jobs[0])
+    return granule.process_granule(jobs[0])[0]
 
 
 def main() -> None:

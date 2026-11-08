@@ -1,5 +1,5 @@
 # %%
-"""Read-only v1/v2/v3/v4 comparison for the single development night.
+"""Read-only v1/v2/v3/v4/v5 comparison for the single development night.
 
 ``v3`` is the final v3 code as run for 30 nights; ``v3_dev`` is the round-3
 development output, which predates the 10% model-error term.
@@ -19,7 +19,7 @@ NIGHT = "2026-10-29"
 TAG = f"{NIGHT}_{NIGHT}"
 
 
-def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
+def main(out_dir: Path = HERE / "outputs" / "dev_v5") -> dict:
     """Save comparison metrics; v1 has no isolated-cloud neighbour flags."""
     sites = pd.read_csv(p.SITES_CSV)
     result = {}
@@ -29,6 +29,7 @@ def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
         ("v3_dev", "dev_v3", TAG),  # round-3 code, before the 10% model error
         ("v3", ".", "2026-10-06_2026-11-04"),  # final v3 code (30-night run)
         ("v4", "dev_v4", TAG),
+        ("v5", "dev_v5", TAG),
     ):
         over = pd.read_csv(HERE / "outputs" / folder / f"overpasses_{tag}.csv")
         over = over.merge(sites[["site_id", "lon"]], on="site_id")
@@ -45,7 +46,7 @@ def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
         legacy["detected"] = False
         legacy = p.dedupe_overpasses(legacy)
         legacy["detected"] = legacy.pop("_detected")
-        over = p.dedupe_overpasses(over) if version == "v4" else legacy
+        over = p.dedupe_overpasses(over) if version in ("v4", "v5") else legacy
         nights = p.site_nights(
             over, sites, date.fromisoformat(NIGHT), date.fromisoformat(NIGHT)
         )
@@ -76,7 +77,7 @@ def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
         )
         peak_rh = (
             detected.rh_peak_mw
-            if version == "v4"
+            if version in ("v4", "v5")
             else (5.670374419e-8 * detected.temp_k**4 * detected.area_m2 / 1e6)
         )
         ratios = (detected.rh_mw / peak_rh).replace([np.inf, -np.inf], np.nan).dropna()
@@ -84,10 +85,10 @@ def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
             rh75_over_peak_p5_p50_p95=ratios.quantile([0.05, 0.5, 0.95]).tolist(),
             rh75_over_peak_n=len(ratios),
             peak_rh_note="recorded"
-            if version == "v4"
+            if version in ("v4", "v5")
             else "reconstructed from rounded T/source area",
         )
-        if version == "v4":
+        if version in ("v4", "v5"):
             metrics.update(
                 rh75_over_peak_p5_p50_p95=ratios.quantile([0.05, 0.5, 0.95]).tolist(),
                 rh75_over_peak_n=len(ratios),
@@ -115,8 +116,16 @@ def main(out_dir: Path = HERE / "outputs" / "dev_v4") -> dict:
         import validate_myc25 as validation
 
         myc = validation.load_myc()
-        matched = validation.match_sites(nights, myc, overpasses=over)
+        copies = (
+            pd.read_csv(HERE / "outputs/dev_v5" / f"copies_{TAG}.csv")
+            if version == "v5"
+            else None
+        )
+        matched = validation.match_sites(
+            nights, myc, overpasses=raw if version == "v5" else over, copies=copies
+        )
         summary = validation.validation_summary(matched)
+        metrics["det_freq_myc_strict"] = summary["det_freq_myc_strict"]
         metrics["det_freq"] = summary["det_freq"]
         metrics["det_freq_like_for_like"] = summary["det_freq_like_for_like"]
         result[version] = dict(

@@ -223,7 +223,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 0/378 retained fits below 1,200 K; 48 two-band fits span
   1,334.2–2,458.9 K; 13/378 fits pin (9 range, 3 low temperature, 1 bounds). The
   observed site-3802 regression recovers 1,699.2 K and 124.3191 MW (n=1 spectrum).
-- **Status:** active (v4). Review 3 recommends changes (N1, M7/M8 guard; see reviews.md).
+- **Status:** superseded by D33 (v5).
 
 ### D23 Peak-anchored RH75% (v4)
 - **Choice:** Threshold at 0.75 × the M10 peak pixel RH. Sum fitted pixels, including
@@ -237,7 +237,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 496 pixels summed across 402 sources, 0/1103 fitted pixels
   cap-excluded. Site 3804 falls from 1,775.8899 to 71.1207 MW (n=1 case); no cap
   exclusion occurs there. The synthetic cap test excludes 1/3 fitted pixels.
-- **Status:** active (v4). Review 3 recommends changes (N6, estimator label; see reviews.md).
+- **Status:** superseded by D37 (v5).
 
 ### D24 Separate connected maxima (v4)
 - **Choice:** Within each selected scan component, retain all M10 maxima passing the
@@ -250,7 +250,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 9 unique confirmed components split among 378 detection
   records; 22 sites have multiple sources (24/378 records). The seven-pixel bridge test
   produces two sources (n=1 component).
-- **Status:** active (v4). Review 3 recommends changes (N5 saddle test; see reviews.md).
+- **Status:** superseded by D35 (v5).
 
 ### D25 Merge scan copies and sum distinct sources (v4)
 - **Choice:** Union confirmed peaks in adjacent 16-line scans when geodesic peak
@@ -268,8 +268,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: 413 confirmed clusters become 402 assigned sources, merging
   11 copies; 24/378 detection records contain two sources. The under/over-half-pixel and
   three-copy-chain tests all pass (n=3 cases).
-- **Status:** merge distance superseded by D32 (v4); summing distinct sources
-  remains active. Review 3 recommends changes (N2, N3, N7; see reviews.md).
+- **Status:** superseded by D38 (v5).
 
 ### D26 Detection-first duplicate selection (v4)
 - **Choice:** Keep the same satellite/site consecutive-gap <10 s groups. Prefer detected
@@ -312,7 +311,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: old median 0.000 (n=182 persistent site rates); MYC-centred
   median 0.667 (n=231), pooled 53.5% (357/667 passes). V3 new-definition median is 0.667
   (n=229), pooled 52.2% (343/657).
-- **Status:** active (v4). Review 3 recommends changes (N8; see reviews.md).
+- **Status:** superseded by D40 (v5).
 
 ### D29 Peak and diagnostic outputs (v4)
 - **Choice:** Keep row/col and dist_m at the site pixel. Add strongest-source
@@ -328,7 +327,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Dev night: peak fields accompany all 378 detection records; 402 sources,
   413 pre-merge clusters, 496 retained RH pixels and 1,103 fitted pixels are
   represented. Nine split components are counted once by granule ID.
-- **Status:** active (v4). Review 3 recommends changes (copy-level table; see reviews.md).
+- **Status:** superseded by D39 (v5).
 
 ### D30 Empty coverage (v4)
 - **Choice:** Skip a satellite when CMR produces no site-bearing slices for the
@@ -339,7 +338,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** Nine requested regression job builds cover ten site cases; empty SNPP
   coverage previously stopped a November build (n=1 observed failure). All ten
   comparisons now complete. The network-free all-empty-coverage test passes.
-- **Status:** active (v4). Review 3 recommends changes (logging; see reviews.md).
+- **Status:** superseded by D41 (v5).
 
 ### D31 Development scope and checks (v4)
 - **Choice:** Use v4 cache/output paths, the nine requested NOAA-20 granules and only
@@ -354,7 +353,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   site/granule comparisons complete. All 51 tests, Ruff lint/format, configured pre-
   commit hook and whitespace checks pass. Eight same-night caches were reprocessed
   solely to finalize split diagnostics.
-- **Status:** active (v4).
+- **Status:** superseded by D42 (v5).
 
 ### D32 Merge scan copies closer than one pixel (v4)
 - **Choice:** adjacent-scan peaks merge when closer than 1.0 × the smaller
@@ -378,8 +377,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   4279 instead of 111 MW at 4279 plus 72 MW at 4280. Granule
   `d20261022_t2126021`: the 4452/4531 pair becomes one 49.6 MW source at 4531,
   nearest the stronger copy; MYC flares there are below 0.001 BCM/yr.
-- **Status:** active (v4). Two distinct flares less than one pixel apart in
-  adjacent scans now merge; they are not resolvable at M-band resolution. Review 3 recommends changes (N2, N4; see reviews.md).
+- **Status:** superseded by D36 (v5).
 
 ## V4 development evidence (2026-11-08)
 
@@ -462,3 +460,263 @@ other. Nearest-peak partitions and the ±2 glow window can suppress unresolved
 sources. M10-only triggering, greedy MYC matching (B11), cloud-window scaling,
 view-angle effects and non-upstream classification remain deferred. The
 30-night v4 run has not been made.
+
+### D33 Guard-aware fit selection (v5)
+- **Choice:** Evaluate every leave-one-out trial, rank full guard validity before reduced χ², then accept the first valid state at χ² ≤9. Keep the three-band elimination floor and existing bounds; export rejected temperature on pins. Two-band residual χ² remains exactly determined; its independent guard is the 1,200–2,500 K interval.
+- **Alternatives:** Rank χ² first; enumerate every subset globally.
+- **Why:** A greedy step can choose a valid 1,697 K state instead of the lower-χ² 1,077 K rejection. Global subset search changes more of the estimator.
+- **Evidence:** The exact N1 spectrum passes at 1,696.7 K, χ² 8.28, dropping M10 (n=1 counterexample).
+- **Status:** active (v5).
+
+### D34 Final spectral band set (v5)
+- **Choice:** Require at least two of M10/M11/M12/M13 and at least one of M10/M11. Compare each fitted pixel against the same v5 algorithm with this rule disabled in optional diagnostics.
+- **Alternatives:** Allow M10+M7+M8; require M12/M13 specifically.
+- **Why:** Two short-wave bands alone cannot constrain the flare spectrum reliably; M10+M11 remains supported.
+- **Evidence:** Three forbidden synthetic sets are rejected (n=3); accepted M10/M11 fits retain the two-band range.
+- **Status:** active (v5).
+
+### D35 Saddle prominence (v5)
+- **Choice:** Retain a secondary M10 maximum only when its maximum-bottleneck 8-connected path to any retained stronger maximum has saddle/peak ≤0.5. Partition by nearest retained peak. Record the ratio; the primary maximum has ratio zero by convention.
+- **Alternatives:** Split every maximum; no component splitting.
+- **Why:** A max-priority path search computes the same saddle as a descending merge tree. It suppresses shallow shoulders without discarding resolved peaks.
+- **Evidence:** Split/no-split/boundary synthetic cases pass (n=3); split cloud counts are in V5 development evidence.
+- **Status:** active (v5).
+
+### D36 Constrained copy pairing (v5)
+- **Choice:** Sort candidate pairs by physical distance. Require adjacent 16-line scans, |Δcol|≤1, distance <1.5 times the smaller sqrt(footprint), RH75% ratio <3. Join only disjoint scan sets; export every accepted edge at both endpoints. Δrow is diagnostic, without a cutoff.
+- **Alternatives:** Unconstrained unions; one-pixel spacing; require Δrow 4–10.
+- **Why:** Scan uniqueness enforces pair matching and permits consecutive-scan chains. Reviewers observed Δrow 4–10 but have no validated geometry bound outside that sample; a hard row cutoff risks dropping genuine copies.
+- **Evidence:** Review 3 measured 45 pairs, including 1.06/1.32-pixel copies and 1.45/1.79-pixel pairs with RH ratios 121/89. Bridge, column, RH-ratio, 1.4-pixel and three-scan tests pass. Across the 21 v5 spot cases, 4/75 accepted pairs have Δrow 1–2, supporting diagnostic-only row separation.
+- **Status:** active (v5).
+
+### D37 Peak-anchored RH75% adjacency (v5)
+- **Choice:** Sum confirmed pixels in the peak partition within one row and column of the M10 peak and in its scan, with inclusive 0.75× threshold and 1.5× cap. Count cap exclusions only in this neighbourhood.
+- **Alternatives:** Sum the full partition; anchor at RHmax; remove the cap.
+- **Why:** en2025 §4.2.1 describes adjacent pixels and RH75%=sum(RH when RH>75% RHmax). It anchors on local RHmax, gives no cap, and does not specify a 3×3 stencil. Our explicit peak-anchored RH75% is a local estimator, not an exact reproduction.
+- **Evidence:** The distant eligible-pixel regression now excludes that pixel; cap and adjacency regressions pass (n=2).
+- **Status:** active (v5).
+
+### D38 Copy-group value and location (v5)
+- **Choice:** Use a spherical RH-weighted centroid of copy peak positions, assign to nearest observed GFW site within 2 km, use mean copy RH75%, and retain max-copy RH and strongest-copy spectral fit. Sum group RH at a site.
+- **Alternatives:** Strongest-copy position and RH; arithmetic unweighted location; sum copies.
+- **Why:** Copies are repeated observations of one source; mean avoids upward selection, centroid avoids attributing the flare solely by the brighter sample. rh_mw sums distinct sources; temp_k/area_m2/bands/fit_flag describe the strongest source’s strongest copy. n_clusters counts assigned pre-merge confirmed copies; n_sources counts copy groups.
+- **Evidence:** Synthetic stronger-copy-near-B/centroid-near-A assignment and mean/max RH pass (n=1). Review 3 centroid assignment changed 8/37 spot pairs.
+- **Status:** active (v5).
+
+### D39 Copy provenance and cache completeness (v5)
+- **Choice:** process_granule returns (site_records, copy_records), including header-only tables for empty granules. Cache <gid>.csv and <gid>_copies.csv together, and export copies_<tag>.csv. Pair fields are semicolon-separated in edge order for chains; group IDs are scoped by satellite/granule. Keep unassigned copies with blank assigned_site.
+- **Alternatives:** Only per-site rows; discard unassigned groups; a cache hit on one file.
+- **Why:** Copy-level provenance makes fits, splits, assignment and merge edges inspectable. Cloud mask and eight-neighbour counts are sampled at copy peaks; per-site cloud fields retain site-pixel semantics.
+- **Evidence:** Cache completeness and integration contracts pass; every confirmed copy has the declared COPY_COLUMNS schema.
+- **Status:** active (v5).
+
+### D40 MYC-centred source-radius frequency (v5)
+- **Choice:** Use copy-group centroids within 2 km of MYC for detections. Form same-satellite consecutive <10 s pass groups over nearby GFW sites in the requested local-night/SZA scope. Report strict 0/1 plus isolated-cloud and detection-clears sensitivity definitions. Preserve existing keys; add det_freq_myc_strict.
+- **Alternatives:** Count all detections assigned to nearby sites; own-site only.
+- **Why:** Source-radius filtering prevents nearby infrastructure from admitting another flare. Strict detections require a clear pass; sensitivity adds source detections to the clear denominator. Historical outputs without copies use recorded peak coordinates where available and legacy site detections otherwise; they cannot reconstruct group centroids.
+- **Evidence:** A source at 3.3 km contributes zero; a source at 1.1 km contributes only under sensitivity until its cloudy pixel has six clear neighbours (n=1 radius/cloud regression).
+- **Status:** active (v5).
+
+### D41 Empty coverage reporting (v5)
+- **Choice:** Print satellite and each UTC date whose CMR result has no site-bearing slices.
+- **Alternatives:** Silent skips; abort all satellites.
+- **Why:** Missing coverage should be visible without fabricating observations.
+- **Evidence:** All-empty mocked coverage is skipped successfully (n=1 test); live skipped dates are retained in cases.log.
+- **Status:** active (v5).
+
+### D42 V5 development scope and output isolation (v5)
+- **Choice:** Version caches v5; run only local night 2026-10-29 plus the 21 requested granules, using jobs from build_jobs. Retain v4 baseline source snapshots and outputs in dev_v5; no commit or push.
+- **Alternatives:** Run 30 nights; overwrite v4; use the obsolete dev_v3 baseline.
+- **Why:** Final v3 comes from the existing 30-night files; the council needs reviewable evidence before a larger rerun. Additional processing of the same night is allowed only to finalize diagnostics.
+- **Evidence:** Tests and measured development artifacts are listed below; all new artifacts are under outputs/dev_v5.
+- **Status:** active (v5).
+
+### D43 Guard failures on good fits pin without elimination (v5)
+- **Choice:** band elimination runs only while reduced χ² > 9. A fit with
+  χ² ≤ 9 that fails a physical guard (low temperature, bounds,
+  non-convergence, band set) is pinned at 1,810 K from M10 with the guard as
+  the reason; D33's guard-first ranking applies within elimination steps.
+- **Alternatives:** D33 as first implemented, which also eliminated bands from
+  good fits until a subset passed the guards.
+- **Why:** dropping bands from a fit that already matches the data, until the
+  temperature clears 1,200 K, selects the answer by the guard rather than by
+  the data. Elimination exists to remove an outlier band from a poor fit.
+- **Evidence:** main-session check, dev night 2026-10-29: 2 fits change from
+  `eliminated:M11` to `pinned:low_t` (n = 372 detections); detected RH
+  1,766.68 → 1,766.11 MW; summed strict-clear site means 449.07 → 448.97 MW.
+  21 granule cases: 1 record changes, site 4634 in NOAA-20
+  `d20261103_t2240322`, 1,271 K `eliminated:M11` 0.49 MW → `pinned:low_t`
+  0.24 MW. Test `test_good_fit_failing_guard_pins_without_elimination`.
+  Pre-change outputs are in `outputs/dev_v5_preD43/`.
+- **Status:** active (v5).
+
+## V5 development evidence (2026-11-08)
+
+This section is the current development evidence; the V4 section above is retained
+as historical evidence. Only local night 2026-10-29 was run in full. All 1,343/1,343
+granules succeeded with both cache files. The first pass fetched 11.44 GB in
+7.8 minutes (12 workers; see night.log for exact totals). Finalizing the
+band-rule diagnostics reprocessed 172/1,343 same-night granules, 4.93 GB in
+2.2 minutes. This did not add another night. The 21/21 requested cases each ran
+v4 and v5 using process_granule and build_jobs. No 30-night v5 run was made.
+All artifacts are in outputs/dev_v5. Baseline source snapshots come from HEAD
+(d6c50b5); the case baseline is run directly rather than inferred from v3.
+
+The table uses local evening date, SZA ≥97°, and detection-first deduplication
+for v4/v5. Final v3 comes from the 30-night file with its original deduplication.
+
+| Measure | v3 (final) | v4 | v5 |
+| --- | --- | --- | --- |
+| Detected overpasses | 369.00 | 376.00 | 372.00 |
+| Detected RH, MW | 1796.77 | 1823.48 | 1766.11 |
+| Sum strict-clear site means, MW | 450.33 | 453.50 | 448.97 |
+| Strict-clear detections | 257.00 | 255.00 | 256.00 |
+
+V5 strongest-source fit flags (after D43), n=372: ok 355;
+eliminated:M12 2; eliminated:M7 2; pinned:two_band_range 9; pinned:low_t 3;
+pinned:bounds 1. Pinned share is 3.5% (13/372). Accepted forbidden band sets
+are 0/372 in the local night and 0/824 in the complete v4 development granules.
+A controlled v5 refit with only D34 disabled changes 4 confirmed pixel fits in
+the 172 audited granules, including 0/1,046 confirmed copy-peak fits. These
+pixel changes do not alter the final local-night totals. n_band_rule_changed
+is a granule-wide count repeated on site rows; aggregate its maximum per
+satellite/granule, not its sum over sites.
+
+There are five unique split components represented by ten local-night detection
+records. Their non-isolated-cloud share is 80% (8/10); v4 had nine components.
+Four local-night records at four sites have multiple sources; their swath-edge
+share is 0% (0/4), against 29.8% (111/372) of all detections. Edge means peak
+column <640 or ≥2560. There are 32 merged copies represented in local-night
+records. Across all processed granules, 1,046 copies form 954 groups, with
+92 merged groups and 92 accepted pair edges. Accepted Δrow spans 1–9; 13/92
+accepted pairs lie outside 4–10 lines. This further supports D36's diagnostic-
+only Δrow choice. Component IDs and group IDs are scoped by satellite/granule.
+
+MYC-centred strict frequency is 46.1% (263/571 passes), median 0.400 across
+188 persistent flares with strict-clear passes. Detection-clears sensitivity
+is 53.5% (354/662 passes), median 0.667 across 229 persistent flares. The latter
+retains det_freq_like_for_like and has the explicit alias
+det_freq_myc_detection_clears; strict is det_freq_myc_strict. Own-site strict
+median remains 0.000 (n=182). Recomputed historical v4 peak-radius sensitivity
+is 52.8% (350/663 passes), median 0.667 (n=230), rather than the old unfiltered
+354/667 metric. V3 lacks source positions, so its 343/657 pass metric remains
+site-based; historical frequencies cannot reproduce v5 group-centroid filtering.
+
+### Requested granule cases
+
+RH totals below sum all site records in each selected granule, including cloud
+and outside-local-night records. They differ in scope from the local-night table.
+case_records.csv contains every detected v4/v5 site record, case_groups_v4.csv
+and case_groups.csv contain the source-group tables, and cases/ contains raw
+v4 constituent/group snapshots and v5 copies, including peak fit/cloud data.
+
+| satellite | granule | detections_v4 | detections_v5 | rh_v4 | rh_v5 | named_sites |
+| --- | --- | --- | --- | --- | --- | --- |
+| NOAA-20 | d20261010_t2330408 | 11 | 10 | 191.11 | 169.98 | 3752: 45.00 → 37.54; 3802: 124.32 → 114.71 |
+| NOAA-20 | d20261011_t2311458 | 29 | 28 | 551.27 | 503.58 | 3752: 22.20 → 22.20; 3802: 35.42 → 34.77; 4197: 21.74 → 21.74; 4267: 77.14 → 58.38; 4279: 103.05 → 94.30 |
+| NOAA-20 | d20261013_t0043475 | 16 | 16 | 27.74 | 26.9 | nan |
+| NOAA-20 | d20261014_t0704356 | 12 | 11 | 134.61 | 92.27 | 971: 21.65 → 21.65 |
+| NOAA-20 | d20261014_t2216245 | 10 | 10 | 61.62 | 51.39 | 4267: 21.14 → 10.92 |
+| NOAA-20 | d20261016_t1810529 | 9 | 9 | 8.76 | 8.69 | nan |
+| NOAA-20 | d20261021_t2144572 | 18 | 18 | 171.97 | 164.88 | 4197: 2.42 → 2.42; 4267: 17.66 → 13.06; 4279: 50.95 → 50.95 |
+| NOAA-20 | d20261022_t2126021 | 17 | 17 | 241.23 | 201.86 | 4197: 1.39 → 1.39; 4267: 26.43 → 26.43; 4279: 129.40 → 97.15 |
+| NOAA-20 | d20261022_t2305365 | 38 | 37 | 370.92 | 357.21 | 3752: 28.71 → 22.12; 3802: 56.30 → 56.30; 4197: 5.96 → 4.90; 4267: 18.14 → 18.14; 4279: 88.65 → 88.65 |
+| NOAA-20 | d20261027_t0758447 | 2 | 2 | 20.43 | 20.43 | nan |
+| NOAA-20 | d20261030_t2216381 | 10 | 10 | 82.89 | 82.89 | 4267: 37.00 → 37.00 |
+| NOAA-20 | d20261102_t2119529 | 16 | 16 | 278.58 | 251.5 | 4197: 6.41 → 6.41; 4267: 34.94 → 34.94; 4279: 111.13 → 91.80 |
+| NOAA-20 | d20261102_t2258015 | 1 | 1 | 12.21 | 12.21 | nan |
+| NOAA-20 | d20261103_t2240322 | 39 | 39 | 392.21 | 387.25 | 3752: 6.97 → 6.27; 3804: 71.12 → 71.12; 4197: 11.49 → 11.49; 4267: 27.20 → 22.60; 4279: 68.36 → 68.36 |
+| NOAA-20 | d20261105_t2204060 | 15 | 15 | 133.6 | 133.6 | 4202: 3.96 → 3.96; 4267: 19.54 → 19.54; 4279: 21.92 → 21.92 |
+| NOAA-21 | d20261013_t2317594 | 7 | 7 | 196.55 | 188.84 | 3752: 24.81 → 24.81; 3801: 165.65 → 157.95 |
+| NOAA-21 | d20261022_t0837523 | 8 | 7 | 77.75 | 59.32 | 957: 2.23 → 0.00; 971: 4.06 → 3.15 |
+| NOAA-21 | d20261030_t0748551 | 10 | 9 | 15.67 | 13.31 | 971: 0.56 → 0.56; 981: 1.64 → 0.00 |
+| NOAA-21 | d20261030_t2118195 | 14 | 13 | 330.48 | 297.51 | 4197: 11.85 → 13.79; 4202: 15.74 → 0.00; 4267: 122.73 → 122.73; 4279: 0.00 → 112.68; 4281: 127.87 → 0.00 |
+| SNPP | d20261020_t2323324 | 22 | 22 | 241.03 | 227.51 | 3752: 39.14 → 39.14; 3802: 5.81 → 5.81; 4197: 0.00 → 6.64; 4267: 32.19 → 31.12; 4279: 112.35 → 101.64 |
+| SNPP | d20261029_t0703487 | 10 | 9 | 203.28 | 168.9 | 971: 53.28 → 42.11 |
+
+The named NOAA-21 d20261030_t2118195 group moves from 4281 (127.87 MW) to
+4279 (112.68 MW); 4197/4202 become 13.79/0 MW from 11.85/15.74 MW. NOAA-21
+d20261022_t0837523 sites 971/957 become 3.15/0 MW from 4.06/2.23 MW.
+NOAA-21 d20261013_t2317594 retains the 3801/3804 copy group, reducing its
+max-selected 165.65 MW to a 157.95 MW mean. SNPP d20261020_t2323324's
+4279/4284 copies and separate 3752 source are preserved in case_groups.csv.
+At the cloud split NOAA-21 d20261030_t0748551, detections fall 10→9 and RH
+15.67→13.31 MW; site 981's 1.64 MW detection disappears when its shallow
+secondary peak is suppressed. The surviving site 984 source falls 0.97→0.68 MW.
+The adjacency-only effect is independently isolated in unit tests. NOAA-20
+d20261030_t2216381 site 4267 retains two sources and 37.00 MW: its 1.53-pixel
+separation remains outside the copy threshold.
+
+### Pair-distance histograms
+
+Candidate population: adjacent scans, |Δcol|≤1, separation <3 smaller-footprint
+pixels, before distance/RH eligibility. Columns split the RH75% ratio. This
+counts candidate edges, not copies. All processed development granules (n=104):
+
+| bin | <3 | >=3 |
+| --- | --- | --- |
+| [0.0, 0.5) | 36 | 0 |
+| [0.5, 1.0) | 52 | 6 |
+| [1.0, 1.32) | 4 | 3 |
+| [1.32, 1.45) | 0 | 0 |
+| [1.45, 1.5) | 0 | 0 |
+| [1.5, 2.0) | 0 | 0 |
+| [2.0, 3.0) | 1 | 2 |
+
+The 21 spot granules (n=83):
+
+| bin | <3 | >=3 |
+| --- | --- | --- |
+| [0.0, 0.5) | 20 | 0 |
+| [0.5, 1.0) | 52 | 2 |
+| [1.0, 1.32) | 3 | 0 |
+| [1.32, 1.45) | 0 | 1 |
+| [1.45, 1.5) | 0 | 0 |
+| [1.5, 2.0) | 0 | 2 |
+| [2.0, 3.0) | 1 | 2 |
+
+The 1.31842-pixel pair has RH ratio 1.82 and merges; the 1.44803-pixel pair
+has RH ratio 120.88 and remains separate. No candidate occurs between those
+two distances in the spot cases; this small sample does not calibrate a universal
+1.5-pixel boundary. CSVs list each pair and its match outcome.
+
+### Tail inspection, checks and remaining risks
+
+Cap exclusions are 0 across 1,046 copies. Four copies have RH75%/peak >3;
+rh75_tail.csv lists all four. They sum three or four eligible adjacent pixels,
+not remote component pixels: SNPP d20261030_t2017091/site 4823 ratio 3.90
+(four pixels, cloud 0); NOAA-20 d20261029_t2234075/site 4263 ratio 3.32
+(three, cloud 1); NOAA-20 d20261030_t0704492/site 976 ratio 3.83 (four,
+cloud 3); NOAA-20 d20261030_t0844236/site 992 ratio 4.00 (four, cloud 3).
+These are compatible with the stencil but the two cloud-3 cases remain
+candidates for diffuse cloud contamination; no cap was triggered.
+
+All 67 network-free tests pass; Ruff check, Ruff format, configured pre-commit
+Ruff hook and git diff --check pass. Updated existing tests: adjacency changes
+RH expectations in test_cluster_nearest_site_rh75_and_bowtie_max and
+test_peak_rh_threshold_and_cap; test_elimination_stops_at_three_and_keeps_anchor
+now expects band_set for the forbidden three-band input; the bowtie chain test
+uses a 1.501-pixel rejection and mean RH; process integration accepts the new
+tuple/diagnostic argument and checks copy columns; main output-path test uses
+v5 and a structured synthetic job. New test_v5 covers all requested counterexamples,
+saddle boundary, same-scan bridge, pair guards, centroid assignment, cache
+completeness, copy schema, adjacency/scan exclusion, and MYC source radius.
+
+Defaults changed only as documented by D33–D42: guarded elimination and final
+bands; saddle prominence; local RH stencil; 1.5-pixel paired merging with column,
+RH and scan constraints; centroid assignment; mean RH; v5 cache version; copy
+outputs and source-radius frequency. process_granule now returns a tuple;
+dev_v4 is adapted to select the site table. The existing dates, cloud thresholds,
+M10 trigger, fit bounds/model error, calibration and association radius remain.
+Diagnostic refits roughly double fitting work when diagnostics are requested;
+public NOAA reads dominate the observed run cost.
+
+Open risks: 80% (8/10) split-tagged local-night detections remain under
+non-isolated cloud; one night cannot calibrate split, cap or copy thresholds.
+Subpixel distinct sources with comparable RH in adjacent scans can merge.
+Site 4267 remains an unresolved 1.53-pixel two-source case. Observed-site nearest
+assignment can still select the wrong structure in dense fields. Optimal MYC
+matching (B11), association basins, cloud-window scaling, view-angle normalization,
+M11/M12-M13 triggers and non-upstream classification remain deferred. The 30-night
+rerun must inspect these distributions and the source-attribution flips before
+backfill. No implementation item is intentionally deferred from this fix set.

@@ -6,6 +6,18 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Main-session check of the v5 changes (2026-11-08)
+
+- D33 as first implemented also eliminated bands from fits with χ² ≤ 9 that
+  failed a guard, searching for a subset above 1,200 K. Elimination now runs
+  only while χ² > 9 (D43). Effect: 2 dev-night fits move from
+  `eliminated:M11` to `pinned:low_t`; one case record (site 4634) falls from
+  0.49 to 0.24 MW.
+- Code paths checked against the brief: guard-first trial ranking, band-set
+  rule, saddle split, same-scan 8-neighbour RH75%, pair matching with unique
+  scans per group, RH-weighted centroid, mean copy RH, copy table and both-file
+  cache, source-radius MYC frequency. 68 tests pass.
+
 ## Review 3: v4, development night and spot granules (2026-11-08)
 
 Code reviewed: commit `54dbe6e`. No 30-night v4 run exists; evidence is the
@@ -71,6 +83,20 @@ pass). Scratch: `/private/tmp/nf-review4-gpt61/`, `/private/tmp/nf-review4-opus5
 | D30 empty coverage | Agree; report skipped coverage | Agree; print skipped satellites and days |
 | D31 dev scope | Agree | Agree; the dev night is unrepresentative (local night +0.7% strict-clear RH; all 820 detections in those granules −8.8%) |
 | D32 one-pixel merge | Change: add group constraints; deviation from rs2019 | Agree over half-pixel; extend to < 1.5 pixel when \|Δcol\| ≤ 1, Δrow 4–10 and RH ratio < 3 |
+
+### v5 response
+
+| Finding | Decision | Change |
+| --- | --- | --- |
+| N1 | D33, D43 | Full guards rank before χ²; elimination only while χ² > 9 (D43); rejected fit temperature exported. |
+| D22 band-set cheap item | D34 | Two SWIR/MWIR bands and an M10/M11 anchor required. |
+| N2, N4 | D36 | Closest eligible pairs, column and RH guards, unique scans per group; Δrow exported. |
+| N3, N7 | D38 | RH-weighted centroid assignment and mean copy RH; maximum retained. |
+| N5 | D35 | Saddle ≤ half the lower maximum; prominence exported. |
+| N6 | D37 | Same-scan eight-neighbour peak-anchored RH75%. |
+| N8 | D40 | Source-centroid radius; strict and detection-clears sensitivity frequencies. |
+| N9 | D38, D39, D41 | Source sums and strongest-fit semantics; copy table and both-file cache; skipped dates printed. |
+| Development/version cheap items | D42 | v5 caches, 21 cases and one development night; final v3 baseline. |
 
 ### Spot checks (v4 code, live)
 

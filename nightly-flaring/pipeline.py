@@ -7,7 +7,7 @@
 3. One row per site per local night: mean clear-sky radiant heat (MW, clear
    non-detections count as 0) and the matching BCM/yr rate.
 
-Per-granule results are cached under ``out_dir/overpasses_v4/`` to resume.
+Per-granule results are cached under ``out_dir/overpasses_v5/`` to resume.
 Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 """
 
@@ -33,7 +33,7 @@ import nodd  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 SITES_CSV = OUT_DIR / "gfw_oil_sites.csv"
-PIPELINE_VERSION = "v4"
+PIPELINE_VERSION = "v5"
 SZA_CLEAR = 97.0  # clear-overpass rule (MYC25Q4 README)
 BCM_PER_MW_YEAR = 0.0116  # John Zink calibration slope (MYC25Q4 README)
 SLICE_MARGIN = timedelta(seconds=20)
@@ -53,15 +53,15 @@ def build_jobs(sites: pd.DataFrame, start: date, end: date) -> list[dict]:
     session = requests.Session()
     jobs = []
     for sat, short_name in granule_coverage.PRODUCTS.items():
-        slices = pd.concat(
-            [
-                granule_coverage.site_slices(
-                    sites, granule_coverage.cmr_granules(short_name, d.isoformat())
-                )
-                for d in utc_days
-            ],
-            ignore_index=True,
-        )
+        frames = []
+        for d in utc_days:
+            frame = granule_coverage.site_slices(
+                sites, granule_coverage.cmr_granules(short_name, d.isoformat())
+            )
+            if frame.empty:
+                print(f"Skipped empty coverage: {sat} {d.isoformat()}")
+            frames.append(frame)
+        slices = pd.concat(frames, ignore_index=True)
         if slices.empty:
             continue
         for col in ("slice_start", "slice_end"):
@@ -101,6 +101,17 @@ def _cache_path(job: dict, cache_dir: Path) -> Path:
     return cache_dir / job["satellite"] / f"{job['gid']}.csv"
 
 
+def _copies_path(job: dict, cache_dir: Path) -> Path:
+    return _cache_path(job, cache_dir).with_name(f"{job['gid']}_copies.csv")
+
+
+def cache_complete(job: dict, cache_dir: Path) -> bool:
+    """Both site and copy tables must exist before a granule is cached."""
+    return (
+        _cache_path(job, cache_dir).exists() and _copies_path(job, cache_dir).exists()
+    )
+
+
 def run_jobs(
     jobs: list[dict], cache_dir: Path, workers: int = 8, attempts: int = 3
 ) -> pd.DataFrame:
@@ -110,7 +121,7 @@ def run_jobs(
     ``attempts`` passes; any still missing are reported and left uncached.
     """
     for attempt in range(1, attempts + 1):
-        todo = [j for j in jobs if not _cache_path(j, cache_dir).exists()]
+        todo = [j for j in jobs if not cache_complete(j, cache_dir)]
         print(
             f"pass {attempt}: {len(jobs)} granules, "
             f"{len(jobs) - len(todo)} cached, {len(todo)} to run"
@@ -119,7 +130,9 @@ def run_jobs(
             break
     frames = [
         pd.read_csv(p)
-        for p in (_cache_path(j, cache_dir) for j in jobs)
+        for p in (
+            _cache_path(j, cache_dir) for j in jobs if cache_complete(j, cache_dir)
+        )
         if p.exists() and p.stat().st_size > 0
     ]
     frames = [f for f in frames if len(f)]
@@ -135,7 +148,7 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
             job = futures[fut]
             done += 1
             try:
-                recs = fut.result()
+                recs, copies = fut.result()
             except Exception:
                 errors.append({"granule": job["gid"], "satellite": job["satellite"]})
                 print(
@@ -145,6 +158,9 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
             path = _cache_path(job, cache_dir)
             path.parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(recs, columns=granule.RECORD_COLUMNS)
+            pd.DataFrame(copies, columns=granule.COPY_COLUMNS).to_csv(
+                _copies_path(job, cache_dir), index=False
+            )
             df.to_csv(path, index=False)
             nbytes += int(df["bytes_granule"].max()) if len(df) else 0
             if done % 25 == 0 or done == len(todo):
@@ -285,7 +301,18 @@ def main(
     if max_granules:
         jobs = jobs[:max_granules]
     over = run_jobs(jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", workers)
+    frames = [
+        pd.read_csv(_copies_path(j, out_dir / f"overpasses_{PIPELINE_VERSION}"))
+        for j in jobs
+        if cache_complete(j, out_dir / f"overpasses_{PIPELINE_VERSION}")
+    ]
+    copies = (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=granule.COPY_COLUMNS)
+    )
     tag = f"{start}_{end}"
+    copies.to_csv(out_dir / f"copies_{tag}.csv", index=False)
     over.to_csv(out_dir / f"overpasses_{tag}.csv", index=False)
     nights = site_nights(over, sites, d0, d1)
     nights.to_csv(out_dir / f"site_nights_{tag}.csv", index=False)

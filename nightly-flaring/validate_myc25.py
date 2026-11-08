@@ -75,15 +75,20 @@ def pooled_observations(nights: pd.DataFrame, over: pd.DataFrame) -> pd.DataFram
 
 
 def like_for_like_frequency(
-    nights: pd.DataFrame, over: pd.DataFrame, lat: float, lon: float
+    nights: pd.DataFrame,
+    over: pd.DataFrame,
+    lat: float,
+    lon: float,
+    copies: pd.DataFrame | None = None,
+    sensitivity: bool = True,
 ) -> tuple[int, int]:
-    """MYC-centred passes: any nearby detection makes that pass clear."""
-    from pipeline import dedupe_overpasses, strict_clear, SZA_CLEAR
+    """Count source-radius detections on strict or detection-cleared passes."""
+    from pipeline import strict_clear, SZA_CLEAR
     from nightfire import haversine_m
 
     sites = nights[["site_id", "lat", "lon"]].drop_duplicates("site_id")
     nearby = sites[haversine_m(lat, lon, sites.lat, sites.lon) <= 2000]
-    obs = dedupe_overpasses(over[over.site_id.isin(nearby.site_id)])
+    obs = over[over.site_id.isin(nearby.site_id)].copy()
     obs = obs.merge(sites[["site_id", "lon"]], on="site_id")
     local = pd.to_datetime(obs.time_utc) + pd.to_timedelta(obs.lon / 15, "h")
     obs["night"] = (local - pd.Timedelta(hours=12)).dt.strftime("%Y-%m-%d")
@@ -91,7 +96,29 @@ def like_for_like_frequency(
         nights[["site_id", "night"]].astype({"night": str}), on=["site_id", "night"]
     )
     obs = obs[obs.sza >= SZA_CLEAR].copy()
-    obs["clear"] = strict_clear(obs) | obs.detected
+    if copies is not None:
+        sources = copies[
+            haversine_m(lat, lon, copies.centroid_lat, copies.centroid_lon) <= 2000
+        ]
+        detected = []
+        for row in obs.itertuples():
+            hit = sources[
+                (sources.satellite == row.satellite) & (sources.granule == row.granule)
+            ]
+            detected.append(
+                bool(
+                    (
+                        abs(pd.to_datetime(hit.time_utc) - pd.Timestamp(row.time_utc))
+                        < pd.Timedelta(seconds=10)
+                    ).any()
+                )
+            )
+        obs["detected"] = detected
+    elif "peak_lat" in obs:
+        obs["detected"] &= haversine_m(lat, lon, obs.peak_lat, obs.peak_lon) <= 2000
+    obs["clear"] = strict_clear(obs)
+    if sensitivity:
+        obs["clear"] |= obs.detected
     obs["_time"] = pd.to_datetime(obs.time_utc)
     obs = obs.sort_values(["satellite", "_time"], kind="stable")
     gap = obs.groupby("satellite")._time.diff()
@@ -99,7 +126,7 @@ def like_for_like_frequency(
     passes = obs.groupby("_pass").agg(
         detected=("detected", "max"), clear=("clear", "max")
     )
-    return int(passes.detected.sum()), int(passes.clear.sum())
+    return int((passes.detected & passes.clear).sum()), int(passes.clear.sum())
 
 
 def match_sites(
@@ -107,6 +134,7 @@ def match_sites(
     myc: pd.DataFrame,
     match_m: float = 2000.0,
     overpasses: pd.DataFrame | None = None,
+    copies: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Greedily accept nearest pairs within radius, using each site once."""
     if overpasses is None:
@@ -148,13 +176,36 @@ def match_sites(
     rates = {}
     for i, (_, j) in selected.items():
         flare = myc.iloc[j]
-        rates[i] = like_for_like_frequency(nights, overpasses, flare.lat, flare.lon)
+        rates[i] = like_for_like_frequency(
+            nights, overpasses, flare.lat, flare.lon, copies
+        )
     per_site["lf_detections"] = [rates.get(i, (0, 0))[0] for i in range(len(per_site))]
     per_site["lf_clear_passes"] = [
         rates.get(i, (0, 0))[1] for i in range(len(per_site))
     ]
     per_site["lf_det_freq"] = per_site.lf_detections / per_site.lf_clear_passes.replace(
         0, np.nan
+    )
+    strict_rates = {
+        i: like_for_like_frequency(
+            nights,
+            overpasses,
+            myc.iloc[j].lat,
+            myc.iloc[j].lon,
+            copies,
+            sensitivity=False,
+        )
+        for i, (_, j) in selected.items()
+    }
+    per_site["lf_strict_detections"] = [
+        strict_rates.get(i, (0, 0))[0] for i in range(len(per_site))
+    ]
+    per_site["lf_strict_clear_passes"] = [
+        strict_rates.get(i, (0, 0))[1] for i in range(len(per_site))
+    ]
+    per_site["lf_strict_det_freq"] = (
+        per_site.lf_strict_detections
+        / per_site.lf_strict_clear_passes.replace(0, np.nan)
     )
     return per_site
 
@@ -176,7 +227,7 @@ def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
         & sites.myc_det_freq.notna()
     ]
     matched["region"] = [region_of(r.lat, r.lon) for r in matched.itertuples()]
-    return dict(
+    result = dict(
         matched=len(matched),
         observed=len(observed),
         match_m=match_m,
@@ -203,6 +254,12 @@ def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
             myc=float(persistent.myc_det_freq.median()) if len(persistent) else None,
             n=len(persistent),
         ),
+        det_freq_myc_strict=dict(
+            ours=float(lf_persistent.lf_strict_det_freq.median()),
+            n=int(lf_persistent.lf_strict_det_freq.notna().sum()),
+            detections=int(lf_persistent.lf_strict_detections.sum()),
+            clear_passes=int(lf_persistent.lf_strict_clear_passes.sum()),
+        ),
         det_freq_like_for_like=dict(
             ours=float(lf_persistent.lf_det_freq.median())
             if len(lf_persistent)
@@ -225,6 +282,9 @@ def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
         ],
     )
 
+    result["det_freq_myc_detection_clears"] = result["det_freq_like_for_like"].copy()
+    return result
+
 
 def main(
     tag: str = "2026-10-29_2026-10-29",
@@ -239,7 +299,9 @@ def main(
 
     nights = pd.read_csv(site_nights_csv or out_dir / f"site_nights_{tag}.csv")
     over = pd.read_csv(overpasses_csv or out_dir / f"overpasses_{tag}.csv")
-    sites = match_sites(nights, load_myc(year), match_m, over)
+    copies_path = out_dir / f"copies_{tag}.csv"
+    copies = pd.read_csv(copies_path) if copies_path.exists() else None
+    sites = match_sites(nights, load_myc(year), match_m, over, copies)
     summary = validation_summary(sites, match_m)
     print(f"MYC25Q4 {year}; run {tag} (short-period rates vs annual reference)")
     print(json.dumps(summary, indent=2))

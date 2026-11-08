@@ -20,7 +20,9 @@ import nodd
 WINDOW = 2  # pixels either side of the site pixel searched for hot pixels
 MAX_SITE_PIXEL_M = 1200.0  # site must be this close to a valid pixel centre
 ASSOC_M = 2000.0  # hot pixels farther than this from every site are ignored
-BOWTIE_MERGE_PIXELS = 1.0  # adjacent-scan copies closer than this merge (D32)
+BOWTIE_MERGE_PIXELS = (
+    1.5  # adjacent-scan distance limit, with column/RH/group guards (D36)
+)
 SZA_NIGHT = 95.0  # detection only where solar zenith >= this (Elvidge 2013)
 GRANULE_SECONDS = 86.0
 # JPSS VIIRS SDR DD Part 6, QF1: bits 2-3, 0 none / 1 some / 2 all.
@@ -38,6 +40,7 @@ RECORD_COLUMNS = [
     "cloud_clear_neighbors",
     "n_hot_m10",
     "n_fitted",
+    "n_band_rule_changed",
     "n_clusters",
     "n_sources",
     "rh_peak_mw",
@@ -59,6 +62,39 @@ RECORD_COLUMNS = [
     "fit_flag",
     "bytes_granule",
 ]
+
+COPY_COLUMNS = """satellite granule time_utc scan component_id peak_row peak_col
+peak_lat peak_lon footprint_m2 m10_peak prominence_ratio rh75_mw rh_peak_mw
+n_rh75 n_rh_cap_excluded temp_k area_m2 bands fit_flag t_fit_rejected
+cloud_mask_peak clear_neighbors_peak group_id group_size pair_distance_px
+pair_dcol pair_drow pair_rh_ratio group_rh_mw group_max_rh_mw centroid_lat
+centroid_lon assigned_site site_dist_m band_rule_changed""".split()
+
+
+def peak_saddle(
+    pixels: list[tuple], values: np.ndarray, start: tuple, targets: set[tuple]
+) -> float:
+    """Highest bottleneck level on an 8-connected path to a stronger peak."""
+    import heapq
+
+    allowed = set(pixels)
+    queue = [(-float(values[start]), start)]
+    seen = set()
+    while queue:
+        negative, rc = heapq.heappop(queue)
+        if rc in seen:
+            continue
+        seen.add(rc)
+        if rc in targets:
+            return -negative
+        r, c = rc
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                nxt = r + dr, c + dc
+                if nxt in allowed and nxt not in seen:
+                    heapq.heappush(queue, (-min(-negative, float(values[nxt])), nxt))
+    return 0.0
+
 
 _SESSION: requests.Session | None = None
 
@@ -159,6 +195,13 @@ def candidate_clusters(
             peaks.append((r, c))
         if not peaks:
             continue
+        retained, prominence = [peaks[0]], [0.0]
+        for peak in peaks[1:]:
+            ratio = peak_saddle(pixels, l10, peak, set(retained)) / l10[peak]
+            if ratio <= 0.5:
+                retained.append(peak)
+                prominence.append(float(ratio))
+        peaks = retained
         groups = [[] for _ in peaks]
         for rc in pixels:
             j = min(
@@ -169,6 +212,9 @@ def candidate_clusters(
         for j, peak in enumerate(peaks):
             clusters.append(
                 {
+                    "component_id": int(ids[group[0]]),
+                    "prominence_ratio": prominence[j],
+                    "m10_peak": float(l10[peak]),
                     "pixels": groups[j],
                     "peak": peak,
                     "split_component": int(ids[group[0]]) if len(peaks) > 1 else None,
@@ -183,6 +229,7 @@ def summarize_clusters(
     lat: np.ndarray,
     lon: np.ndarray,
     sites: np.ndarray,
+    copy_rows: list[dict] | None = None,
 ) -> list[dict]:
     """Compute peak-anchored RH75%, merge scan copies, then assign sources."""
     tree = cKDTree(_unit_xyz(sites[:, 1].astype(float), sites[:, 2].astype(float)))
@@ -199,9 +246,22 @@ def summarize_clusters(
             and pixels[rc].get("fit_flag") != "unfitted"
         ]
         peak_rh = peak["rh_mw"]
-        selected = [p for p in fitted if 0.75 * peak_rh <= p["rh_mw"] <= 1.5 * peak_rh]
+        adjacent = [
+            pixels[rc]
+            for rc in cluster["pixels"]
+            if max(abs(rc[0] - r), abs(rc[1] - c)) <= 1
+            and rc[0] // nf.M_SCAN_LINES == r // nf.M_SCAN_LINES
+            and "rh_mw" in pixels.get(rc, {})
+            and pixels[rc].get("fit_flag") != "unfitted"
+        ]
+        selected = [
+            p for p in adjacent if 0.75 * peak_rh <= p["rh_mw"] <= 1.5 * peak_rh
+        ]
         copies.append(
             dict(
+                component_id=cluster.get("component_id"),
+                prominence_ratio=cluster.get("prominence_ratio", 0.0),
+                m10_peak=cluster.get("m10_peak", np.nan),
                 peak=peak,
                 peak_row=r,
                 peak_col=c,
@@ -213,23 +273,22 @@ def summarize_clusters(
                 rh_mw=sum(p["rh_mw"] for p in selected),
                 rh_peak_mw=peak_rh,
                 n_rh75=len(selected),
-                n_rh_cap_excluded=sum(p["rh_mw"] > 1.5 * peak_rh for p in fitted),
+                n_rh_cap_excluded=sum(p["rh_mw"] > 1.5 * peak_rh for p in adjacent),
                 split_components={cluster["split_component"]}
                 if cluster.get("split_component") is not None
                 else set(),
             )
         )
-    return merge_scan_copies(copies, tree)
+    result = merge_scan_copies(copies, tree)
+    if copy_rows is not None:
+        copy_rows.extend(copies)
+    return result
 
 
 def merge_scan_copies(copies: list[dict], tree: cKDTree) -> list[dict]:
-    """Union adjacent-scan peaks closer than one pixel (smaller sqrt(footprint)).
-
-    Bow-tie copies of one flare at the swath edge sit 7-9 lines apart in
-    adjacent scans with peak centres 0.50-0.83 pixel apart (two granules,
-    2026-10-29), so rs2019's half-pixel spacing would keep and sum them.
-    """
+    """Match closest qualifying pairs; forbid duplicate scans within a group."""
     parent = list(range(len(copies)))
+    scans = [{p["peak_row"] // nf.M_SCAN_LINES} for p in copies]
 
     def find(i):
         while parent[i] != i:
@@ -237,35 +296,81 @@ def merge_scan_copies(copies: list[dict], tree: cKDTree) -> list[dict]:
             i = parent[i]
         return i
 
+    pairs = []
     for i, a in enumerate(copies):
+        a["pairs"] = []
         for j in range(i):
             b = copies[j]
-            if (
-                abs(a["peak_row"] // nf.M_SCAN_LINES - b["peak_row"] // nf.M_SCAN_LINES)
-                != 1
-            ):
+            if abs(a["peak_row"] // 16 - b["peak_row"] // 16) != 1:
                 continue
-            distance = nf.haversine_m(
-                a["peak_lat"], a["peak_lon"], b["peak_lat"], b["peak_lon"]
+            dcol = abs(a["peak_col"] - b["peak_col"])
+            ratio = max(a["rh_mw"], b["rh_mw"]) / min(a["rh_mw"], b["rh_mw"])
+            distance = float(
+                nf.haversine_m(
+                    a["peak_lat"], a["peak_lon"], b["peak_lat"], b["peak_lon"]
+                )
             )
-            pixel = BOWTIE_MERGE_PIXELS * np.sqrt(min(a["footprint"], b["footprint"]))
-            if distance < pixel:
-                parent[find(i)] = find(j)
+            scale = np.sqrt(min(a["footprint"], b["footprint"]))
+            px = distance / scale if scale > 0 else np.inf
+            if dcol <= 1 and px < BOWTIE_MERGE_PIXELS and ratio < 3:
+                pairs.append(
+                    (
+                        distance,
+                        i,
+                        j,
+                        px,
+                        dcol,
+                        abs(a["peak_row"] - b["peak_row"]),
+                        ratio,
+                    )
+                )
+    for _, i, j, px, dc, dr, ratio in sorted(pairs):
+        x, y = find(i), find(j)
+        if scans[x] & scans[y]:
+            continue
+        parent[x] = y
+        scans[y] |= scans[x]
+        for k in (i, j):
+            copies[k]["pairs"].append((px, dc, dr, ratio))
     groups = {}
-    for i in range(len(copies)):
-        groups.setdefault(find(i), []).append(copies[i])
+    for i, copy in enumerate(copies):
+        groups.setdefault(find(i), []).append(copy)
     result = []
-    for group in groups.values():
+    for group_id, group in enumerate(groups.values()):
         best = max(group, key=lambda p: p["rh_mw"]).copy()
-        chord, j = tree.query(_unit_xyz([best["peak_lat"]], [best["peak_lon"]])[0])
-        dist = 2 * nf.EARTH_RADIUS_M * np.arcsin(min(chord / 2, 1.0))
+        weights = np.array([p["rh_mw"] for p in group])
+        xyz = np.average(
+            _unit_xyz([p["peak_lat"] for p in group], [p["peak_lon"] for p in group]),
+            axis=0,
+            weights=weights,
+        )
+        xyz /= np.linalg.norm(xyz)
+        la = float(np.degrees(np.arcsin(xyz[2])))
+        lo = float(np.degrees(np.arctan2(xyz[1], xyz[0])))
+        chord, j = tree.query(xyz)
+        dist = float(2 * nf.EARTH_RADIUS_M * np.arcsin(min(chord / 2, 1.0)))
+        rh = float(weights.mean())
+        for copy in group:
+            copy.update(
+                group_id=group_id,
+                group_size=len(group),
+                group_rh_mw=rh,
+                group_max_rh_mw=float(weights.max()),
+                centroid_lat=la,
+                centroid_lon=lo,
+                site=int(j) if dist <= ASSOC_M else None,
+                site_dist_m=dist,
+            )
         if dist > ASSOC_M:
             continue
         best.update(
             site=int(j),
-            peak_dist_m=float(dist),
+            peak_dist_m=dist,
             n_clusters=len(group),
             n_copies_merged=len(group) - 1,
+            rh_mw=rh,
+            centroid_lat=la,
+            centroid_lon=lo,
         )
         best["split_components"] = set().union(
             *(p.get("split_components", set()) for p in group)
@@ -314,8 +419,8 @@ def site_cluster_summary(clusters: list[dict], site: int) -> dict:
     return out
 
 
-def process_granule(job: dict) -> list[dict]:
-    """Return one dict per site observed by the granule described in ``job``.
+def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
+    """Return site records and confirmed-copy records for one granule.
 
     ``job`` holds ``satellite``, ``bucket``, ``gid``, ``start`` (datetime),
     ``keys`` (product -> S3 key) and ``sites`` (list of (site_id, lat, lon)).
@@ -336,7 +441,7 @@ def process_granule(job: dict) -> list[dict]:
 
     # Site -> nearest valid pixel.
     if not valid.any():
-        return []
+        return [], []
     sites = np.array(job["sites"], dtype=object)
     rows, cols, dist_m = site_pixels(lat, lon, l10, sites)
     inside = (
@@ -347,7 +452,7 @@ def process_granule(job: dict) -> list[dict]:
         & (cols < ncol - 1)
     )
     if not inside.any():
-        return []
+        return [], []
     sites = sites[inside]
     rows, cols, dist_m = rows[inside], cols[inside], dist_m[inside]
 
@@ -356,7 +461,7 @@ def process_granule(job: dict) -> list[dict]:
     sza[valid] = nf.solar_zenith_deg(lat[valid], lon[valid], mid)
     night = valid & (sza >= SZA_NIGHT)
     if not night[rows, cols].any():
-        return []
+        return [], []
 
     # Stage 1: M10 detection, thresholds per aggregation zone.
     usable = night & np.isfinite(l10)
@@ -403,12 +508,18 @@ def process_granule(job: dict) -> list[dict]:
             }
             px = {"row": r, "col": c, "bands": sorted(obs)}
             if len(obs) >= 2:
+                diagnostic = {}
                 t, esf, chi, used, flag = nf.fit_planck(
-                    list(obs), list(obs.values()), [sigma[k] for k in obs]
+                    list(obs),
+                    list(obs.values()),
+                    [sigma[k] for k in obs],
+                    diagnostics=diagnostic,
                 )
                 if flag != "unfitted":
                     area = nf.pixel_area_m2(lat, lon, r, c)
                     px.update(
+                        band_rule_changed=diagnostic.get("band_rule_changed", False),
+                        t_fit_rejected=diagnostic.get("t_fit_rejected", np.nan),
                         temp_k=t,
                         esf=esf,
                         chi2=chi,
@@ -419,7 +530,9 @@ def process_granule(job: dict) -> list[dict]:
                     )
             pixels[r, c] = px
 
-    assigned = summarize_clusters(clusters, pixels, lat, lon, sites)
+    copies = []
+    assigned = summarize_clusters(clusters, pixels, lat, lon, sites, copies)
+    copy_cloud = {}
 
     # Cloud mask at site pixels (0 clear, 1 probably clear, 2/3 cloudy).
     clear_neighbors = np.zeros(len(sites), dtype=int)
@@ -429,6 +542,14 @@ def process_granule(job: dict) -> list[dict]:
         with h5py.File(f, "r") as h:
             ds = h["CloudMask"]
             if ds.shape == lat.shape:
+                for copy in copies:
+                    r, c = copy["peak_row"], copy["peak_col"]
+                    cm = int(ds[r, c])
+                    window = ds[max(0, r - 1) : r + 2, max(0, c - 1) : c + 2]
+                    copy_cloud[r, c] = (
+                        cm,
+                        int(np.isin(window, [0, 1]).sum()) - int(cm in (0, 1)),
+                    )
                 cloud = np.array([int(ds[r, c]) for r, c in zip(rows, cols)])
                 for k, (r, c) in enumerate(zip(rows, cols)):
                     window = ds[r - 1 : r + 2, c - 1 : c + 2]
@@ -459,10 +580,44 @@ def process_granule(job: dict) -> list[dict]:
             "bands": "",
             "fit_flag": "",
             "bytes_granule": nbytes,
+            "n_band_rule_changed": sum(
+                p.get("band_rule_changed", False) for p in pixels.values()
+            ),
         }
         rec.update(site_cluster_summary(assigned, k))
         records.append(rec)
-    return records
+    copy_records = []
+    for copy in copies:
+        peak = copy["peak"]
+        r, c = copy["peak_row"], copy["peak_col"]
+        row = {k: copy.get(k, np.nan) for k in COPY_COLUMNS}
+        row.update(
+            satellite=job["satellite"],
+            granule=job["gid"],
+            time_utc=(
+                job["start"] + timedelta(seconds=GRANULE_SECONDS * r / nrow)
+            ).isoformat(timespec="seconds"),
+            scan=r // 16,
+            footprint_m2=copy["footprint"],
+            rh75_mw=copy["rh_mw"],
+            temp_k=peak["temp_k"],
+            area_m2=peak["esf"] * peak["area_m2"],
+            bands="+".join(peak["bands"]),
+            fit_flag=peak["fit_flag"],
+            band_rule_changed=peak.get("band_rule_changed", False),
+            t_fit_rejected=peak.get("t_fit_rejected", np.nan),
+            cloud_mask_peak=copy_cloud.get((r, c), (-1, 0))[0],
+            clear_neighbors_peak=copy_cloud.get((r, c), (-1, 0))[1],
+            assigned_site=int(sites[copy["site"], 0])
+            if copy["site"] is not None
+            else "",
+        )
+        for i, key in enumerate(
+            ("pair_distance_px", "pair_dcol", "pair_drow", "pair_rh_ratio")
+        ):
+            row[key] = ";".join(str(pair[i]) for pair in copy["pairs"])
+        copy_records.append(row)
+    return records, copy_records
 
 
 def granule_start(gid: str) -> datetime:

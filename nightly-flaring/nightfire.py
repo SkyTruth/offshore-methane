@@ -108,11 +108,13 @@ NOISE_FLOOR = 1e-6  # radiance units; guards uniform synthetic/background scenes
 MODEL_REL_ERROR = 0.10
 
 
-def fit_planck(
+def _fit_planck(
     bands: list[str],
     radiance: list[float],
     noise: list[float] | None = None,
     t0: float = 1000.0,
+    diagnostics: dict | None = None,
+    require_swir: bool = True,
 ) -> tuple[float, float, float, list[str], str]:
     """Noise-weighted fit with guarded leave-one-out elimination or M10 pin.
 
@@ -149,47 +151,81 @@ def fit_planck(
         )
         return res, float(res.fun) / max(len(names) - 2, 1)
 
-    if len(bands) >= 2 and {"M10", "M11"}.intersection(bands):
+    def guard(names, res):
+        t = float(res.x[0])
+        esf = float(np.exp(np.clip(res.x[1], -100, 10)))
+        if not res.success:
+            return "nonconvergence"
+        if not np.isfinite(t) or not 0 < esf <= 1 or t > FIT_T_MAX:
+            return "bounds"
+        if t < FIT_T_MIN:
+            return "low_t"
+        if not {"M10", "M11"}.intersection(names):
+            return "no_m10_m11"
+        if require_swir and len({"M10", "M11", "M12", "M13"}.intersection(names)) < 2:
+            return "band_set"
+        if len(names) == 2 and not TWO_BAND_T_MIN <= t <= TWO_BAND_T_MAX:
+            return "two_band_range"
+        return ""
+
+    if len(bands) >= 2:
         res, chi = refit(bands, obs, sd)
-        while chi > FIT_CHI2_MAX and len(bands) > 3:
+        while True:
+            reason = guard(bands, res)
+            if not reason and np.isfinite(chi) and chi <= FIT_CHI2_MAX:
+                return (
+                    float(res.x[0]),
+                    float(np.exp(res.x[1])),
+                    chi,
+                    bands,
+                    "eliminated:" + "+".join(dropped) if dropped else "ok",
+                )
+            if not reason:
+                reason = "chi2"
+            elif np.isfinite(chi) and chi <= FIT_CHI2_MAX:
+                # A good fit that fails a physical guard is pinned, not
+                # searched for a band subset that passes (D43).
+                break
+            if len(bands) <= 3:
+                break
             trials = []
             for i in range(len(bands)):
                 remaining = bands[:i] + bands[i + 1 :]
-                if not {"M10", "M11"}.intersection(remaining):
-                    continue
                 fit, score = refit(remaining, np.delete(obs, i), np.delete(sd, i))
-                if fit.success and np.isfinite(score) and score < chi:
-                    trials.append((score, i, fit))
-            if not trials:
-                break
-            chi, i, res = min(trials, key=lambda trial: trial[0])
+                trials.append(
+                    (
+                        bool(guard(remaining, fit)),
+                        score if np.isfinite(score) else np.inf,
+                        i,
+                        fit,
+                    )
+                )
+            _, chi, i, res = min(trials, key=lambda trial: trial[:3])
             dropped.append(bands.pop(i))
             obs, sd = np.delete(obs, i), np.delete(sd, i)
-        t, esf = float(res.x[0]), float(np.exp(np.clip(res.x[1], -100, 10)))
-        if not res.success:
-            reason = "nonconvergence"
-        elif not np.isfinite(t) or not 0 < esf <= 1 or t > FIT_T_MAX:
-            reason = "bounds"
-        elif t < FIT_T_MIN:
-            reason = "low_t"
-        elif len(bands) == 2 and not TWO_BAND_T_MIN <= t <= TWO_BAND_T_MAX:
-            reason = "two_band_range"
-        elif not np.isfinite(chi) or chi > FIT_CHI2_MAX:
-            reason = "chi2"
-        else:
-            return (
-                t,
-                esf,
-                chi,
-                bands,
-                ("eliminated:" + "+".join(dropped) if dropped else "ok"),
-            )
+        if diagnostics is not None:
+            diagnostics["t_fit_rejected"] = float(res.x[0])
 
     if usable_m10:
         esf = original["M10"] / float(planck(BAND_UM["M10"], FLARE_T_DEFAULT))
         if 0 < esf <= 1:
             return FLARE_T_DEFAULT, esf, chi, ["M10", "T1810"], "pinned:" + reason
     return np.nan, np.nan, chi, [], "unfitted"
+
+
+def fit_planck(
+    bands: list[str],
+    radiance: list[float],
+    noise: list[float] | None = None,
+    t0: float = 1000.0,
+    diagnostics: dict | None = None,
+) -> tuple[float, float, float, list[str], str]:
+    """Guarded spectral fit; optionally audit the v5 band-set rule's effect."""
+    fit = _fit_planck(bands, radiance, noise, t0, diagnostics)
+    if diagnostics is not None:
+        relaxed = _fit_planck(bands, radiance, noise, t0, require_swir=False)
+        diagnostics["band_rule_changed"] = fit[3:] != relaxed[3:]
+    return fit
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> np.ndarray:

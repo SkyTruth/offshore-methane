@@ -76,10 +76,10 @@ def test_cluster_nearest_site_rh75_and_bowtie_max():
     lat, lon = np.zeros((32, 8)), np.full((32, 8), 0.001)
     assigned = g.summarize_clusters(clusters, pixels, lat, lon, sites)
     assert [c["site"] for c in assigned] == [0, 0]
-    assert assigned[0]["rh_mw"] == pytest.approx(25.49)  # peak-anchored threshold
+    assert assigned[0]["rh_mw"] == pytest.approx(18)  # peak-anchored threshold
     summary = g.site_cluster_summary(assigned, 0)
     assert summary["n_clusters"] == 2
-    assert summary["rh_mw"] == pytest.approx(37.49)  # sum distinct sources
+    assert summary["rh_mw"] == pytest.approx(30)  # sum distinct sources
     assert summary["temp_k"] == 1900  # winning cluster's M10 peak
     assert not g.site_cluster_summary(assigned, 1)["detected"]
     pixels[(1, 2)] = {}  # fitted wings cannot rescue an unconfirmed peak
@@ -159,7 +159,9 @@ def test_process_granule_cluster_integration(monkeypatch):
     )
     monkeypatch.setattr(g.nf, "local_background", lambda *a: (0, 0))
     monkeypatch.setattr(
-        g.nf, "fit_planck", lambda bands, obs, noise: (1800, 0.001, 0, bands, "ok")
+        g.nf,
+        "fit_planck",
+        lambda bands, obs, noise, **kwargs: (1800, 0.001, 0, bands, "ok"),
     )
     job = dict(
         satellite="SNPP",
@@ -169,7 +171,8 @@ def test_process_granule_cluster_integration(monkeypatch):
         keys=dict(geo="geo", **{b: b for b in bands}),
         sites=[(1, lat[5, 5], lon[5, 5]), (2, lat[5, 7], lon[5, 7])],
     )
-    records = g.process_granule(job)
+    records, copies = g.process_granule(job)
+    assert copies and all(set(g.COPY_COLUMNS) <= set(row) for row in copies)
     assert len(records) == 2
     assert set(records[0]) == set(g.RECORD_COLUMNS)
     assert records[0]["detected"] and records[0]["n_clusters"] == 1
@@ -177,12 +180,12 @@ def test_process_granule_cluster_integration(monkeypatch):
     assert not records[1]["detected"]
     # Raw saturated M10 must be removed; M11-M13 still confirm and fit.
     bands["M10"][5, 5] = g.nf.SATURATION["M10"]
-    records = g.process_granule(job)
+    records, copies = g.process_granule(job)
     assert records[0]["detected"] and "M10" not in records[0]["bands"]
     # Partial saturation flags remove a band even well below its full-pixel limit.
     bands["M10"][5, 5] = 1
     flags["M11"][5, 5] = 4
-    records = g.process_granule(job)
+    records, copies = g.process_granule(job)
     assert "M11" not in records[0]["bands"]
     assert "M10" in records[0]["bands"]
     # Optional M7/M8 contribute only when hot, and their noise reaches the fit.
@@ -191,7 +194,7 @@ def test_process_granule_cluster_integration(monkeypatch):
         flags[name] = np.zeros(lat.shape, dtype=np.uint8)
         job["keys"][name] = name
     bands["M7"][5, 5] = 1
-    records = g.process_granule(job)
+    records, copies = g.process_granule(job)
     assert "M7" in records[0]["bands"] and "M8" not in records[0]["bands"]
     # No candidates means no stage-2 reads (including optional bands).
     reads = []
@@ -213,7 +216,9 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
     sites.to_csv(source, index=False)
     output = tmp_path / "new" / "dev"
     seen = []
-    monkeypatch.setattr(p, "build_jobs", lambda *a: ["synthetic_job"])
+    monkeypatch.setattr(
+        p, "build_jobs", lambda *a: [dict(satellite="SNPP", gid="synthetic")]
+    )
 
     def run_jobs(jobs, cache_dir, workers):
         seen.append((jobs, cache_dir, workers))
@@ -227,7 +232,9 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
         sites_csv=source,
         out_dir=output,
     )
-    assert seen == [(["synthetic_job"], output / "overpasses_v4", 12)]
+    assert seen == [
+        ([dict(satellite="SNPP", gid="synthetic")], output / "overpasses_v5", 12)
+    ]
     assert (output / "overpasses_2026-10-29_2026-10-29.csv").exists()
     assert (output / "site_nights_2026-10-29_2026-10-29.csv").exists()
     assert result.iloc[0].rh_mw == 3

@@ -68,7 +68,7 @@ Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day bucket retention.
 
-## Pipeline (v4)
+## Pipeline (v5)
 
 1. **Granule selection**: NASA CMR footprints of the 6-minute geolocation
    granules, split into four slices, select the NOAA 86 s granules (±20 s) and
@@ -84,25 +84,29 @@ must be within NOAA's ~91-day bucket retention.
    3σ). Drop saturated bands using raw radiance, before background subtraction.
    QF1 bits 2–3 also exclude partially/fully saturated bands. Missing M7/M8
    files are optional. At least two unsaturated bands confirm a candidate;
-   M10 or M11 must survive. Use noise-weighted fits with a 10% model-error
-   term. Above reduced χ² 9, remove the band whose leave-one-out refit lowers
-   χ² most, retaining at least three bands. Accept 1,200–3,500 K and ESF in
+   The final set requires two of M10/M11/M12/M13 and at least one of M10/M11.
+   Use noise-weighted fits with a 10% model-error term. Evaluate each allowed
+   leave-one-out trial with all guards, ranking guard-passing trials first,
+   then reduced χ², retaining at least three bands during elimination. Accept 1,200–3,500 K and ESF in
    (0,1]; two-band fits require 1,200–2,500 K. Reject failed convergence or
    remaining high χ²; pin rejected fits at 1,810 K from usable M10, else leave
    unfitted. `fit_flag` is `ok`, `eliminated:<bands>`, `pinned:<reason>` or
-   `unfitted`. Split components around separate qualifying M10 maxima by
-   nearest-peak pixel distance. A cluster needs a fitted M10 peak.
-5. **Per overpass**: RH75% sums fitted pixels with RH between 0.75 and 1.5
-   times the M10 peak RH. Merge adjacent-scan peaks closer than one pixel
-   (smaller local sqrt(footprint area)), including chains; retain the strongest
-   RH75% copy. Assign each source to the nearest site within 2 km and sum
-   distinct sources. The strongest source supplies temperature, area and fit.
-   `n_sources` counts distinct sources; `n_clusters` counts pre-merge copies.
-   `rh_peak_mw` and `n_rh75` record peak RH and summed pixel count;
-   `n_rh_cap_excluded`, `n_copies_merged`, `n_components_split` and
-   `split_component_ids` support audits. `peak_row`, `peak_col`, `peak_lat`,
-   `peak_lon`, `peak_dist_m` locate the strongest source; `row`/`col` remain
-   the site pixel. Cloud flags and clear-neighbour counts use that site pixel.
+   `unfitted`; pinned copies retain `t_fit_rejected`. Split a secondary M10
+   maximum only when the connecting saddle is ≤0.5 times that maximum, then
+   partition by nearest retained peak. A cluster needs a fitted M10 peak.
+5. **Per overpass**: peak-anchored RH75% sums the peak and its eight neighbours
+   within its partition and scan when fitted RH is 0.75–1.5 times peak RH.
+   en2025 uses an RHmax anchor; our M10-peak anchor, stencil and cap are local
+   choices. Pair adjacent-scan peaks with |Δcol|≤1, distance <1.5 times the
+   smaller sqrt(footprint area), and RH75% ratio <3, closest pairs first.
+   Each group has at most one peak per scan; consecutive-scan chains are allowed.
+   Group RH is mean copy RH75%; assignment uses the RH-weighted spherical centroid
+   and nearest site within 2 km. Distinct groups at a site are summed in `rh_mw`;
+   `temp_k`, `area_m2`, bands and fit describe the strongest group's strongest copy.
+   `n_sources` counts groups; `n_clusters` counts pre-merge confirmed copies.
+   `peak_*` fields locate that strongest copy; `row`/`col` and cloud flags retain
+   site-pixel semantics. `n_rh75` counts selected pixels from the strongest copy
+   of each group. Cap, split and merged-copy counts support audits.
 6. **Per night**: deduplicate same-satellite/site records in runs of consecutive
    time gaps <10 s, preferring detections, then smallest `dist_m` (earliest on
    ties), then pool
@@ -117,9 +121,18 @@ must be within NOAA's ~91-day bucket retention.
    detected-OR-cloud-0/1 rule on the same deduplicated observations. Volume rate
    is 0.0116 × mean RH.
 
-Per-granule caches are versioned as `overpasses_v4`; `out_dir` contains both
-that cache and the final CSVs. Development runs use `outputs/dev_v4`, preserving
+Per-granule caches are versioned as `overpasses_v5`; `out_dir` contains both
+that cache and the final CSVs. Development runs use `outputs/dev_v5`, preserving
 v1/v2/v3 outputs and caches.
+
+Each cache entry needs both `<satellite>/<gid>.csv` and `<gid>_copies.csv`.
+`copies_<tag>.csv` exports every confirmed copy, including unassigned groups:
+peak position, scan/component, footprint, M10 prominence, RH75% and peak RH,
+fit/bands/rejected temperature, peak cloud mask and clear neighbours, group ID,
+size, mean/max RH, centroid, assigned site and distance. Accepted pair edge
+fields (`pair_distance_px`, `pair_dcol`, `pair_drow`, `pair_rh_ratio`) are
+semicolon-separated for chain endpoints with two edges; group IDs are scoped
+by satellite and granule. Δrow is recorded without a cutoff.
 
 Simplifications versus EOG: Planck at band centres (no spectral response),
 single-curve fit with background subtraction instead of the dual-curve fit, no
@@ -236,25 +249,27 @@ VIIRS active fire 59% (822/1400).
 | v3 | 2026-10-06 – 11-04 (30) | 19,443 | 167 GB | 105 min | 4,060 clear + 1,634 lit under cloud | 504 clear (558 incl. cloud) |
 
 
-Dev night 2026-10-29, same local-night/SZA/dedupe scope (v3 = final v3 code):
+Dev night 2026-10-29, same local-night/SZA/dedupe scope (v3 = final v3):
 
-| Measure | v3 | v4 |
-| --- | --- | --- |
-| Detected overpasses | 369 | 376 |
-| Total detected RH, MW | 1,796.8 | 1,823.5 |
-| Strict-clear site RH means summed, MW | 450.3 | 453.5 |
-| Fits below 1,200 K | 3/369 | 0/376 |
-| Two-band fits above 2,500 K | present (max 3,202 K) | 0/48 |
-| Flaring sites, strict / including cloud | 122 / 177 | 120 / 179 |
-| MYC-centred frequency, median | 0.667 (n=229) | 0.667 (n=231) |
+| Measure | v3 (final) | v4 | v5 |
+| --- | --- | --- | --- |
+| Detected overpasses | 369.00 | 376.00 | 372.00 |
+| Detected RH, MW | 1796.77 | 1823.48 | 1766.11 |
+| Sum strict-clear site means, MW | 450.33 | 453.50 | 448.97 |
+| Strict-clear detections | 257.00 | 255.00 | 256.00 |
 
-The large v3 failures (B1, B2) fall on other nights; the regression granules
-show them: site 3802 3,127 → 124 MW, site 3804 1,776 → 71 MW.
+V5 pinned share is 3.5% (13/372); split-cloud share is 80% (8/10 detection
+records); multi-source edge share is 0% (0/4). MYC-centred strict frequency is
+46.1% (263/571 passes), median 0.400 (n=188); detection-clears sensitivity is
+53.5% (354/662), median 0.667 (n=229). Source locations use the copy table.
+All 1,343/1,343 granules and 21/21 requested spot cases completed; 67 tests pass.
+Only the same development night was run; no 30-night v5 run exists.
 
-Full counts, fit reasons, regression granules, defaults and open risks are in
-[the v4 development evidence](docs/decisions.md#v4-development-evidence-2026-11-08).
-Machine-readable results are in `outputs/dev_v4/comparison.json` and
-`outputs/dev_v4/regressions.csv`. No 30-night v4 run has been performed.
+[The v5 development evidence](docs/decisions.md#v5-development-evidence-2026-11-08)
+contains the full case table, pair histogram, fit reasons, changed tests and risks.
+Artifacts are in outputs/dev_v5: report.md, comparison.json, case_records.csv,
+case_groups_v4.csv, case_groups.csv, pair_candidates.csv and copies_<tag>.csv.
+Historical v4 evidence remains in decisions.md and outputs/dev_v4.
 
 SNPP has no data in NOAA's bucket after 2026-11-02 15:32 UTC (no night passes
 over sites after 12:51 UTC). v1 outputs are kept in `outputs/v1/`.
@@ -292,9 +307,12 @@ out_dir=OUT_DIR / 'dev_v3')` writes `validation_myc25_<tag>.csv` and
 pairs first within 2 km. Period means pool all deduplicated strict clear
 overpasses, including clear zeros, rather than averaging nightly means.
 The original own-site strict-clear frequency remains. The added
-`det_freq_like_for_like` compares detections at any GFW site within 2 km of a
-matched MYC flare per strict-clear-or-detected satellite pass with MYC
-n_det/n_clear; nearby sites share a pass. Regime counts and regional totals use matched sites
+`det_freq_like_for_like` is the detection-clears sensitivity metric: only source
+group centroids within 2 km of MYC count as detections, over satellite pass groups
+with <10 s consecutive gaps at GFW sites within 2 km. `det_freq_myc_strict` uses
+cloud 0/1 plus the isolated-cloud rule. Nearby sites share a pass. Historical
+outputs without copies use peak positions where available; their group-centroid
+frequencies cannot be reconstructed. Regime counts and regional totals use matched sites
 with at least one clear night; regional MYC totals use those same sites.
 The default reference year is 2025, the latest annual catalog, so a one-night
 2026 comparison is a diagnostic rather than annual validation.
