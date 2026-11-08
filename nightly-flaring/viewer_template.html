@@ -647,7 +647,9 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const tlBox = document.getElementById("timeline");
   const tl = { w: 0, h: 74, padL: 6, padR: 6, top: 6, bot: 18 };
   let tlX = null, brush = null, gBrush = null, tlBars = null, tlHead = null;
-  const nightAt = px => Math.max(0, Math.min(NN - 1, Math.floor((px - tl.padL) / tlX.bandwidth() + 1e-6)));
+  // one night = bar + gap (step); half the gap on each side belongs to the nearest bar
+  const nightAt = px => Math.max(0, Math.min(NN - 1,
+    Math.floor((px - tl.padL + (tlX.step() - tlX.bandwidth()) / 2) / tlX.step())));
   function renderStrip() {
     tl.w = Math.max(strip.getBoundingClientRect().width, 100);
     strip.setAttribute("viewBox", `0 0 ${tl.w} ${tl.h}`);
