@@ -95,6 +95,8 @@ def build_jobs(sites: pd.DataFrame, start: date, end: date) -> list[dict]:
                 }
             )
         print(f"{sat}: {len(jobs)} granule jobs so far")
+    # Oldest granules first across satellites: NODD deletes them first (D49).
+    jobs.sort(key=lambda j: (j["start"], j["satellite"]))
     return jobs
 
 

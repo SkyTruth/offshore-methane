@@ -6,6 +6,134 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 5: v5, 30 nights, backfill decision (2026-11-08)
+
+Code reviewed: commit `783512a`. Evidence: the 30-night v5 run in
+`outputs/v5_30n/` (local nights 2026-10-06 to 11-04, 19,443 granules), the v3
+files of the same nights, `gates_30n.py` output, and live reprocessing of 5
+granules (Opus). Both reviewers recomputed gates 2, 3, 5, 6, 9 and 10 without
+importing `gates_30n.py`; the main-session figures reproduced. Scratch:
+`/private/tmp/nf-review6-gpt61/`, `/private/tmp/nf-review6-opus55/`.
+
+### Verdicts
+
+- **Sol: `BACKFILL: GO`** (8/10 for the scoped NODD backfill). No defect
+  requires fetching and processing backfilled granules again. Gate 9 is
+  recorded as failed on its threshold and gate 7 as reinterpreted. GO permits
+  collecting v5 measurements. It does not certify final site attribution or
+  unbiased annual volumes.
+- **Opus: `BACKFILL: GO`.** No finding requires a change to per-granule cached
+  results. `granule.py` and `nightfire.py` are unchanged since `1d83362`, so
+  all 38,886 cache files come from one code version. Five granules reprocessed
+  live with HEAD match the cache with 0 differing cells (4,074 site rows, 112
+  copies). The oldest backfill nights are at NODD's 91-day deletion edge, which
+  sets the order of work.
+
+### Gates (requested nights only; *checked*)
+
+The table uses the gate script after the S1, S2 and O10 corrections below:
+local nights 2026-10-06 to 11-04 only, ≥ 3 clear passes per geometry for
+gate 7, and split components for gate 9. Before the correction, padding nights
+added 235 v5 and 240 v3 detections.
+
+| Gate | v5 | v3 | Result |
+| --- | --- | --- | --- |
+| 1 Baseline | 4/4 checksums match; own `out_dir` | — | Pass |
+| 2 Coverage | manifest 19,443/19,443; site rows 828,621 with v3's keys; 11,794/11,794 raw detections reconcile with copy groups (sources, RH, clusters, merged copies); SNPP has no NODD SDR after 2026-11-02 15:34 UTC (11-03 to 11-05 skipped and logged) | 828,621 rows; same SNPP gap | Pass. 5 SNPP CMR slices (10-17, 10-22, 10-24 ×2, 10-31) have no job and no log line (O7) |
+| 3 Fits | 0/14,320 accepted copy fits outside 1,200–3,500 K; 0/2,218 two-band fits outside 1,200–2,500 K; 0 band-rule failures; pinned 3.2% (365/11,527) of detections, 0.4% of RH; `pinned:low_t` 109 copies, rejected T 831–1,199 K (median 1,129 K), 0.10% of copy RH; `eliminated:M10` 3 copies, all SNPP | — | Pass |
+| 4 RH tail | 0.43% (63/14,791) of copies: 54 RH75%/peak > 3, 10 cap exclusions, 1 both; 32/63 under cloud class 3; top-20 site-nights 78 copy rows, 0 flagged | — | Pass |
+| 5 Pairs | 0/13,520 groups repeat a scan; independent re-matching reproduces every granule's groups; 0/1,271 edges violate a guard; mean, max and centroid reproduce; 1.17% (17/1,448) of candidates in 1.32–1.5 px; 54 unmerged pairs < 1 px, all ratio ≥ 3; 43 pairs < 2 px with ratio ≥ 10 at different sites; 0 groups ≥ 3; 40 cross-granule pairs passing the D36 guards, 31 at one site | — | Pass |
+| 6 Attribution | same-pass detections at sites < 2 km apart: edge 36.1% (26/72); all detections 34.5% (3,980/11,527); multi-source edge 30.5% (25/82); centroid changes 122/1,271 merged groups, MYC sides with the centroid 73.7% (87/118); MYC flares with ≥ 2 GFW sites switching across passes 51.7% (92/178) | edge 66.8% (131/196); switching 51.1% (92/180) | Pass; switching unchanged (O5) |
+| 7 Edge/nadir | persistent MYC sites detected ≥ 80% at both geometries: mean of copies 1.53 (n = 42, implied H/R 1.94), max 1.60, sum 1.72 | 1.62 (n = 43) | Fail against 0.8–1.25; flame-shape model reported as a diagnostic (D48) |
+| 8 Cross-satellite | > 2× differences: N20/N21 29.7% (n = 1,598), N20/SNPP 21.7% (1,327), N21/SNPP 24.4% (1,292) | 30.3% (1,606), 21.9% (1,344), 25.1% (1,297) | Pass on one definition; the 0.2–0.7-point differences are within sampling noise |
+| 9 Splits | components 0.75% (87/11,527); affected records 1.22% (141/11,527), 47% under non-isolated cloud vs 32% of all detections | — | Pass counted as components (the gate's wording); fail counted as records |
+| 10 Totals | detections 11,527 (−1.4%); detected RH 60,146 MW (−19.9%); strict-clear RH 48,968 MW (−22.1%); sum of site means 759 MW, 8.80 BCM/yr (−19.6%); dedupe loses 0 | 11,695; 75,085 MW; 62,895 MW; 944 MW, 10.95 BCM/yr | Pass after investigation |
+| 11 MYC | log r 0.513 (n = 363); median ratio 0.630; MYC-centred strict 0.392 and detection-clears 0.514 (n = 356); detections never exceed clear passes (0/7,637 sites, 3 definitions) | 0.506 (365); 0.663 | Pass |
+
+### RH change, v3 → v5 (Opus; Sol confirms the partition totals)
+
+Matched on satellite, granule and site, all records including padding nights
+(−15,631 MW, −20.4%):
+
+| Class | Records | ΔRH (MW) | Reading |
+| --- | --- | --- | --- |
+| v3 fit now forbidden (band set, < 1,200 K, two-band outside 1,200–2,500 K) | 330 | −5,917 | v3 defect corrected (site 3802: 3,126.9 → 114.7 MW, M7+M8 at 916 K) |
+| v3 detection absent in v5 | 248 | −5,180 | 139 (3,783 MW) now detected at a site < 2 km in the same pass, 128 of them double-counted in v3; 87 (1,134 MW) moved ≥ 2 km; 22 (263 MW) unassigned at the 2 km radius (O3) |
+| RH75% scope (fit unchanged, Δ > 1%) | 200 | −3,010 | v3 summed remote pixels (3804: 1,775.9 → 71.1 MW at the same 1,616 K fit) |
+| Bow-tie copy mean (D38) | 1,130 | −1,981 | median v5/v3 0.91 |
+| Split records (D35) | 51 | −180 | |
+| Other, fit changed | 25 | −83 | |
+| New in v5 | 75 | +719 | 8 of the 10 largest from split components |
+| Unchanged | 9,951 | +2 | |
+
+v3 defects account for −12,710 MW (81%). Max of copies in place of the mean
+gives −18.0%.
+
+### Mean, max or sum of copies (D38)
+
+Opus's within-site test at the swath edge, comparing passes with two copies to
+passes with one, at sites with ≥ 3 of each: mean 1.21 (n = 51 sites, IQR
+1.01–1.38), max 1.29, sum 2.41; at zenith ≥ 60°, 1.12, 1.22, 2.25 (n = 43).
+Each copy carries the whole flare, so the sum is ruled out. Merged copies
+agree: RH ratio median 1.26 (IQR 1.12–1.50, n = 1,271). EOG's practice is
+nearer max (rs2019 drops adjacent-scan duplicates under 0.5 px; rs2021 §2.4
+keeps the maximum-M10 detection), and the 0.0116 slope was calibrated on it.
+Both reviewers keep the mean; Opus recommends publishing max beside it.
+
+### Findings
+
+| ID | Finding | Location | Evidence | Blocker |
+| --- | --- | --- | --- | --- |
+| S1 | Gate metrics included padding nights | `gates_30n.py` `load` | 235 v5 / 240 v3 detections outside the interval; RH change −20.36% → −19.90% | No; fixed |
+| S2 | Gate 7 rate subsets admitted one clear pass per geometry | `gates_30n.py` `gate7` | minimum 1 among 42 sites | No; fixed (≥ 3) |
+| O9 | D48 compared 50–70° zenith with exactly 0°; with H/R free the model fits 1.0–2.5 | D48 | zone means give 1.36 for H/R 1.6; observed 1.52 implies H/R 1.9; edge T +3% (×1.12 via T⁴, n = 42) | No; D48 corrected |
+| O10/S3 | Gate 9 counted records, not components; cross-granule list lacked the ratio guard and scan-boundary check | `gates_30n.py` | 143 records vs 88 components; 3/43 pairs ratio ≥ 3 | No; fixed (gate 6 strongest-copy site uses all sites, 2/1,271 groups differ; open) |
+| O1/S4 (P5) | Weak adjacent-scan sample under a bright flare becomes a neighbouring site's only source | `granule.py:186` | 43 pairs < 2 px, ratio ≥ 10, different sites; 35 strict-clear detections at 24 sites, 57 MW; live: 0.43 MW at 3780 in the halo of 98.9 MW at 3779 | No; drop from the copy table |
+| O2 (P7) | Copies on either side of a granule boundary never merge | `granule.py:327`, `pipeline.py:211` | 40 guarded pairs, 31 same site (dedupe keeps one); 3 flares at two sites: 4279/4281 50.5 + 66.7 MW (live-confirmed, 0.38 px), 4583/4589 26.3 + 29.6, 939/941 1.5 + 1.1 | No |
+| O3 | The 2 km radius on pair centroids drops flares a single copy would assign | `granule.py:376` | 22 v3 detections (263 MW) lost; 14/1,271 groups unassigned although the strongest copy is within 2 km; 750 unassigned groups (4,261 MW, 7.0% of assigned RH) at 2.0–2.5 km, no drop in counts at the radius | No; report 2.5 km sensitivity offline |
+| O4 (P4) | Sub-pixel copies with ratio ≥ 3 stay separate | `granule.py:327` | 54 pairs < 1 px; 29 same-site add 25 MW | No |
+| O5/S5 | Cross-pass site alternation at MYC flares with ≥ 2 GFW sites is unchanged | `granule.py:362` | 52.8% (94/178) vs 52.2% (94/180) including padding nights; multi-site passes 343 → 125 | No; source-centred products from copies |
+| O6 | `eliminated:M10` drops the trigger band | `nightfire.py:192` | 3 SNPP copies; site 3779: 35.0 MW vs partner 98.9 MW, M10 ratio implies about 53 MW | No; 3 granules listed by `fit_flag` |
+| O7 | Coverage holes are silent | `pipeline.py:77,83` | 5 SNPP slices (15 site-slices) with no job; manifest lists only built jobs | No |
+| O8/S7 | Split secondaries are often clouded | `granule.py:199–210` | 88 components, 56 across two sites; secondary cloud 2/3 in 50/99; secondary RH 1,030 MW (1.7%); all 99 secondaries pass the saddle rule (≤ 0.49) at 2.3–12.5 km | No; drop secondaries offline |
+| S6 (P1) | MYC strict frequency uses site-pixel cloud and the isolated-cloud clause | `validate_myc25.py:119–128` | strict 7,905/18,238; detection-clears 11,127/21,460 (n = 356) | No |
+| S8 (P6) | Site peak coordinates and peak distance describe different locations after merging | `granule.py:378–385, 430–431` | 122/1,271 groups change site vs the strongest copy | No |
+| O11 | The copy table has no band radiances, noise or background, so any fit-policy change needs the granule, which NODD deletes after about 91 days | `granule.py:601–632` | fit policy changed in v3, v4 and v5 | No result change; cheap only before backfill |
+| O12 | M10-only candidates leave no record | `granule.py:522` | 1/93 candidate peaks near sites in 5 live granules | No |
+| O13 | Jobs ran per satellite, so NOAA-21's oldest granules started last | `pipeline.py:56, 87` | 30 nights ≈ 19,443 jobs in about 105 min; the backfill needs about 37,000 | No; fixed (D49) |
+
+### Required before the backfill (merged)
+
+1. Protect the oldest nights: warm the CMR cache for the backfill dates in
+   parallel (D47), and run oldest granules first (D49, done).
+2. End the post-11-04 segment at least 3 days before the run date (CMR
+   responses under 3 days old are re-queried; coverage holes are silent, O7).
+3. Use a separate `out_dir` per segment. When concatenating, drop duplicate
+   (satellite, granule) rows at the UTC 2026-10-06 and 11-05 boundaries.
+4. Keep gate 9 recorded as failed counted as records and gate 7 as failed
+   against 0.8–1.25 (Sol).
+
+Recommended while NODD still holds the data (Opus): add per-copy band
+radiances, noise and M12/M13 background for the peak and its same-scan 3×3
+neighbours (O11), and log coverage holes in the run summary (O7).
+
+### Non-blocking work (merged order)
+
+1. Fix remaining `gates_30n.py` definitions before reuse on the backfill
+   (gate 6 in-swath site list).
+2. Weak adjacent-scan copies (O1): drop copies within 2 px of one ≥ 10×
+   brighter, or extend the glow window across the scan boundary; rebuild site
+   records.
+3. Cross-granule merging (O2) across adjoining runs, with the D36 guards.
+4. Association radius sensitivity at 2.0 and 2.5 km (O3).
+5. Offline view-angle normalisation from `peak_col` (D48); publish max of
+   copies beside the mean.
+6. Count split components and drop secondaries under cloud class 2/3 (O8).
+7. Attribution and record-field fixes from the tables (O4, O5, P1, P6, S8).
+8. Decide whether elimination may drop M10 (O6); if not, reprocess the 3
+   listed granules while NODD holds them.
+9. A fully additive RH decomposition in the gate script.
+
 ## Review 4: v5, development night and spot granules (2026-11-08)
 
 Code reviewed: commit `c40795c`. Evidence: the 2026-10-29 development night,

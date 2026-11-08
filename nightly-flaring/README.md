@@ -23,6 +23,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `nightfire.py` | Physics: Planck function, zone thresholds, Planck fit, pixel area, radiant heat, solar zenith. |
 | `nodd.py` | NOAA bucket listing, granule index, HTTP byte-range file object for h5py. |
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
+| `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
 | `build_viewer.py` | Builds `outputs/flaring_viewer.html`, a self-contained map viewer (data and basemap inlined). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
@@ -247,6 +248,7 @@ VIIRS active fire 59% (822/1400).
 | v1 | 2026-10-29 – 11-04 (7) | 4,551 | 32 GB | 21 min | 1,804 | 506 |
 | v1 | 2026-10-06 – 11-04 (30) | 19,443 | 143 GB | 71 min for 23 new nights | 7,691 | 758 |
 | v3 | 2026-10-06 – 11-04 (30) | 19,443 | 167 GB | 105 min | 4,060 clear + 1,634 lit under cloud | 504 clear (558 incl. cloud) |
+| v5 | 2026-10-06 – 11-04 (30) | 19,443 | about 167 GB | about 105 min (3 attempts, D47) | 3,976 clear + 1,607 lit under cloud | 492 clear (548 incl. cloud) |
 
 
 Dev night 2026-10-29, same local-night/SZA/dedupe scope (v3 = final v3):
@@ -263,7 +265,14 @@ records); multi-source edge share is 0% (0/4). MYC-centred strict frequency is
 46.1% (263/571 passes), median 0.400 (n=188); detection-clears sensitivity is
 53.5% (354/662), median 0.667 (n=229). Source locations use the copy table.
 All 1,343/1,343 granules and 21/21 requested spot cases completed; 67 tests pass.
-Only the same development night was run; no 30-night v5 run exists.
+
+The 30-night v5 run is in `outputs/v5_30n/`; `gates_30n.py` writes its gate
+results to `gates.json` and `gates/`. Against v3 over the same local nights:
+detections 11,527 vs 11,695 (−1.4%), detected RH 60,146 vs 75,085 MW (−19.9%),
+sum of site means 759 vs 944 MW (8.80 vs 10.95 BCM/yr). 81% of the RH change
+corrects v3 defects (forbidden fits, RH75% summing remote pixels, one flare
+counted at two sites); the mean of bow-tie copies accounts for −1,981 MW.
+Council review 5 gave `BACKFILL: GO` from both reviewers.
 
 [The v5 development evidence](docs/decisions.md#v5-development-evidence-2026-11-08)
 contains the full case table, pair histogram, fit reasons, changed tests and risks.
@@ -279,23 +288,26 @@ regime. v1 matched every GFW site within 1 km of a MYC site (many-to-one); v3
 matches one-to-one within 2 km and uses the strict cloud rule, so the columns
 are not strictly comparable.
 
-| Regime | v1, 7 nights | v1, 30 nights | v3, 30 nights |
-| --- | --- | --- | --- |
-| persistent | 71% (235/331) | 85% (283/332) | 79% (283/356) |
-| intermittent | 31% (54/174) | 50% (88/175) | 42% (71/171) |
-| sporadic | 11% (8/72) | 18% (13/72) | 16% (11/67) |
-| undetected | 2.3% (3/130) | 3.8% (5/131) | 2.5% (3/118) |
+| Regime | v1, 7 nights | v1, 30 nights | v3, 30 nights | v5, 30 nights |
+| --- | --- | --- | --- | --- |
+| persistent | 71% (235/331) | 85% (283/332) | 79% (283/356) | 79% (282/356) |
+| intermittent | 31% (54/174) | 50% (88/175) | 42% (71/171) | 41% (70/171) |
+| sporadic | 11% (8/72) | 18% (13/72) | 16% (11/67) | 16% (11/67) |
+| undetected | 2.3% (3/130) | 3.8% (5/131) | 2.5% (3/118) | 2.5% (3/118) |
 
 Annualised volume vs MYC25Q4 2025 at sites positive in both: v1 log-log r =
 0.42 (n = 297, 7 nights) and 0.52 (n = 384, 30 nights), median ratio 0.83 (mean
 of nightly means); v3 r = 0.51 (n = 365), median ratio 0.66 (pooled clear-sky
-mean). Flaring sites with no MYC flare nearby: v1 369 (1 km), v3 136 (2 km).
+mean); v5 r = 0.51 (n = 363), median ratio 0.63. Flaring sites with no MYC
+flare nearby: v1 369 (1 km), v3 136 (2 km), v5 126 (2 km).
 
 ## Reviews and decisions
 
 - [docs/reviews.md](docs/reviews.md): council reviews. Review 1 covers the
   7-night v1 run and the v1 → v3 comparison; review 2 (2026-11-08) covers the
-  30-night v3 run, with 12 new bugs (B1–B12) and the agreed fix order.
+  30-night v3 run, with 12 new bugs (B1–B12) and the agreed fix order;
+  reviews 3 and 4 cover v4 and v5 on the development night; review 5 covers
+  the 30-night v5 run against gates 1–11 and the backfill decision.
 - [docs/decisions.md](docs/decisions.md): every local choice and departure from
   the papers, with the reason and evidence, and which version introduced it.
 

@@ -3,8 +3,10 @@
 
 Compares the run with the v3 30-night files at the top of ``outputs/`` and
 writes ``gates.json``, ``gates.md`` and per-gate lists under ``<run>/gates/``.
-Network-free. Detection sets follow ``site_nights``: deduplicate, then keep
-solar zenith >= 97 degrees.
+Network-free. Detection sets follow ``site_nights``: deduplicate, keep solar
+zenith >= 97 degrees, then keep local nights inside the tag's interval (review
+5, S1: padding nights had been counted). Raw records stay unfiltered for the
+coverage and dedupe checks.
 
 Definitions calibrated on v3 (they reproduce the review-2/3 baselines):
 - gate 6 pairs: two sites < 2 km apart, both detected in one granule; edge by
@@ -29,6 +31,9 @@ import pipeline as p
 import validate_myc25 as v
 
 TAG = "2026-10-06_2026-11-04"
+NADIR_ZENITH = (0.0, 36.0)  # satellite zenith span of columns 1,008-2,191
+EDGE_ZENITH = (53.0, 70.0)  # span of columns < 640 or >= 2,560 (review 5, O9)
+MIN_GEOMETRY_PASSES = 3  # clear passes per geometry for rate subsets (S2)
 V3_ROWS = 828_621
 NADIR_COLS = (1008, 2192)
 EDGE_COLS = (640, 2560)
@@ -65,6 +70,8 @@ def load(folder: Path, tag: str, sites: pd.DataFrame) -> dict:
     local = pd.to_datetime(dd.time_utc) + pd.to_timedelta(lon / 15, "h")
     dd["night"] = (local - pd.Timedelta(hours=12)).dt.date.astype(str)
     dd["clear"] = p.strict_clear(dd)
+    start, end = tag.split("_")
+    dd = dd[(dd.night >= start) & (dd.night <= end)].copy()
     return dict(over=over, dd=dd, det=dd[dd.detected].copy())
 
 
@@ -319,7 +326,11 @@ def candidate_pairs(copies: pd.DataFrame, max_px: float = 3.0) -> pd.DataFrame:
 
 
 def cross_granule_pairs(copies: pd.DataFrame) -> pd.DataFrame:
-    """Copies from consecutive granules of one satellite that would pair."""
+    """Copies across consecutive granules of one satellite that would pair.
+
+    Applies the D36 guards (|dcol| <= 1, < 1.5 px, RH ratio < 3) and requires
+    one copy in scan 0 and the other in scan >= 46 of the earlier granule.
+    """
     rows = []
     t = pd.to_datetime(copies.time_utc)
     for sat, f in copies.assign(_t=t).groupby("satellite"):
@@ -334,7 +345,9 @@ def cross_granule_pairs(copies: pd.DataFrame) -> pd.DataFrame:
                 continue
             d = float(nf.haversine_m(a.peak_lat, a.peak_lon, b.peak_lat, b.peak_lon))
             px = d / np.sqrt(min(a.footprint_m2, b.footprint_m2))
-            if px >= 1.5:
+            ratio = max(a.rh75_mw, b.rh75_mw) / min(a.rh75_mw, b.rh75_mw)
+            first, second = (a, b) if a.granule < b.granule else (b, a)
+            if px >= 1.5 or ratio >= 3 or second.scan != 0 or first.scan < 46:
                 continue
             rows.append(
                 dict(
@@ -346,6 +359,7 @@ def cross_granule_pairs(copies: pd.DataFrame) -> pd.DataFrame:
                     distance_px=px,
                     rh_a=a.rh75_mw,
                     rh_b=b.rh75_mw,
+                    rh_ratio=ratio,
                     site_a=a.assigned_site,
                     site_b=b.assigned_site,
                 )
@@ -593,6 +607,26 @@ def flame_area_ratio(zenith_deg: float, h_over_r: float = 1.6) -> float:
     return float(np.sqrt((h_over_r**2 + 1 - (h_over_r**2 - 1) * c) / 2))
 
 
+def flame_zone_ratio(h_over_r: float) -> float:
+    """Edge-zone/nadir-zone mean apparent area, uniform in zenith per zone."""
+
+    def zone(lo, hi):
+        return np.mean(
+            [flame_area_ratio(z, h_over_r) for z in np.linspace(lo, hi, 181)]
+        )
+
+    return float(zone(*EDGE_ZENITH) / zone(*NADIR_ZENITH))
+
+
+def implied_h_over_r(ratio: float) -> float | None:
+    """H/R at which the zone-mean flame model equals an observed ratio."""
+    from scipy.optimize import brentq
+
+    if ratio is None or not 1.0 < ratio < flame_zone_ratio(6.0):
+        return None
+    return float(brentq(lambda h: flame_zone_ratio(h) - ratio, 1.0, 6.0))
+
+
 def gate7(
     new: dict, old: dict, copies: pd.DataFrame, run: Path, tag: str, lists: dict
 ) -> dict:
@@ -601,13 +635,17 @@ def gate7(
     Edge detections are conditioned on detection, and small flares escape
     detection at the edge, so the all-detection ratio is biased upward. Sites
     detected on most clear passes at both geometries limit that bias. The
-    flame-shape model (H/R 1.6) predicts about 1.47 at 60 degrees zenith.
+    flame-shape model averaged over each zone gives 1.36 for H/R 1.6 (review
+    5, O9); with H/R free (published range 1-4) it fits most ratios, so the
+    implied H/R is reported instead of a pass band.
     """
     val = pd.read_csv(run / f"validation_myc25_{tag}.csv")
     pers = set(val.loc[val.myc_regime == "persistent", "site_id"])
     out = dict(
         persistent_sites=len(pers),
-        flame_model_h_r_1p6={z: flame_area_ratio(z) for z in (10, 50, 60, 70)},
+        flame_zone_ratio={
+            h: flame_zone_ratio(h) for h in (1.0, 1.4, 1.6, 1.8, 2.0, 2.5)
+        },
     )
 
     def ratios(d, col, rh_cols):
@@ -629,12 +667,17 @@ def gate7(
                 )
                 .unstack()
             )
+            enough = (s[("n", "edge")] >= MIN_GEOMETRY_PASSES) & (
+                s[("n", "nadir")] >= MIN_GEOMETRY_PASSES
+            )
             subsets = {
                 "all_detected": s[("mean_det", "edge")].notna()
                 & s[("mean_det", "nadir")].notna(),
-                "rate_ge_0.5": (s[("rate", "edge")] >= 0.5)
+                "rate_ge_0.5": enough
+                & (s[("rate", "edge")] >= 0.5)
                 & (s[("rate", "nadir")] >= 0.5),
-                "rate_ge_0.8": (s[("rate", "edge")] >= 0.8)
+                "rate_ge_0.8": enough
+                & (s[("rate", "edge")] >= 0.8)
                 & (s[("rate", "nadir")] >= 0.8),
             }
             res[rh] = {}
@@ -646,6 +689,9 @@ def gate7(
                 res[rh][name] = dict(
                     n_sites=len(r),
                     median=float(r.median()) if len(r) else None,
+                    implied_h_over_r=implied_h_over_r(float(r.median()))
+                    if len(r)
+                    else None,
                     p25=float(r.quantile(0.25)) if len(r) else None,
                     p75=float(r.quantile(0.75)) if len(r) else None,
                 )
@@ -692,12 +738,21 @@ def gate8(d: pd.DataFrame) -> dict:
 
 
 def gate9(det: pd.DataFrame) -> dict:
+    """Split components (the gate's unit) and affected records (review 5, O10)."""
     split = det[det.n_components_split > 0]
+    components = {
+        (r.satellite, r.granule, c)
+        for r in split.itertuples()
+        for c in str(r.split_component_ids).split(",")
+        if c and c != "nan"
+    }
     return dict(
         detections=len(det),
+        split_components=len(components),
+        component_share=len(components) / len(det),
         split_records=len(split),
-        share=len(split) / len(det),
-        cloud_share=float((~split.clear).mean()) if len(split) else None,
+        record_share=len(split) / len(det),
+        record_cloud_share=float((~split.clear).mean()) if len(split) else None,
     )
 
 

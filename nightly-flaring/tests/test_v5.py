@@ -263,3 +263,41 @@ def test_cmr_cache(monkeypatch, tmp_path):
     gc.cmr_granules("VJ203MOD", recent, tmp_path)
     gc.cmr_granules("VJ203MOD", recent, tmp_path)
     assert len(calls) == 6 and not (tmp_path / "VJ203MOD" / f"{recent}.json").exists()
+
+
+def test_build_jobs_oldest_first(monkeypatch):
+    from datetime import date, datetime, timedelta
+
+    import pipeline as p
+
+    sites = pd.DataFrame(dict(site_id=[1], lat=[0.0], lon=[0.0]))
+    base = datetime(2026, 11, 3, 1)
+    offsets = {"SNPP": 30, "NOAA-20": 20, "NOAA-21": 10}
+
+    def slices(sites_, granules):
+        return pd.DataFrame(
+            dict(
+                slice_start=[pd.Timestamp("2026-11-03T00:00Z")],
+                slice_end=[pd.Timestamp("2026-11-04T23:59Z")],
+                site_ids=["1"],
+            )
+        )
+
+    def index(sat, day, session):
+        out = {}
+        for k in (0, 60):
+            start = base + timedelta(minutes=offsets[sat] + k)
+            gid = start.strftime("d%Y%m%d_t%H%M%S0")
+            out[gid] = dict(
+                start=start,
+                end=start + timedelta(seconds=86),
+                **{r: "x" for r in p.REQUIRED},
+            )
+        return out
+
+    monkeypatch.setattr(p.granule_coverage, "cmr_granules", lambda *a: [{}])
+    monkeypatch.setattr(p.granule_coverage, "site_slices", slices)
+    monkeypatch.setattr(p.nodd, "granule_index", index)
+    jobs = p.build_jobs(sites, date(2026, 11, 3), date(2026, 11, 3))
+    starts = [j["start"] for j in jobs]
+    assert starts == sorted(starts) and jobs[0]["satellite"] == "NOAA-21"

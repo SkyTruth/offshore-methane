@@ -606,31 +606,53 @@ view-angle effects and non-upstream classification remain deferred. The
   `test_get_with_retries`, `test_cmr_cache`.
 - **Status:** active (v5).
 
-### D48 Gate 7 reference: flame shape, not 1 (v5)
-- **Choice:** the edge/nadir RH gate (review 4, gate 7) is judged against the
-  flame-shape expectation of about 1.4–1.5, using persistent MYC sites
-  detected on ≥ 50% and ≥ 80% of strict-clear passes at both geometries. The
-  all-detection ratio is kept for reference. No view-angle normalisation is
-  applied to RH.
-- **Alternatives:** the 0.8–1.25 band set in review 4; the side-view source
-  adjustment of Elvidge et al. 2016 §3.6 (ellipticity per flare, 1.6 when
-  detections are sparse).
-- **Why:** Elvidge et al. 2016 §3.6 report higher apparent source area at
-  high satellite zenith angle, with stable temperature, because flames are
-  taller than wide (H/R 1–4, mean 1.6). Their equation 3 gives an apparent
-  area of 1.02, 1.38, 1.47 and 1.54 times nadir at 10°, 50°, 60° and 70°
-  zenith for H/R 1.6. The operational calibration (Zhizhin et al. 2025, John
-  Zink tests at nadir, medium and side views) applies no view-angle term and
-  treats geometry as residual noise, so MYC volumes carry the same effect.
-  The all-detection ratio is also biased upward by selection: detection per
-  clear pass is 0.29 at the edge and 0.39 at nadir (v3, persistent sites).
-- **Evidence (v3 30 nights, persistent MYC sites, site-pixel column):**
-  all-detection median 1.59 (n = 229 sites); detected on ≥ 50% of clear
-  passes at both geometries 1.62 (n = 92, IQR 1.40–1.89); ≥ 80% 1.59 (n = 44,
-  IQR 1.41–1.81). RH75% pixel counts barely differ by geometry (mean 1.24 edge
-  vs 1.09 nadir copies, v5 dev night), so the excess sits in single-pixel RH,
-  not in pixel summing. The v5 30-night figures are in reviews.md, review 5.
-- **Status:** active (v5); view-angle normalisation stays deferred.
+### D48 Gate 7: flame-shape diagnostic, not a 0.8–1.25 band (v5)
+- **Choice:** the edge/nadir RH check (review 4, gate 7) is reported as a
+  diagnostic against the flame-shape model of Elvidge et al. 2016 §3.6,
+  averaged over each geometry zone, with the H/R implied by the observed
+  ratio. It is computed at persistent MYC sites detected on ≥ 50% and ≥ 80%
+  of strict-clear passes at both geometries, with ≥ 3 clear passes per
+  geometry. The original 0.8–1.25 band stays on record as failed. No
+  view-angle normalisation is applied to RH.
+- **Alternatives:** the 0.8–1.25 band of review 4 (contradicts en2016 §3.6,
+  rs2021 §2.4 and en2025 §4.2.2); a fixed 1.4–1.5 reference (the first
+  version of this entry, which compared 50–70° zenith with exactly 0°);
+  side-view source adjustment (en2016 §3.6, rs2021 §2.4); an offline
+  view-angle normalisation from `peak_col` (deferred; deterministic from the
+  cached columns).
+- **Why:** flames are taller than wide (H/R 1–4, mean 1.6), so apparent area
+  grows toward the side view at stable temperature (en2016 §3.6). The
+  operational calibration (en2025, John Zink tests at nadir, medium and side
+  views) has no view-angle term, so MYC volumes carry the effect. The gate's
+  nadir zone (columns 1,008–2,191) spans 0–36° zenith and the edge zone 53–70°.
+  Averaged over the zones, the model gives 1.25, 1.36, 1.47, 1.56 and 1.78
+  for H/R 1.4, 1.6, 1.8, 2.0 and 2.5 (review 5, O9). With H/R free, the model
+  fits ratios from 1.0 to about 2.5, so it cannot serve as a pass band.
+- **Evidence (30 nights, requested nights only, site-pixel column):** v5 mean
+  of copies 1.53 (n = 42 sites at ≥ 80%; implied H/R 1.94), max 1.60, sum
+  1.72; v3 1.62 (n = 43). The excess persists in single-source records without
+  merged copies, 1.49 (n = 42, Opus). Edge temperature is 3% above nadir
+  (1,789 vs 1,729 K, n = 42), which alone gives ×1.12 through T⁴; en2016
+  reports stable temperature, so part of the excess has another cause
+  (candidate: the uncorrected atmospheric path, 2× at 61°). Detection per
+  clear pass is 0.29 at the edge and 0.39 at nadir (v3), which biases the
+  all-detection ratio upward. RH75% pixel counts barely differ by geometry
+  (1.24 edge vs 1.09 nadir copies, v5 dev night).
+- **Status:** active (v5); view-angle normalisation deferred. Review 5 accepted
+  the flame-shape basis (both reviewers) and the corrected zone-mean numbers
+  (Opus).
+
+### D49 Process the oldest granules first (v5)
+- **Choice:** `build_jobs` sorts jobs by granule start time across satellites,
+  so a run processes the oldest nights first.
+- **Alternatives:** per-satellite order (SNPP, NOAA-20, NOAA-21), as before;
+  running the first nights as a separate invocation.
+- **Why:** NODD keeps about 91 days; on 2026-11-08 the oldest backfill night
+  (2026-08-09) is at the deletion edge. With per-satellite order, NOAA-21's
+  oldest granules would start hours after launch (review 5, O13).
+- **Evidence:** test `test_build_jobs_oldest_first`. Results do not depend on
+  job order.
+- **Status:** active (v5).
 
 ## V5 development evidence (2026-11-08)
 
