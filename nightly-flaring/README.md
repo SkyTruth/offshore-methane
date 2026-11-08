@@ -32,7 +32,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `build_viewer.py` | Builds the self-contained viewer (data, basemap and explainer inlined); `publish_pages` deploys it to GitHub Pages (D51). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
-| `docs/` | `explainer.md` and its figures (`explainer/`, from `make_figures.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
+| `docs/` | `explainer.md` and its figures (`explainer/`: charts from `make_figures.py`, real VIIRS image chips from `make_chips.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
 | `outputs/` | Generated CSVs and the per-granule cache (git-ignored). |
 
 ## Running

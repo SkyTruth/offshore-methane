@@ -85,6 +85,20 @@ the flare's location.
 
 *Figure 5. One scan line through a flare (illustration with typical values).*
 
+### What the satellite records
+
+These are real images of the 1.6 µm band around one platform. Each square is
+one pixel, drawn at its true size and position on the sea.
+
+![Three passes over one platform: flare, no flare, flare under cloud](explainer/chips_states.png)
+
+*Figure 6. Three passes over site 928 in the Bay of Campeche, Mexico. Left: a
+7.2 MW flare on a clear night; cloud flags nearby (hatched) do not cover the
+site's pixel. Middle: a clear night with no flare; the site's pixel reads like
+the sea around it, and the pass counts as zero. Right: the flare glowing
+through cloud. It shows the flare was lit, but the dimmed value is not
+used.*
+
 ### Reading temperature and size from the colours
 
 A hot body's spectrum has a fixed shape for each temperature: hotter flames
@@ -102,7 +116,7 @@ repeated.
 
 ![Fitting a flame temperature and size to six infrared bands](explainer/fit.svg)
 
-*Figure 6. A real measurement: NOAA-20 over site 3802 on 10 October 2026. Five
+*Figure 7. A real measurement: NOAA-20 over site 3802 on 10 October 2026. Five
 bands agree on a 1,699 K flame; M7 is set aside.*
 
 ### Radiant heat
@@ -117,7 +131,7 @@ RH75%.
 
 ![Radiant heat from temperature and flame area, with typical values](explainer/heat.svg)
 
-*Figure 7. The radiant-heat formula and typical values over 11,527
+*Figure 8. The radiant-heat formula and typical values over 11,527
 detections.*
 
 ### One flare, recorded once, at one site
@@ -131,7 +145,15 @@ such copies and averages them into one measurement.
 
 ![Bow-tie overlap: one flare recorded in two consecutive scans](explainer/bowtie.svg)
 
-*Figure 8. Consecutive scans overlap toward the edges of the swath.*
+*Figure 9. Consecutive scans overlap toward the edges of the swath.*
+
+![A real bow-tie pair: one flare recorded in two scans](explainer/chips_bowtie.png)
+
+*Figure 10. A real pair at the swath edge: NOAA-20 over site 3802, off Saudi
+Arabia, 10 October, the pass whose spectrum is in Figure 7. As recorded (left), the flare appears in two scans, eight
+rows apart, at 105 and 124 MW. On the ground (right) the two copies land 0.48
+pixel apart, and the pipeline averages them to 115 MW. The flare at the top of
+the strip belongs to site 3779; its other copy is in the previous image.*
 
 **Neighbouring platforms.** Half of the sites (3,858 of 7,637) have another
 site within 2 km, while an edge pixel is 1.6 km wide. A flare's glow can light
@@ -140,8 +162,15 @@ assigns it to the site nearest its centre, within 2 km.
 
 ![Assigning one flare to one of two nearby platforms](explainer/neighbours.svg)
 
-*Figure 9. The same hot patch, counted pixel by pixel (left) and as one
+*Figure 11. The same hot patch, counted pixel by pixel (left) and as one
 source (right).*
+
+![A crowded field off Abu Dhabi](explainer/chips_field.png)
+
+*Figure 12. NOAA-20 over a field off Abu Dhabi, 4 November: 112 GFW sites in
+a 22 km square, seven of them flaring on this pass, 72 MW in total. Each hot
+patch is given to the nearest site; the other sites read zero for this
+pass.*
 
 ### From passes to nights to a yearly rate
 
@@ -161,7 +190,7 @@ the mean over nights that had a clear pass.
 
 ![Thirty nights of passes over one Bay of Campeche site](explainer/nights.svg)
 
-*Figure 10. Every pass over site 928 (Bay of Campeche, Mexico) for 30 nights.
+*Figure 13. Every pass over site 928 (Bay of Campeche, Mexico) for 30 nights.
 Hover a dot in the app to see its value.*
 
 ### Converting heat into gas
@@ -179,7 +208,7 @@ kept the average seen over the nights observed.
 
 ![Converting mean radiant heat into an annual gas volume](explainer/volume.svg)
 
-*Figure 11. The conversion scale, with the 492 sites seen flaring on clear
+*Figure 14. The conversion scale, with the 492 sites seen flaring on clear
 nights. The median flaring site averages 0.29 MW, about 3.4 million m³ a
 year.*
 
@@ -192,7 +221,7 @@ have a small flame.
 
 ![How large detected flares are](explainer/sizes.svg)
 
-*Figure 12. Radiant heat of every detection. The drop below about 0.3 MW comes
+*Figure 15. Radiant heat of every detection. The drop below about 0.3 MW comes
 from the sensor's limit.*
 
 **One pass is a sample.** Flames flicker and wind bends them, and the
@@ -203,7 +232,15 @@ weeks are much steadier than any single night.
 
 ![How two satellites' readings of the same flare compare](explainer/satellites.svg)
 
-*Figure 13. NOAA-20 against NOAA-21 for the same site and night.*
+*Figure 16. NOAA-20 against NOAA-21 for the same site and night.*
+
+![One night, four passes over one flare](explainer/chips_night.png)
+
+*Figure 17. Four passes over site 928 on the night of 1 November, 100
+minutes apart from first to last. Edge pixels (first and last panels) are
+about twice as wide as nadir pixels. The flare reads between 1.0 and 10.1 MW;
+at column 53 its light is spread over one large pixel and barely clears the
+background. The night's value is the mean of the four.*
 
 **Viewing angle changes the reading.** Flames are taller than they are wide,
 so a satellite looking from the side sees more flame than one looking
@@ -214,7 +251,7 @@ passes.
 
 ![Flames look larger from the side than from above](explainer/viewangle.svg)
 
-*Figure 14. Apparent flame area against viewing angle, for flames 1, 1.6 and 2
+*Figure 18. Apparent flame area against viewing angle, for flames 1, 1.6 and 2
 times taller than wide (Elvidge et al. 2016).*
 
 **Clouds hide flares.** Cloudy passes are left out, so a site under cloud for
@@ -247,7 +284,7 @@ lists.
 
 ![Site volumes from this pipeline against EOG's 2025 annual catalog](explainer/validation.svg)
 
-*Figure 15. Each dot is one site, matched to the nearest EOG flare within
+*Figure 19. Each dot is one site, matched to the nearest EOG flare within
 2 km.*
 
 **The record starts in August 2026.** The free NOAA data bucket keeps about 91
@@ -291,7 +328,7 @@ removes errors in v3's handling.
 
 ![Where the 20% drop in radiant heat from v3 to v5 comes from](explainer/waterfall.svg)
 
-*Figure 16. Radiant heat summed over all detections, v3 to v5, by cause.*
+*Figure 20. Radiant heat summed over all detections, v3 to v5, by cause.*
 
 ### A. Scope: where and when we look
 
@@ -356,7 +393,7 @@ source, applies the glow test, and assigns the source to one site by its
 centre. *Effect:* glow detections fell below 1%. From v3 to v5 the
 source-centre assignment removed a further 3,783 MW of double counting, and
 same-pass detections at two sites under 2 km apart fell from 196 to 72 pairs
-(Figure 9).
+(Figure 11).
 
 **3. Physical limits on the temperature fit.** A fit that uses only the two
 shortest bands (M7 and M8) can match them with a cool, very large "flame",
@@ -371,7 +408,7 @@ pass fell from 3,127 MW to 115 MW. Fits replaced by the standard estimate are
 
 ![A fit that used the wrong bands, and the corrected fit](explainer/fitguard.svg)
 
-*Figure 17. Site 3802: the v3 fit (dashed) matches M7 and M8 but overshoots
+*Figure 21. Site 3802: the v3 fit (dashed) matches M7 and M8 but overshoots
 every other band; the corrected fit (solid) matches five bands.*
 
 **4. Radiant heat anchored on the flare's peak.** EOG's RH75% adds pixels
@@ -383,7 +420,7 @@ removed 3,010 MW over 200 detections; site 3804 on 3 November fell from
 
 ![Which pixels add up to a flare's radiant heat](explainer/rh75.svg)
 
-*Figure 18. The same hot patch under the old and new rule.*
+*Figure 22. The same hot patch under the old and new rule.*
 
 **5. Bow-tie copies matched and averaged.** EOG drops copies closer than half
 a pixel and keeps one. Here, 59% of matched copies (756 of 1,271) sit more

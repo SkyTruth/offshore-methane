@@ -10,6 +10,7 @@ writes one HTML file with the data, a 1:50m country basemap and the
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -191,11 +192,19 @@ def explainer_html(path: Path = EXPLAINER) -> str:
     html = markdown.markdown(path.read_text(), extensions=["tables", "sane_lists"])
 
     def figure(m: re.Match) -> str:
-        svg = (path.parent / m.group(2)).read_text().strip()
-        return f"<figure>{svg}</figure>"
+        src = path.parent / m.group(2)
+        if src.suffix == ".svg":
+            return f"<figure>{src.read_text().strip()}</figure>"
+        data = base64.b64encode(src.read_bytes()).decode()
+        return (
+            f'<figure class="photo"><img alt="{m.group(1)}" '
+            f'src="data:image/png;base64,{data}"></figure>'
+        )
 
     html = re.sub(
-        r'<p><img alt="([^"]*)" src="(explainer/[^"]+\.svg)" ?/?></p>', figure, html
+        r'<p><img alt="([^"]*)" src="(explainer/[^"]+\.(?:svg|png))" ?/?></p>',
+        figure,
+        html,
     )
     html = html.replace("<p><em>Figure", '<p class="cap"><em>Figure')
     html = html.replace("<table>", '<div class="tbl-wrap"><table>').replace(
