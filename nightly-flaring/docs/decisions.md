@@ -583,6 +583,55 @@ view-angle effects and non-upstream classification remain deferred. The
   there.
 - **Status:** active (v5).
 
+### D47 Retry, lengthen and cache job-building requests (v5)
+- **Choice:** CMR granule searches and NODD S3 listings go through
+  `nodd.get_with_retries`: 4 attempts, backoff 5/10/20 s, retrying timeouts,
+  connection errors, HTTP 429 and 5xx; other 4xx fail at once. The CMR read
+  timeout is 300 s. CMR responses for UTC dates at least 3 days old are cached
+  as JSON in `outputs/cmr_cache/<short_name>/<date>.json` (atomic write);
+  newer dates are always re-queried.
+- **Alternatives:** caching NODD listings as well (they answer in seconds, so
+  not needed yet); deriving footprints from NODD geolocation files instead of
+  CMR (downloads whole GEO granules).
+- **Why:** the first resume of the 30-night v5 run ended in `build_jobs` on a
+  single 60 s CMR read timeout (NOAA-21 queries), after 15,978/19,443
+  granules were already cached. With retries, all 4 attempts on the same
+  query timed out again. On 2026-11-08, VJ203MOD searches took 64–84 s
+  (count-only 45 s; by concept ID 64 s; by provider 74 s), while VJ103MOD
+  took 3 s. Job building for 31 days needs 62 VJ203MOD searches, so an
+  uncached run spends about an hour there. CMR footprints of past dates do not
+  change. Warming the cache with 8 parallel requests took about 10 minutes
+  for all 93 product-days.
+- **Evidence:** `outputs/v5_30n/run_attempt2.log`, `run_attempt3.log`; tests
+  `test_get_with_retries`, `test_cmr_cache`.
+- **Status:** active (v5).
+
+### D48 Gate 7 reference: flame shape, not 1 (v5)
+- **Choice:** the edge/nadir RH gate (review 4, gate 7) is judged against the
+  flame-shape expectation of about 1.4–1.5, using persistent MYC sites
+  detected on ≥ 50% and ≥ 80% of strict-clear passes at both geometries. The
+  all-detection ratio is kept for reference. No view-angle normalisation is
+  applied to RH.
+- **Alternatives:** the 0.8–1.25 band set in review 4; the side-view source
+  adjustment of Elvidge et al. 2016 §3.6 (ellipticity per flare, 1.6 when
+  detections are sparse).
+- **Why:** Elvidge et al. 2016 §3.6 report higher apparent source area at
+  high satellite zenith angle, with stable temperature, because flames are
+  taller than wide (H/R 1–4, mean 1.6). Their equation 3 gives an apparent
+  area of 1.02, 1.38, 1.47 and 1.54 times nadir at 10°, 50°, 60° and 70°
+  zenith for H/R 1.6. The operational calibration (Zhizhin et al. 2025, John
+  Zink tests at nadir, medium and side views) applies no view-angle term and
+  treats geometry as residual noise, so MYC volumes carry the same effect.
+  The all-detection ratio is also biased upward by selection: detection per
+  clear pass is 0.29 at the edge and 0.39 at nadir (v3, persistent sites).
+- **Evidence (v3 30 nights, persistent MYC sites, site-pixel column):**
+  all-detection median 1.59 (n = 229 sites); detected on ≥ 50% of clear
+  passes at both geometries 1.62 (n = 92, IQR 1.40–1.89); ≥ 80% 1.59 (n = 44,
+  IQR 1.41–1.81). RH75% pixel counts barely differ by geometry (mean 1.24 edge
+  vs 1.09 nadir copies, v5 dev night), so the excess sits in single-pixel RH,
+  not in pixel summing. The v5 30-night figures are in reviews.md, review 5.
+- **Status:** active (v5); view-angle normalisation stays deferred.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
@@ -37,13 +38,35 @@ def bucket_url(bucket: str) -> str:
     return f"https://{bucket}.s3.amazonaws.com"
 
 
+def get_with_retries(
+    session, url: str, attempts: int = 4, backoff_s: float = 5.0, **kwargs
+) -> requests.Response:
+    """GET with retries on timeouts, connection errors and 5xx/429 (D47).
+
+    Job building makes a few thousand listing and CMR requests per 30 nights;
+    one unretried timeout used to end the run.
+    """
+    for attempt in range(attempts):
+        try:
+            resp = session.get(url, **kwargs)
+            if resp.status_code < 500 and resp.status_code != 429:
+                resp.raise_for_status()
+                return resp
+            error: Exception = requests.HTTPError(f"HTTP {resp.status_code}")
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            error = exc
+        if attempt == attempts - 1:
+            raise error
+        time.sleep(backoff_s * 2**attempt)
+    raise AssertionError("unreachable")
+
+
 def list_keys(bucket: str, prefix: str, session: requests.Session) -> list[str]:
     """All object keys under ``prefix`` (S3 ListObjectsV2, paginated)."""
     keys: list[str] = []
     params = {"list-type": "2", "prefix": prefix}
     while True:
-        resp = session.get(bucket_url(bucket), params=params, timeout=60)
-        resp.raise_for_status()
+        resp = get_with_retries(session, bucket_url(bucket), params=params, timeout=60)
         root = ET.fromstring(resp.content)
         keys += [el.text for el in root.iter(f"{S3_NS}Key")]
         token = root.find(f"{S3_NS}NextContinuationToken")

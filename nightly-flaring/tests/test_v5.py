@@ -207,3 +207,59 @@ def test_suppressed_maxima_exported():
     assert c["n_suppressed_maxima"] == 1
     assert c["suppressed_max_m10"] == 9.5
     assert c["suppressed_saddle_ratio"] == pytest.approx(8 / 9.5)
+
+
+def test_get_with_retries(monkeypatch):
+    import requests
+
+    import nodd
+
+    monkeypatch.setattr(nodd.time, "sleep", lambda s: None)
+
+    class Session:
+        def __init__(self, outcomes):
+            self.outcomes, self.calls = list(outcomes), 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            out = self.outcomes.pop(0)
+            if isinstance(out, Exception):
+                raise out
+            resp = requests.Response()
+            resp.status_code = out
+            return resp
+
+    s = Session([requests.ReadTimeout(), 503, 200])
+    assert nodd.get_with_retries(s, "u").status_code == 200 and s.calls == 3
+    s = Session([404])
+    with pytest.raises(requests.HTTPError):
+        nodd.get_with_retries(s, "u")
+    assert s.calls == 1
+    s = Session([requests.ConnectionError()] * 4)
+    with pytest.raises(requests.ConnectionError):
+        nodd.get_with_retries(s, "u")
+
+
+def test_cmr_cache(monkeypatch, tmp_path):
+    from datetime import date, timedelta
+
+    import granule_coverage as gc
+
+    calls = []
+
+    class Resp:
+        def json(self):
+            return {"feed": {"entry": [{"id": len(calls)}]}}
+
+    def fake_get(session, url, **kwargs):
+        calls.append(kwargs["params"]["day_night_flag"])
+        return Resp()
+
+    monkeypatch.setattr(gc.nodd, "get_with_retries", fake_get)
+    old = (date.today() - timedelta(days=10)).isoformat()
+    first = gc.cmr_granules("VJ203MOD", old, tmp_path)
+    assert gc.cmr_granules("VJ203MOD", old, tmp_path) == first and len(calls) == 2
+    recent = date.today().isoformat()
+    gc.cmr_granules("VJ203MOD", recent, tmp_path)
+    gc.cmr_granules("VJ203MOD", recent, tmp_path)
+    assert len(calls) == 6 and not (tmp_path / "VJ203MOD" / f"{recent}.json").exists()

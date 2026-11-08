@@ -13,6 +13,9 @@ missed. Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 
 from __future__ import annotations
 
+import json
+from datetime import date as dt_date
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -22,21 +25,39 @@ import shapely
 from shapely import STRtree
 from shapely.geometry import Polygon
 
+import nodd
+
 HERE = Path(__file__).resolve().parent
 OUT_DIR = HERE / "outputs"
 CMR_URL = "https://cmr.earthdata.nasa.gov/search/granules.json"
 PRODUCTS = {"SNPP": "VNP03MOD", "NOAA-20": "VJ103MOD", "NOAA-21": "VJ203MOD"}
 N_SLICES = 4  # one 6-min NASA granule ~= 4.2 NOAA 86-s SDR granules
 PAGE_SIZE = 2000
+CMR_TIMEOUT_S = 300  # VJ203MOD searches took 45-84 s on 2026-11-08 (D47)
+CMR_CACHE_DIR = OUT_DIR / "cmr_cache"
+CMR_CACHE_MIN_AGE_DAYS = 3
 
 
-def cmr_granules(short_name: str, date: str) -> list[dict]:
-    """CMR granule entries flagged night or both (day/night) for one UTC date."""
+def cmr_granules(
+    short_name: str, date: str, cache_dir: Path | None = None
+) -> list[dict]:
+    """CMR granule entries flagged night or both (day/night) for one UTC date.
+
+    Responses for dates at least ``CMR_CACHE_MIN_AGE_DAYS`` old are cached as
+    JSON under ``cache_dir`` (default ``outputs/cmr_cache``); their granule
+    lists no longer change, and CMR can take over a minute per query (D47).
+    """
+    cache_dir = CMR_CACHE_DIR if cache_dir is None else cache_dir
+    age = (datetime.now(timezone.utc).date() - dt_date.fromisoformat(date)).days
+    path = cache_dir / short_name / f"{date}.json"
+    if age >= CMR_CACHE_MIN_AGE_DAYS and path.exists():
+        return json.loads(path.read_text())
     entries: list[dict] = []
     for flag in ("night", "both"):
         page = 1
         while True:
-            resp = requests.get(
+            resp = nodd.get_with_retries(
+                requests,
                 CMR_URL,
                 params={
                     "short_name": short_name,
@@ -45,14 +66,18 @@ def cmr_granules(short_name: str, date: str) -> list[dict]:
                     "page_size": PAGE_SIZE,
                     "page_num": page,
                 },
-                timeout=60,
+                timeout=CMR_TIMEOUT_S,
             )
-            resp.raise_for_status()
             batch = resp.json()["feed"]["entry"]
             entries += batch
             if len(batch) < PAGE_SIZE:
                 break
             page += 1
+    if age >= CMR_CACHE_MIN_AGE_DAYS:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(entries))
+        tmp.replace(path)
     return entries
 
 
