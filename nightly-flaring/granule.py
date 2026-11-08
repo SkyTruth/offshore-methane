@@ -20,6 +20,7 @@ import nodd
 WINDOW = 2  # pixels either side of the site pixel searched for hot pixels
 MAX_SITE_PIXEL_M = 1200.0  # site must be this close to a valid pixel centre
 ASSOC_M = 2000.0  # hot pixels farther than this from every site are ignored
+BOWTIE_MERGE_PIXELS = 1.0  # adjacent-scan copies closer than this merge (D32)
 SZA_NIGHT = 95.0  # detection only where solar zenith >= this (Elvidge 2013)
 GRANULE_SECONDS = 86.0
 # JPSS VIIRS SDR DD Part 6, QF1: bits 2-3, 0 none / 1 some / 2 all.
@@ -38,6 +39,18 @@ RECORD_COLUMNS = [
     "n_hot_m10",
     "n_fitted",
     "n_clusters",
+    "n_sources",
+    "rh_peak_mw",
+    "n_rh75",
+    "n_rh_cap_excluded",
+    "n_components_split",
+    "split_component_ids",
+    "n_copies_merged",
+    "peak_row",
+    "peak_col",
+    "peak_lat",
+    "peak_lon",
+    "peak_dist_m",
     "detected",
     "temp_k",
     "area_m2",
@@ -131,16 +144,36 @@ def candidate_clusters(
         if not len(group) or ids[group[0]] not in selected:
             continue
         pixels = list(zip(rr[group].tolist(), cc[group].tolist()))
-        peak = max(pixels, key=lambda rc: l10[rc])
-        r, c = peak
-        scan0 = r // nf.M_SCAN_LINES * nf.M_SCAN_LINES
-        window = l10[
-            max(scan0, r - WINDOW) : min(scan0 + nf.M_SCAN_LINES, r + WINDOW + 1),
-            max(0, c - WINDOW) : c + WINDOW + 1,
-        ]
-        if np.any(window > l10[peak]):
+        peaks = []
+        for r, c in sorted(pixels, key=lambda rc: (-l10[rc], rc)):
+            scan0 = r // nf.M_SCAN_LINES * nf.M_SCAN_LINES
+            window = l10[
+                max(scan0, r - WINDOW) : min(scan0 + nf.M_SCAN_LINES, r + WINDOW + 1),
+                max(0, c - WINDOW) : c + WINDOW + 1,
+            ]
+            if np.any(window > l10[r, c]):
+                continue
+            # Collapse a flat summit deterministically within the glow window.
+            if any(max(abs(r - pr), abs(c - pc)) <= WINDOW for pr, pc in peaks):
+                continue
+            peaks.append((r, c))
+        if not peaks:
             continue
-        clusters.append({"pixels": pixels, "peak": peak})
+        groups = [[] for _ in peaks]
+        for rc in pixels:
+            j = min(
+                range(len(peaks)),
+                key=lambda j: sum((a - b) ** 2 for a, b in zip(rc, peaks[j])),
+            )
+            groups[j].append(rc)
+        for j, peak in enumerate(peaks):
+            clusters.append(
+                {
+                    "pixels": groups[j],
+                    "peak": peak,
+                    "split_component": int(ids[group[0]]) if len(peaks) > 1 else None,
+                }
+            )
     return clusters
 
 
@@ -151,40 +184,119 @@ def summarize_clusters(
     lon: np.ndarray,
     sites: np.ndarray,
 ) -> list[dict]:
-    """Assign confirmed clusters once by peak location; compute cluster RH75%."""
+    """Compute peak-anchored RH75%, merge scan copies, then assign sources."""
     tree = cKDTree(_unit_xyz(sites[:, 1].astype(float), sites[:, 2].astype(float)))
-    result = []
+    copies = []
     for cluster in clusters:
         peak = pixels.get(cluster["peak"], {})
-        if "rh_mw" not in peak:
+        if "rh_mw" not in peak or peak.get("fit_flag") == "unfitted":
             continue
         r, c = cluster["peak"]
-        chord, j = tree.query(_unit_xyz([lat[r, c]], [lon[r, c]])[0])
+        fitted = [
+            pixels[rc]
+            for rc in cluster["pixels"]
+            if "rh_mw" in pixels.get(rc, {})
+            and pixels[rc].get("fit_flag") != "unfitted"
+        ]
+        peak_rh = peak["rh_mw"]
+        selected = [p for p in fitted if 0.75 * peak_rh <= p["rh_mw"] <= 1.5 * peak_rh]
+        copies.append(
+            dict(
+                peak=peak,
+                peak_row=r,
+                peak_col=c,
+                peak_lat=float(lat[r, c]),
+                peak_lon=float(lon[r, c]),
+                footprint=nf.pixel_area_m2(lat, lon, r, c),
+                n_hot=len(cluster["pixels"]),
+                n_fitted=len(fitted),
+                rh_mw=sum(p["rh_mw"] for p in selected),
+                rh_peak_mw=peak_rh,
+                n_rh75=len(selected),
+                n_rh_cap_excluded=sum(p["rh_mw"] > 1.5 * peak_rh for p in fitted),
+                split_components={cluster["split_component"]}
+                if cluster.get("split_component") is not None
+                else set(),
+            )
+        )
+    return merge_scan_copies(copies, tree)
+
+
+def merge_scan_copies(copies: list[dict], tree: cKDTree) -> list[dict]:
+    """Union adjacent-scan peaks closer than one pixel (smaller sqrt(footprint)).
+
+    Bow-tie copies of one flare at the swath edge sit 7-9 lines apart in
+    adjacent scans with peak centres 0.50-0.83 pixel apart (two granules,
+    2026-10-29), so rs2019's half-pixel spacing would keep and sum them.
+    """
+    parent = list(range(len(copies)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, a in enumerate(copies):
+        for j in range(i):
+            b = copies[j]
+            if (
+                abs(a["peak_row"] // nf.M_SCAN_LINES - b["peak_row"] // nf.M_SCAN_LINES)
+                != 1
+            ):
+                continue
+            distance = nf.haversine_m(
+                a["peak_lat"], a["peak_lon"], b["peak_lat"], b["peak_lon"]
+            )
+            pixel = BOWTIE_MERGE_PIXELS * np.sqrt(min(a["footprint"], b["footprint"]))
+            if distance < pixel:
+                parent[find(i)] = find(j)
+    groups = {}
+    for i in range(len(copies)):
+        groups.setdefault(find(i), []).append(copies[i])
+    result = []
+    for group in groups.values():
+        best = max(group, key=lambda p: p["rh_mw"]).copy()
+        chord, j = tree.query(_unit_xyz([best["peak_lat"]], [best["peak_lon"]])[0])
         dist = 2 * nf.EARTH_RADIUS_M * np.arcsin(min(chord / 2, 1.0))
         if dist > ASSOC_M:
             continue
-        fitted = [pixels[rc] for rc in cluster["pixels"] if "rh_mw" in pixels[rc]]
-        maximum = max(p["rh_mw"] for p in fitted)
-        result.append(
-            dict(
-                site=int(j),
-                peak=peak,
-                n_hot=len(cluster["pixels"]),
-                n_fitted=len(fitted),
-                rh_mw=sum(p["rh_mw"] for p in fitted if p["rh_mw"] >= 0.75 * maximum),
-            )
+        best.update(
+            site=int(j),
+            peak_dist_m=float(dist),
+            n_clusters=len(group),
+            n_copies_merged=len(group) - 1,
         )
+        best["split_components"] = set().union(
+            *(p.get("split_components", set()) for p in group)
+        )
+        for key in ("n_hot", "n_fitted", "n_rh_cap_excluded"):
+            best[key] = sum(p[key] for p in group)
+        result.append(best)
     return result
 
 
 def site_cluster_summary(clusters: list[dict], site: int) -> dict:
-    """Use the maximum cluster RH75%, absorbing copies in adjacent scans."""
+    """Sum distinct sources; expose the strongest source's fit and location."""
     mine = [p for p in clusters if p["site"] == site]
     out = dict(
-        n_clusters=len(mine),
+        n_clusters=sum(p.get("n_clusters", 1) for p in mine),
+        n_sources=len(mine),
         n_hot_m10=sum(p["n_hot"] for p in mine),
         n_fitted=sum(p["n_fitted"] for p in mine),
         detected=bool(mine),
+        n_rh75=sum(p.get("n_rh75", 0) for p in mine),
+        n_rh_cap_excluded=sum(p.get("n_rh_cap_excluded", 0) for p in mine),
+        n_components_split=len(
+            set().union(*(p.get("split_components", set()) for p in mine))
+        ),
+        split_component_ids=",".join(
+            f"c{i}"
+            for i in sorted(
+                set().union(*(p.get("split_components", set()) for p in mine))
+            )
+        ),
+        n_copies_merged=sum(p.get("n_copies_merged", 0) for p in mine),
     )
     if mine:
         best = max(mine, key=lambda p: p["rh_mw"])
@@ -192,10 +304,13 @@ def site_cluster_summary(clusters: list[dict], site: int) -> dict:
         out.update(
             temp_k=round(peak["temp_k"], 1),
             area_m2=round(peak["esf"] * peak["area_m2"], 3),
-            rh_mw=round(best["rh_mw"], 4),
+            rh_mw=round(sum(p["rh_mw"] for p in mine), 4),
+            rh_peak_mw=best.get("rh_peak_mw", peak["rh_mw"]),
             bands="+".join(peak["bands"]),
             fit_flag=peak.get("fit_flag", "ok"),
         )
+        for key in ("peak_row", "peak_col", "peak_lat", "peak_lon", "peak_dist_m"):
+            out[key] = best.get(key, np.nan)
     return out
 
 

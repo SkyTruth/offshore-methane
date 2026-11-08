@@ -76,10 +76,10 @@ def test_cluster_nearest_site_rh75_and_bowtie_max():
     lat, lon = np.zeros((32, 8)), np.full((32, 8), 0.001)
     assigned = g.summarize_clusters(clusters, pixels, lat, lon, sites)
     assert [c["site"] for c in assigned] == [0, 0]
-    assert assigned[0]["rh_mw"] == 18  # threshold based on RH, not M10 peak
+    assert assigned[0]["rh_mw"] == pytest.approx(25.49)  # peak-anchored threshold
     summary = g.site_cluster_summary(assigned, 0)
     assert summary["n_clusters"] == 2
-    assert summary["rh_mw"] == 18  # max, not sum of scan copies
+    assert summary["rh_mw"] == pytest.approx(37.49)  # sum distinct sources
     assert summary["temp_k"] == 1900  # winning cluster's M10 peak
     assert not g.site_cluster_summary(assigned, 1)["detected"]
     pixels[(1, 2)] = {}  # fitted wings cannot rescue an unconfirmed peak
@@ -227,7 +227,7 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
         sites_csv=source,
         out_dir=output,
     )
-    assert seen == [(["synthetic_job"], output / "overpasses_v3", 12)]
+    assert seen == [(["synthetic_job"], output / "overpasses_v4", 12)]
     assert (output / "overpasses_2026-10-29_2026-10-29.csv").exists()
     assert (output / "site_nights_2026-10-29_2026-10-29.csv").exists()
     assert result.iloc[0].rh_mw == 3

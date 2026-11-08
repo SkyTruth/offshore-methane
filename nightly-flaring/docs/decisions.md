@@ -95,7 +95,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   (rs2019 gives no neighbourhood size).
 - **Evidence:** glow detections fell from 12.7% (501/3,935, v1) to 0.97%
   (116/11,924, v3). Review 2 B6: connected flares merge into one cluster.
-- **Status:** active; splitting is fix 3 of review 2.
+- **Status:** superseded by D24 (v4).
 
 ### D11 Confirmation and saturation (v3)
 - **Choice:** a pixel is confirmed by ≥ 2 unsaturated bands; a cluster counts
@@ -130,7 +130,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** review 2 B1 (elimination can leave M7+M8 only: 8 fits, about
   0.99 BCM/yr), B3 (two-band χ² ≡ 0: 2,107 fits, 238 above 2,500 K), B4 (600 K
   floor: 76 detections below 1,200 K hold 9% of radiant heat).
-- **Status:** under revision for v4.
+- **Status:** superseded by D22 (v4).
 
 ### D14 Source area and radiant heat (v1)
 - **Choice:** source area = ESF × pixel footprint, footprint from neighbouring
@@ -148,7 +148,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** review 2 B2 (threshold from the highest-RH pixel: site 3804
   reports 1,776 MW vs 71 MW at its peak), B5 (scan copies split across sites),
   B7 (963 detections with > 1 cluster).
-- **Status:** under revision for v4.
+- **Status:** superseded by D23 (v4).
 
 ## Clouds and nightly values
 
@@ -168,7 +168,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   smallest `dist_m`, earliest on ties.
 - **Evidence:** 4,715 groups merged; review 2 B9: 11 groups keep the
   non-detection.
-- **Status:** under revision for v4.
+- **Status:** superseded by D26 (v4).
 
 ### D18 Nightly value and status (v3)
 - **Choice:** `rh_mw` = mean RH over strict-clear passes with clear
@@ -178,7 +178,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   detection that night.
 - **Evidence:** review 2 B10: 218 of 1,634 `flaring_cloud` nights also have a
   clear non-detection (`rh_mw` = 0); README step 6 said `cloudy`.
-- **Status:** under revision for v4 (precedence and documentation).
+- **Status:** superseded by D27 (v4).
 
 ### D19 Volume conversion (v1)
 - **Choice:** BCM/yr = 0.0116 × mean RH (MW), the MYC25Q4 Zenodo slope. No
@@ -197,8 +197,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** review 2 B11 (greedy pairing mis-pairs site 989/983), B12
   (definitions differ: 0.269 own-site strict vs 0.509 like-for-like vs MYC
   0.628).
-- **Status:** detection-frequency definition under revision for v4; matching
-  is fix 4 of review 2.
+- **Status:** superseded by D28 (v4).
 
 ### D21 Execution and caching (v1)
 - **Choice:** `ProcessPoolExecutor` (h5py serialises threads); one CSV per
@@ -207,3 +206,259 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
 - **Evidence:** v3, 30 nights: 19,443 granules, 167 GB, 105 min with 12
   workers on a laptop, about 26 MB/s.
 - **Status:** active.
+
+### D22 Spectral fit guards (v4)
+- **Choice:** Keep M10 or M11. Above reduced χ² 9, try every removable band and take the
+  converged leave-one-out refit with the largest decrease in reduced χ²; stop at three
+  bands or no improvement. Keep the 10% model error, noise floor 1e-6, χ² limit 9, 3,500
+  K upper bound and ESF (0,1]. Two-band fits require 1,200–2,500 K; every flare fit
+  requires ≥1,200 K. Reject failed convergence and remaining high χ². Pin rejected
+  spectra to 1,810 K from valid positive M10 with ESF ≤1, otherwise leave unfitted.
+  Flags record the first failed guard.
+- **Alternatives:** Negative-residual elimination; two-band residual acceptance; a
+  higher temperature floor.
+- **Why:** The observed site-3802 spectrum fits 1,699 K and 124 MW after removing M7;
+  M7+M8 alone gave 916 K and 3,127 MW. Keep the requested temperature defaults pending a
+  larger validation sample.
+- **Evidence:** Dev night: 0/378 retained fits below 1,200 K; 48 two-band fits span
+  1,334.2–2,458.9 K; 13/378 fits pin (9 range, 3 low temperature, 1 bounds). The
+  observed site-3802 regression recovers 1,699.2 K and 124.3191 MW (n=1 spectrum).
+- **Status:** active (v4).
+
+### D23 Peak-anchored RH75% (v4)
+- **Choice:** Threshold at 0.75 × the M10 peak pixel RH. Sum fitted pixels, including
+  constrained M10 pins, only through 1.5 × peak RH inclusive. Count excluded pixels.
+  Record peak RH and number summed; at a multi-source site RH is summed, peak RH
+  describes the strongest source, and n_rh75 sums selected pixels over retained copies.
+- **Alternatives:** Highest-RH threshold; no cap; discard all pinned pixels.
+- **Why:** A lower-M10 wing with much higher inferred RH is inconsistent with the source
+  fit. Keep the requested 1.5× cap without tuning it from one night; the fit guards and
+  peak anchoring remove the reviewed 1,776 MW failure.
+- **Evidence:** Dev night: 496 pixels summed across 402 sources, 0/1103 fitted pixels
+  cap-excluded. Site 3804 falls from 1,775.8899 to 71.1207 MW (n=1 case); no cap
+  exclusion occurs there. The synthetic cap test excludes 1/3 fitted pixels.
+- **Status:** active (v4).
+
+### D24 Separate connected maxima (v4)
+- **Choice:** Within each selected scan component, retain all M10 maxima passing the
+  existing same-scan ±2 glow test. Sort by descending M10 then row/column; suppress
+  equal-height summits within two pixels. Assign every component pixel to its nearest
+  retained peak in Euclidean row/column distance; ties follow peak order.
+- **Alternatives:** Watershed on M10; keep one maximum; geodesic pixel assignment.
+- **Why:** Nearest-peak partition is deterministic and needs no new dependency. It
+  separates the seven-pixel [10,3,2,1,2,3,11] bridge without changing the glow window.
+- **Evidence:** Dev night: 9 unique confirmed components split among 378 detection
+  records; 22 sites have multiple sources (24/378 records). The seven-pixel bridge test
+  produces two sources (n=1 component).
+- **Status:** active (v4).
+
+### D25 Merge scan copies and sum distinct sources (v4)
+- **Choice:** Union confirmed peaks in adjacent 16-line scans when geodesic peak
+  distance is strictly less than 0.5 × min(sqrt(area_a), sqrt(area_b)). Areas use the
+  existing same-scan geolocation footprint. Allow transitive chains. Keep the copy with
+  greatest RH75%, first on ties, including its fit and peak location. Then assign to the
+  nearest retained GFW site within 2 km. Sum distinct sources; strongest RH75% source
+  supplies fit, area and peak fields. n_clusters counts confirmed pre-merge copies
+  assigned through their merged source.
+- **Alternatives:** Directional footprint ellipse; average footprint widths; max cluster
+  per site; assign before merging.
+- **Why:** The equivalent-square width makes the paper half-pixel rule explicit. Taking
+  the smaller width avoids enlarging the merge radius using one distorted footprint. No
+  new view-angle correction is introduced.
+- **Evidence:** Dev night: 413 confirmed clusters become 402 assigned sources, merging
+  11 copies; 24/378 detection records contain two sources. The under/over-half-pixel and
+  three-copy-chain tests all pass (n=3 cases).
+- **Status:** merge distance superseded by D32 (v4); summing distinct sources
+  remains active.
+
+### D26 Detection-first duplicate selection (v4)
+- **Choice:** Keep the same satellite/site consecutive-gap <10 s groups. Prefer detected
+  records, then smallest dist_m, then earliest time, with stable input order for exact
+  ties.
+- **Alternatives:** Distance-first selection; highest RH.
+- **Why:** A detection is evidence of a lit flare even when the neighbouring-granule
+  site pixel is closer.
+- **Evidence:** Dev night: 148 duplicate rows removed, 0 additional detections from the
+  new preference (n=27446 retained observations). The synthetic two-row detection/non-
+  detection test retains the detection.
+- **Status:** active (v4).
+
+### D27 Nightly status precedence (v4)
+- **Choice:** Keep flaring > flaring_cloud > clear_no_flare > cloudy > not_observed. RH
+  remains the strict-clear mean, including clear zeros. A flaring_cloud night can
+  therefore have RH 0. Keep site_nights columns unchanged.
+- **Alternatives:** Clear non-detection overrides cloudy detection; treat every
+  detection as clear.
+- **Why:** A detection under cloud is evidence the flare was lit. This precedence
+  already existed in code; the README contradicted it.
+- **Evidence:** Dev night: 121 sites have strict-clear flaring and 180 include cloud
+  detections (n=7637 sites). The existing mixed cloudy-detection/clear-zero test passes;
+  site_nights columns are unchanged.
+- **Status:** active (v4).
+
+### D28 MYC-centred detection frequency (v4)
+- **Choice:** Keep existing validation keys and own-site strict-clear frequency. Add
+  per-matched-flare detections at any GFW site within 2 km divided by strict-clear-or-
+  detected passes at those sites. Group same-satellite consecutive times <10 s into one
+  pass; any site may supply detection or clearing. Keep SZA ≥97° and the requested
+  local-night period. New summary medians use matched persistent flares with at least
+  one such pass, including those without a strict-clear own-site pass. Keep shortest-
+  first one-to-one matching and the 2025 reference.
+- **Alternatives:** Pool nearby site rows independently; own-site only; redefine
+  existing JSON keys.
+- **Why:** Counting a satellite pass once avoids counting nearby GFW structures as
+  independent observations. The new denominator matches the MYC n_det/n_clear
+  interpretation; matching optimization remains deferred.
+- **Evidence:** Dev night: old median 0.000 (n=182 persistent site rates); MYC-centred
+  median 0.667 (n=231), pooled 53.5% (357/667 passes). V3 new-definition median is 0.667
+  (n=229), pooled 52.2% (343/657).
+- **Status:** active (v4).
+
+### D29 Peak and diagnostic outputs (v4)
+- **Choice:** Keep row/col and dist_m at the site pixel. Add strongest-source
+  peak_row/col/lat/lon/dist_m, n_sources, rh_peak_mw and n_rh75. Count cap exclusions
+  and merged copies over all assigned pre-merge clusters. Track unique confirmed split-
+  component IDs per granule, so components shared across sites can be counted once.
+  Pinned pixels count as fitted constrained estimates.
+- **Alternatives:** Overwrite site coordinates; count discarded copies as retained RH
+  pixels.
+- **Why:** The site location is needed for cloud clearing; the flare peak is needed to
+  inspect association. Diagnostics distinguish observed candidates from the copies
+  retained for RH.
+- **Evidence:** Dev night: peak fields accompany all 378 detection records; 402 sources,
+  413 pre-merge clusters, 496 retained RH pixels and 1,103 fitted pixels are
+  represented. Nine split components are counted once by granule ID.
+- **Status:** active (v4).
+
+### D30 Empty coverage (v4)
+- **Choice:** Skip a satellite when CMR produces no site-bearing slices for the
+  requested dates.
+- **Alternatives:** Fail on missing slice_start; fabricate jobs.
+- **Why:** The requested November regression job build encountered empty SNPP coverage.
+  Returning no jobs for that satellite preserves the normal NOAA-20 job selection.
+- **Evidence:** Nine requested regression job builds cover ten site cases; empty SNPP
+  coverage previously stopped a November build (n=1 observed failure). All ten
+  comparisons now complete. The network-free all-empty-coverage test passes.
+- **Status:** active (v4).
+
+### D31 Development scope and checks (v4)
+- **Choice:** Use v4 cache/output paths, the nine requested NOAA-20 granules and only
+  the local night 2026-10-29 with 12 workers. Preserve v3 outputs. Keep the original
+  comparison versions and add v4. Update existing tests only for reason-bearing pins, v4
+  cache naming, peak RH threshold and distinct-source sums.
+- **Alternatives:** Rerun 30 nights before review; replace historical outputs.
+- **Why:** The observed spectrum fixture stores radiance/noise numbers; synthetic tests
+  cover source partition, copy chains, temperature guards, deduplication and pass-level
+  frequency without network.
+- **Evidence:** All 1,343/1,343 dev-night granules succeed; all ten requested
+  site/granule comparisons complete. All 51 tests, Ruff lint/format, configured pre-
+  commit hook and whitespace checks pass. Eight same-night caches were reprocessed
+  solely to finalize split diagnostics.
+- **Status:** active (v4).
+
+### D32 Merge scan copies closer than one pixel (v4)
+- **Choice:** adjacent-scan peaks merge when closer than 1.0 × the smaller
+  sqrt(footprint area) (`granule.BOWTIE_MERGE_PIXELS`), replacing D25's 0.5.
+- **Alternatives:** rs2019's half-pixel spacing (D25); a row/column rule
+  (same column ±1, rows 8–9 apart).
+- **Why:** D25 sums distinct sources at a site, so a bow-tie copy left unmerged
+  is counted twice. Copies of one flare at the swath edge sit 7–9 lines apart
+  in adjacent scans, in the same column ±1, with comparable temperature and RH,
+  and their peak centres are 0.50–0.83 pixel apart (12 pairs in SNPP
+  `d20261029_t0703487` and NOAA-21 `d20261029_t2316490`). rs2019 does not say
+  which pixel dimension "half a pixel" refers to.
+- **Evidence:** dev night 2026-10-29, half-pixel → one-pixel: copies merged
+  11 → 34; sites with more than one source 22 → 4; swath-edge share of
+  multi-source records 53% (25/47) → 12% (1/8), against 34% of all
+  detections; RH of the 47 half-pixel multi-source records was 663 MW vs
+  413 MW in v3 for the same records; summed strict-clear site means 470.0 →
+  453.5 MW (final v3: 450.3). Regression granule `d20261102_t2119529`: the
+  4279/4280 copy pair (both about 1 km from MYC `s_9421`, persistent,
+  0.727 BCM/yr, which is 172 m from site 4279) becomes one 111 MW source at
+  4279 instead of 111 MW at 4279 plus 72 MW at 4280. Granule
+  `d20261022_t2126021`: the 4452/4531 pair becomes one 49.6 MW source at 4531,
+  nearest the stronger copy; MYC flares there are below 0.001 BCM/yr.
+- **Status:** active (v4). Two distinct flares less than one pixel apart in
+  adjacent scans now merge; they are not resolvable at M-band resolution.
+
+## V4 development evidence (2026-11-08)
+
+Only local night 2026-10-29 was run in full: 1,343/1,343 granules succeeded,
+about 11.4 GB, 7.7 minutes with 12 workers. The nine regression granules add
+ten site comparisons (`dev_v4.py`, outputs `outputs/dev_v4/regressions.csv`).
+Results below use the one-pixel merge (D32); the half-pixel outputs are kept
+with a `_halfpixel` suffix in `outputs/dev_v4/`.
+
+Baseline: `v3` is the final v3 code, taken from the 30-night run for this
+night. `outputs/dev_v3/` was produced by round-3 code before the 10% model
+error (D12) and is reported as `v3_dev` in `comparison.json` only; it shows
+103/369 eliminated fits against 4/369 in final v3.
+
+Scope: local night, SZA ≥ 97°, then deduplication (v3 distance-first, v4
+detection-first). Fit counts describe each record's strongest source.
+
+| Measure | v3 (final) | v4 |
+| --- | --- | --- |
+| Detected overpasses | 369 | 376 |
+| Strict-clear detections | 257 | 255 |
+| Two-band fits | 53 | 48 |
+| Two-band temperature range, K | 1,334–3,202 | 1,334–2,459 |
+| Fits below 1,200 K | 3 | 0 |
+| Sum of detected RH, MW | 1,796.8 | 1,823.5 |
+| Median detected RH, MW | 1.089 | 1.121 |
+| Sum of site strict-clear means, MW | 450.3 | 453.5 |
+| Flaring sites, strict / including cloud | 122 / 177 | 120 / 179 |
+| RH75% / peak RH, P5 / P50 / P95 | 1.00 / 1.00 / 1.99 (n=369) | 1.00 / 1.00 / 2.04 (n=376) |
+| Cap-excluded pixels | not recorded | 0/1,114 |
+| Components split | not recorded | 9 |
+| Copies merged | not recorded | 34 |
+| Sites with > 1 source | not recorded | 4 |
+| Duplicate rows removed | 148 | 148 |
+| Own-site strict frequency, median | 0.000 (n=182) | 0.000 (n=182) |
+| MYC-centred frequency, median | 0.667 (n=229) | 0.667 (n=231) |
+| MYC-centred detections / clear-or-detected passes | 343/657 | 354/667 |
+
+| Flag | v3 (n=369) | v4 (n=376) |
+| --- | --- | --- |
+| ok | 364 | 359 |
+| eliminated | 4 | 4 (`M7` 2, `M12` 2) |
+| pinned (v3, no reason) | 1 | – |
+| pinned:two_band_range | – | 9 |
+| pinned:low_t | – | 3 |
+| pinned:bounds | – | 1 |
+
+The test night contains none of the large reviewed failures, so its totals
+move by under 2%; the regression granules carry those cases.
+
+The own-site median is zero because over half the matched persistent sites
+have no strict-clear detection on one night (n=182). The MYC-centred median
+uses all matched persistent flares with clear-or-detected nearby passes, a
+different cohort; MYC reference medians are 0.589 (n=182) and 0.636 (n=231).
+
+All cases are NOAA-20. RH in MW, temperature in K; a dash means no detection.
+
+| Granule | Site | v3 RH / T / bands | v4 RH / T / bands | v4 flag |
+| --- | --- | --- | --- | --- |
+| d20261010_t2330408 | 3802 | 3,126.9 / 916 / M7+M8 | 124.3 / 1,699 / M10+M8+M11+M12+M13 | eliminated:M7 |
+| d20261010_t2330408 | 3801 | 105.1 / 1,593 / all six | – (copy merged into 3802's source) | – |
+| d20261011_t2311458 | 3802 | 359.0 / 1,049 / M7+M8 | 35.4 / 1,689 / all six | ok |
+| d20261014_t2216245 | 4510 | 579.5 / 853 / M7+M8 | 9.7 / 1,833 / M10+M8+M11+M12+M13 | eliminated:M7 |
+| d20261016_t1810529 | 5869 | 49.2 / 1,092 / M7+M8 | 5.2 / 1,931 / M10+M8+M11+M12+M13 | eliminated:M7 |
+| d20261022_t2126021 | 4452 | 553.9 / 996 / M7+M8 | – (copy merged into a 49.6 MW source at 4531) | – |
+| d20261027_t0758447 | 876 | 832.9 / 882 / M7+M8 | 17.2 / 1,908 / M10+M8+M11+M12+M13 | eliminated:M7 |
+| d20261102_t2119529 | 4280 | 933.3 / 1,021 / M7+M8 | – (copy merged into a 111.1 MW source at 4279) | – |
+| d20261102_t2258015 | 3205 | 320.0 / 935 / M7+M8 | 12.2 / 1,829 / M10+M8+M11+M12+M13 | eliminated:M7 |
+| d20261103_t2240322 | 3804 | 1,775.9 / 1,616 / M10+M7+M11+M13 | 71.1 / 1,616 / M10+M7+M11+M13 | eliminated:M12+M8 |
+
+Tests: 51 network-free tests pass (Ruff check and format pass). New tests
+cover the site-3802 spectrum, the three-band floor, the two-band range, low
+temperature, component splitting, one-pixel copy merging and chains, source
+sums, detection-first deduplication, pass-level frequency and empty coverage.
+
+Open risks: one night does not calibrate the temperature bounds or the 1.5×
+cap (0 exclusions on the test night). Merged sources take the stronger copy's
+location, which decides the site when two sites lie within a pixel of each
+other. Nearest-peak partitions and the ±2 glow window can suppress unresolved
+sources. M10-only triggering, greedy MYC matching (B11), cloud-window scaling,
+view-angle effects and non-upstream classification remain deferred. The
+30-night v4 run has not been made.

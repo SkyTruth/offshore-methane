@@ -68,7 +68,7 @@ Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day bucket retention.
 
-## Pipeline (v3)
+## Pipeline (v4)
 
 1. **Granule selection**: NASA CMR footprints of the 6-minute geolocation
    granules, split into four slices, select the NOAA 86 s granules (±20 s) and
@@ -84,39 +84,42 @@ must be within NOAA's ~91-day bucket retention.
    3σ). Drop saturated bands using raw radiance, before background subtraction.
    QF1 bits 2–3 also exclude partially/fully saturated bands. Missing M7/M8
    files are optional. At least two unsaturated bands confirm a candidate;
-   M10 need not survive. Fit residuals are divided by the same clipped zone SD
-   (M7/M8/M10/M11) or local background SD (M12/M13), floored at 1e-6
-   radiance units for uniform scenes. Minimise weighted squared residuals;
-   while chi-square / max(n_bands−2, 1) > 9 and >2 bands remain, remove the
-   most negative (observed−model)/SD residual and refit. Threshold 9 is a local
-   three-sigma quality tolerance, not the papers’ unscaled SSR=2. Reject failed
-   convergence, T outside 600–3500 K (broad combustion range), ESF outside
-   (0,1], or remaining chi-square above 9. Rejected fits pin T=1810 K using
-   usable M10; otherwise leave unfitted. Records carry `fit_flag`: `ok`,
-   `eliminated:<bands>`, or `pinned`. A cluster
-   is a detection only when its M10 peak is confirmed and fitted.
-5. **Per overpass**: compute RH75% separately for each confirmed cluster (sum
-   fitted pixels with RH ≥ 0.75 × cluster maximum RH). Assign the entire cluster
-   to the site nearest its M10 peak, within 2 km. Use the maximum cluster RH75%
-   per site, with temperature and source area from that cluster's M10 peak.
-   `n_clusters` counts confirmed assigned clusters, including scan copies;
-   `n_hot_m10` and `n_fitted` count their hot and fitted pixels. Read the cloud
-   flag and the eight-neighbour clear/probably-clear count at the site pixel.
+   M10 or M11 must survive. Use noise-weighted fits with a 10% model-error
+   term. Above reduced χ² 9, remove the band whose leave-one-out refit lowers
+   χ² most, retaining at least three bands. Accept 1,200–3,500 K and ESF in
+   (0,1]; two-band fits require 1,200–2,500 K. Reject failed convergence or
+   remaining high χ²; pin rejected fits at 1,810 K from usable M10, else leave
+   unfitted. `fit_flag` is `ok`, `eliminated:<bands>`, `pinned:<reason>` or
+   `unfitted`. Split components around separate qualifying M10 maxima by
+   nearest-peak pixel distance. A cluster needs a fitted M10 peak.
+5. **Per overpass**: RH75% sums fitted pixels with RH between 0.75 and 1.5
+   times the M10 peak RH. Merge adjacent-scan peaks closer than one pixel
+   (smaller local sqrt(footprint area)), including chains; retain the strongest
+   RH75% copy. Assign each source to the nearest site within 2 km and sum
+   distinct sources. The strongest source supplies temperature, area and fit.
+   `n_sources` counts distinct sources; `n_clusters` counts pre-merge copies.
+   `rh_peak_mw` and `n_rh75` record peak RH and summed pixel count;
+   `n_rh_cap_excluded`, `n_copies_merged`, `n_components_split` and
+   `split_component_ids` support audits. `peak_row`, `peak_col`, `peak_lat`,
+   `peak_lon`, `peak_dist_m` locate the strongest source; `row`/`col` remain
+   the site pixel. Cloud flags and clear-neighbour counts use that site pixel.
 6. **Per night**: deduplicate same-satellite/site records in runs of consecutive
-   time gaps <10 s, retaining smallest `dist_m` (earliest on ties), then pool
+   time gaps <10 s, preferring detections, then smallest `dist_m` (earliest on
+   ties), then pool
    overpasses with solar zenith ≥ 97°. Clear = cloud mask 0/1 OR a detection
    surrounded by ≥6 clear/probably-clear neighbours. `rh_mw` averages over strict
    clear observations, including clear non-detections as zero; `n_detected`,
-   `rh_max_mw`, `temp_k`, and status also use strict clearing. Detections only
-   under non-isolated cloud yield `cloudy` unless another observation is clear.
+   `rh_max_mw` and `temp_k` also use strict clearing. Detections only
+   under non-isolated cloud yield `flaring_cloud`, even with a clear zero.
+   Precedence: `flaring` > `flaring_cloud` > `clear_no_flare` > `cloudy` >
+   `not_observed`; `rh_mw` remains the strict-clear mean and can be zero.
    `n_clear_detclear`, `rh_mw_detclear`, `bcm_per_year_detclear` preserve the old
    detected-OR-cloud-0/1 rule on the same deduplicated observations. Volume rate
-   is 0.0116 × mean RH. Other statuses: `flaring`, `clear_no_flare`,
-   `not_observed`.
+   is 0.0116 × mean RH.
 
-Per-granule caches are versioned as `overpasses_v3`; `out_dir` contains both
-that cache and the final CSVs. Development runs use `outputs/dev_v3`, preserving
-v1/v2 outputs and caches.
+Per-granule caches are versioned as `overpasses_v4`; `out_dir` contains both
+that cache and the final CSVs. Development runs use `outputs/dev_v4`, preserving
+v1/v2/v3 outputs and caches.
 
 Simplifications versus EOG: Planck at band centres (no spectral response),
 single-curve fit with background subtraction instead of the dual-curve fit, no
@@ -232,6 +235,27 @@ VIIRS active fire 59% (822/1400).
 | v1 | 2026-10-06 – 11-04 (30) | 19,443 | 143 GB | 71 min for 23 new nights | 7,691 | 758 |
 | v3 | 2026-10-06 – 11-04 (30) | 19,443 | 167 GB | 105 min | 4,060 clear + 1,634 lit under cloud | 504 clear (558 incl. cloud) |
 
+
+Dev night 2026-10-29, same local-night/SZA/dedupe scope (v3 = final v3 code):
+
+| Measure | v3 | v4 |
+| --- | --- | --- |
+| Detected overpasses | 369 | 376 |
+| Total detected RH, MW | 1,796.8 | 1,823.5 |
+| Strict-clear site RH means summed, MW | 450.3 | 453.5 |
+| Fits below 1,200 K | 3/369 | 0/376 |
+| Two-band fits above 2,500 K | present (max 3,202 K) | 0/48 |
+| Flaring sites, strict / including cloud | 122 / 177 | 120 / 179 |
+| MYC-centred frequency, median | 0.667 (n=229) | 0.667 (n=231) |
+
+The large v3 failures (B1, B2) fall on other nights; the regression granules
+show them: site 3802 3,127 → 124 MW, site 3804 1,776 → 71 MW.
+
+Full counts, fit reasons, regression granules, defaults and open risks are in
+[the v4 development evidence](docs/decisions.md#v4-development-evidence-2026-11-08).
+Machine-readable results are in `outputs/dev_v4/comparison.json` and
+`outputs/dev_v4/regressions.csv`. No 30-night v4 run has been performed.
+
 SNPP has no data in NOAA's bucket after 2026-11-02 15:32 UTC (no night passes
 over sites after 12:51 UTC). v1 outputs are kept in `outputs/v1/`.
 
@@ -267,8 +291,10 @@ out_dir=OUT_DIR / 'dev_v3')` writes `validation_myc25_<tag>.csv` and
 `validation_summary_<tag>.json`. Matches are one-to-one, accepting shortest
 pairs first within 2 km. Period means pool all deduplicated strict clear
 overpasses, including clear zeros, rather than averaging nightly means.
-Persistent-site detection frequencies compare detections/clear overpasses
-with MYC n_det/n_clear. Regime counts and regional totals use matched sites
+The original own-site strict-clear frequency remains. The added
+`det_freq_like_for_like` compares detections at any GFW site within 2 km of a
+matched MYC flare per strict-clear-or-detected satellite pass with MYC
+n_det/n_clear; nearby sites share a pass. Regime counts and regional totals use matched sites
 with at least one clear night; regional MYC totals use those same sites.
 The default reference year is 2025, the latest annual catalog, so a one-night
 2026 comparison is a diagnostic rather than annual validation.

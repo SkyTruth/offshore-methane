@@ -133,15 +133,30 @@ same geometry.
 
 | Order | Fix | Addresses | Planned for |
 | --- | --- | --- | --- |
-| 1 | Fit guardrails: M10 or M11 in the final band set, low-temperature handling, better elimination, bounded two-band fits | B1, B3, B4 | v4 |
-| 2 | RH75% threshold from the M10 peak; record peak RH and pixels summed | B2 | v4 |
-| 3 | Merge adjacent-scan copies before site assignment; split clusters with separate maxima; keep independent flares at one site | B5, B6, B7 | v4 |
+| 1 | Fit guardrails: M10 or M11 in the final band set, low-temperature handling, better elimination, bounded two-band fits | B1, B3, B4 | v4 (D22) |
+| 2 | RH75% threshold from the M10 peak; record peak RH and pixels summed | B2 | v4 (D23) |
+| 3 | Merge adjacent-scan copies before site assignment; split clusters with separate maxima; keep independent flares at one site | B5, B6, B7 | v4 (D24, D25, D32) |
 | 4 | Flare-centred association basins; optimal matching | Association, B11 | later |
 | 5 | Footprint-scaled cloud clearing, calibrated against other satellites' same-night passes | Cloud deviation | later |
 | 6 | M11 and M12/M13 triggers | Finding 6 | later |
 | 7 | Non-upstream flags, upstream-only totals | Finding 9 | later |
-| 8 | Export peak location; prefer detected record in dedupe; settle `flaring_cloud` precedence; detection frequency under MYC's definition | B8, B9, B10, B12 | v4 |
+| 8 | Export peak location; prefer detected record in dedupe; settle `flaring_cloud` precedence; detection frequency under MYC's definition | B8, B9, B10, B12 | v4 (D26–D29) |
 | – | View-angle area normalisation | Deviation | later |
+
+## Main-session check of the v4 changes (2026-11-08)
+
+GPT-6.1 Sol implemented the v4 fixes; the main session checked the diff and
+the development outputs before the council review.
+
+- The dev-night comparison used `outputs/dev_v3/` as the v3 baseline. That
+  output predates the 10% model-error term: 103/369 eliminated fits against
+  4/369 in final v3 on the same night. The tables in `decisions.md` and the
+  README now use final v3 from the 30-night run.
+- With rs2019's half-pixel spacing, swath-edge bow-tie copies 0.50–0.83 pixel
+  apart stayed separate, and v4's per-site sum counted them twice: 22 sites
+  had more than one source, 53% (25/47) of those records at the swath edge
+  against 34% of all detections. The merge distance is now one pixel (D32):
+  4 sites with more than one source, 12% (1/8) at the swath edge.
 
 ## Review 1: v1, 7 nights (2026-11-07)
 

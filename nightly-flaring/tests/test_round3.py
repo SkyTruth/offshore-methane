@@ -38,8 +38,8 @@ def test_normalised_negative_residual_elimination():
 @pytest.mark.parametrize("temp,esf", [(5000, 1e-5), (400, 1e-5), (1800, 2)])
 def test_physical_rejection_and_pin(temp, esf):
     result = nf.fit_planck(BANDS, spectrum(temp, esf), [0.01] * 6)
-    assert result[4] in ("pinned", "unfitted")
-    if result[4] == "pinned":
+    assert result[4].startswith("pinned:") or result[4] == "unfitted"
+    if result[4].startswith("pinned:"):
         assert result[0] == 1810 and 0 < result[1] <= 1
 
 
@@ -49,7 +49,7 @@ def test_nonconvergence_pins_only_usable_m10(monkeypatch):
         "minimize",
         lambda *a, **k: SimpleNamespace(x=[1800, np.log(1e-5)], fun=0, success=False),
     )
-    assert nf.fit_planck(BANDS, spectrum(), [0.01] * 6)[4] == "pinned"
+    assert nf.fit_planck(BANDS, spectrum(), [0.01] * 6)[4] == "pinned:nonconvergence"
     assert nf.fit_planck(["M12", "M13"], [0.1, 0.1], [0.01] * 2)[4] == "unfitted"
 
 
@@ -59,7 +59,7 @@ def test_high_final_chi_square_rejected(monkeypatch):
         "minimize",
         lambda *a, **k: SimpleNamespace(x=[1800, np.log(1e-5)], fun=100, success=True),
     )
-    assert nf.fit_planck(BANDS, spectrum(), [0.01] * 6)[4] == "pinned"
+    assert nf.fit_planck(BANDS, spectrum(), [0.01] * 6)[4] == "pinned:chi2"
 
 
 def test_zone_noise_uses_same_clipped_sample():

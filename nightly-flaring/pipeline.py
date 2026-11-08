@@ -7,7 +7,7 @@
 3. One row per site per local night: mean clear-sky radiant heat (MW, clear
    non-detections count as 0) and the matching BCM/yr rate.
 
-Per-granule results are cached under ``out_dir/overpasses_v3/`` to resume.
+Per-granule results are cached under ``out_dir/overpasses_v4/`` to resume.
 Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 """
 
@@ -33,7 +33,7 @@ import nodd  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 SITES_CSV = OUT_DIR / "gfw_oil_sites.csv"
-PIPELINE_VERSION = "v3"
+PIPELINE_VERSION = "v4"
 SZA_CLEAR = 97.0  # clear-overpass rule (MYC25Q4 README)
 BCM_PER_MW_YEAR = 0.0116  # John Zink calibration slope (MYC25Q4 README)
 SLICE_MARGIN = timedelta(seconds=20)
@@ -62,6 +62,8 @@ def build_jobs(sites: pd.DataFrame, start: date, end: date) -> list[dict]:
             ],
             ignore_index=True,
         )
+        if slices.empty:
+            continue
         for col in ("slice_start", "slice_end"):
             slices[col] = pd.to_datetime(slices[col]).dt.tz_convert(None)
         index: dict[str, dict] = {}
@@ -159,7 +161,7 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
 def dedupe_overpasses(over: pd.DataFrame) -> pd.DataFrame:
     """Collapse same-satellite/site runs with consecutive gaps <10 s.
 
-    Keep the smallest site-pixel distance; ties keep the earliest record.
+    Prefer detections, then smallest site-pixel distance, then earliest record.
     """
     if over.empty:
         return over.copy()
@@ -169,7 +171,11 @@ def dedupe_overpasses(over: pd.DataFrame) -> pd.DataFrame:
     gap = ordered.groupby(["satellite", "site_id"])["_time"].diff()
     ordered["_observation"] = (gap.isna() | (gap >= pd.Timedelta(seconds=10))).cumsum()
     return (
-        ordered.sort_values("dist_m", kind="stable")
+        ordered.sort_values(
+            ["detected", "dist_m", "_time"],
+            ascending=[False, True, True],
+            kind="stable",
+        )
         .drop_duplicates("_observation")
         .sort_values("_time", kind="stable")
         .drop(columns=["_time", "_observation"])

@@ -98,7 +98,8 @@ def local_background(
 # Local quality choices: chi-square per max(n-2, 1) <= 9 (3-sigma RMS).
 # Two-band fits have no residual degrees of freedom; use denominator one.
 FIT_CHI2_MAX = 9.0
-FIT_T_MIN, FIT_T_MAX = 600.0, 3500.0
+FIT_T_MIN, FIT_T_MAX = 1200.0, 3500.0
+TWO_BAND_T_MIN, TWO_BAND_T_MAX = 1200.0, 2500.0
 NOISE_FLOOR = 1e-6  # radiance units; guards uniform synthetic/background scenes
 # Relative model error added in quadrature to each band's noise: band-centre
 # Planck (no spectral response), no atmospheric correction and calibration
@@ -113,7 +114,7 @@ def fit_planck(
     noise: list[float] | None = None,
     t0: float = 1000.0,
 ) -> tuple[float, float, float, list[str], str]:
-    """Noise-weighted fit, negative obs-model residual elimination, or M10 pin.
+    """Noise-weighted fit with guarded leave-one-out elimination or M10 pin.
 
     Return T, ESF, reduced chi-square, used bands, fit flag. Rejected fits
     without usable M10 return NaNs and 'unfitted'. The pin is a constrained
@@ -129,35 +130,53 @@ def fit_planck(
     usable_m10 = "M10" in bands and original["M10"] > 0
     dropped = []
     chi = np.inf
-    while len(bands) >= 2:
-        wl = np.array([BAND_UM[b] for b in bands])
+    reason = "insufficient_bands" if len(bands) < 2 else "no_m10_m11"
+
+    def refit(names, values, errors):
+        wl = np.array([BAND_UM[b] for b in names])
 
         def objective(p):
             t = np.clip(p[0], 300.0, 5000.0)
             model = np.exp(np.clip(p[1], -100, 10)) * planck(wl, t)
-            return float(np.sum(((model - obs) / sd) ** 2))
+            return float(np.sum(((model - values) / errors) ** 2))
 
-        esf0 = max(obs[0], 1e-9) / planck(wl[0], t0)
+        esf0 = max(values[0], 1e-9) / planck(wl[0], t0)
         res = minimize(
             objective,
             [t0, np.log(esf0)],
             method="Nelder-Mead",
             options={"xatol": 0.001, "fatol": 1e-10, "maxiter": 2000},
         )
+        return res, float(res.fun) / max(len(names) - 2, 1)
+
+    if len(bands) >= 2 and {"M10", "M11"}.intersection(bands):
+        res, chi = refit(bands, obs, sd)
+        while chi > FIT_CHI2_MAX and len(bands) > 3:
+            trials = []
+            for i in range(len(bands)):
+                remaining = bands[:i] + bands[i + 1 :]
+                if not {"M10", "M11"}.intersection(remaining):
+                    continue
+                fit, score = refit(remaining, np.delete(obs, i), np.delete(sd, i))
+                if fit.success and np.isfinite(score) and score < chi:
+                    trials.append((score, i, fit))
+            if not trials:
+                break
+            chi, i, res = min(trials, key=lambda trial: trial[0])
+            dropped.append(bands.pop(i))
+            obs, sd = np.delete(obs, i), np.delete(sd, i)
         t, esf = float(res.x[0]), float(np.exp(np.clip(res.x[1], -100, 10)))
-        chi = float(res.fun) / max(len(bands) - 2, 1)
-        if chi > FIT_CHI2_MAX and len(bands) > 2:
-            drop = int(np.argmin((obs - esf * planck(wl, np.clip(t, 300, 5000))) / sd))
-            dropped.append(bands.pop(drop))
-            obs, sd = np.delete(obs, drop), np.delete(sd, drop)
-            continue
-        if (
-            res.success
-            and FIT_T_MIN <= t <= FIT_T_MAX
-            and 0 < esf <= 1
-            and np.isfinite(chi)
-            and chi <= FIT_CHI2_MAX
-        ):
+        if not res.success:
+            reason = "nonconvergence"
+        elif not np.isfinite(t) or not 0 < esf <= 1 or t > FIT_T_MAX:
+            reason = "bounds"
+        elif t < FIT_T_MIN:
+            reason = "low_t"
+        elif len(bands) == 2 and not TWO_BAND_T_MIN <= t <= TWO_BAND_T_MAX:
+            reason = "two_band_range"
+        elif not np.isfinite(chi) or chi > FIT_CHI2_MAX:
+            reason = "chi2"
+        else:
             return (
                 t,
                 esf,
@@ -165,11 +184,11 @@ def fit_planck(
                 bands,
                 ("eliminated:" + "+".join(dropped) if dropped else "ok"),
             )
-        break
+
     if usable_m10:
         esf = original["M10"] / float(planck(BAND_UM["M10"], FLARE_T_DEFAULT))
         if 0 < esf <= 1:
-            return FLARE_T_DEFAULT, esf, chi, ["M10", "T1810"], "pinned"
+            return FLARE_T_DEFAULT, esf, chi, ["M10", "T1810"], "pinned:" + reason
     return np.nan, np.nan, chi, [], "unfitted"
 
 

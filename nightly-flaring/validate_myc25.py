@@ -74,6 +74,34 @@ def pooled_observations(nights: pd.DataFrame, over: pd.DataFrame) -> pd.DataFram
     return result
 
 
+def like_for_like_frequency(
+    nights: pd.DataFrame, over: pd.DataFrame, lat: float, lon: float
+) -> tuple[int, int]:
+    """MYC-centred passes: any nearby detection makes that pass clear."""
+    from pipeline import dedupe_overpasses, strict_clear, SZA_CLEAR
+    from nightfire import haversine_m
+
+    sites = nights[["site_id", "lat", "lon"]].drop_duplicates("site_id")
+    nearby = sites[haversine_m(lat, lon, sites.lat, sites.lon) <= 2000]
+    obs = dedupe_overpasses(over[over.site_id.isin(nearby.site_id)])
+    obs = obs.merge(sites[["site_id", "lon"]], on="site_id")
+    local = pd.to_datetime(obs.time_utc) + pd.to_timedelta(obs.lon / 15, "h")
+    obs["night"] = (local - pd.Timedelta(hours=12)).dt.strftime("%Y-%m-%d")
+    obs = obs.merge(
+        nights[["site_id", "night"]].astype({"night": str}), on=["site_id", "night"]
+    )
+    obs = obs[obs.sza >= SZA_CLEAR].copy()
+    obs["clear"] = strict_clear(obs) | obs.detected
+    obs["_time"] = pd.to_datetime(obs.time_utc)
+    obs = obs.sort_values(["satellite", "_time"], kind="stable")
+    gap = obs.groupby("satellite")._time.diff()
+    obs["_pass"] = (gap.isna() | (gap >= pd.Timedelta(seconds=10))).cumsum()
+    passes = obs.groupby("_pass").agg(
+        detected=("detected", "max"), clear=("clear", "max")
+    )
+    return int(passes.detected.sum()), int(passes.clear.sum())
+
+
 def match_sites(
     nights: pd.DataFrame,
     myc: pd.DataFrame,
@@ -117,6 +145,17 @@ def match_sites(
     per_site["myc_det_freq"] = pd.to_numeric(per_site.myc_n_det) / pd.to_numeric(
         per_site.myc_n_clear
     ).replace(0, np.nan)
+    rates = {}
+    for i, (_, j) in selected.items():
+        flare = myc.iloc[j]
+        rates[i] = like_for_like_frequency(nights, overpasses, flare.lat, flare.lon)
+    per_site["lf_detections"] = [rates.get(i, (0, 0))[0] for i in range(len(per_site))]
+    per_site["lf_clear_passes"] = [
+        rates.get(i, (0, 0))[1] for i in range(len(per_site))
+    ]
+    per_site["lf_det_freq"] = per_site.lf_detections / per_site.lf_clear_passes.replace(
+        0, np.nan
+    )
     return per_site
 
 
@@ -129,6 +168,12 @@ def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
     both = matched[(matched.myc_bcm.astype(float) > 0) & (matched.bcm_per_year > 0)]
     persistent = matched[
         (matched.myc_regime == "persistent") & matched.myc_det_freq.notna()
+    ]
+    lf_persistent = sites[
+        sites.myc_flare_id.notna()
+        & (sites.myc_regime == "persistent")
+        & sites.lf_det_freq.notna()
+        & sites.myc_det_freq.notna()
     ]
     matched["region"] = [region_of(r.lat, r.lon) for r in matched.itertuples()]
     return dict(
@@ -157,6 +202,17 @@ def validation_summary(sites: pd.DataFrame, match_m: float = 2000.0) -> dict:
             ours=float(persistent.det_freq.median()) if len(persistent) else None,
             myc=float(persistent.myc_det_freq.median()) if len(persistent) else None,
             n=len(persistent),
+        ),
+        det_freq_like_for_like=dict(
+            ours=float(lf_persistent.lf_det_freq.median())
+            if len(lf_persistent)
+            else None,
+            myc=float(lf_persistent.myc_det_freq.median())
+            if len(lf_persistent)
+            else None,
+            n=len(lf_persistent),
+            detections=int(lf_persistent.lf_detections.sum()),
+            clear_passes=int(lf_persistent.lf_clear_passes.sum()),
         ),
         regions=[
             [
