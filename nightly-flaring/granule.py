@@ -68,7 +68,8 @@ peak_lat peak_lon footprint_m2 m10_peak prominence_ratio rh75_mw rh_peak_mw
 n_rh75 n_rh_cap_excluded temp_k area_m2 bands fit_flag t_fit_rejected
 cloud_mask_peak clear_neighbors_peak group_id group_size pair_distance_px
 pair_dcol pair_drow pair_rh_ratio group_rh_mw group_max_rh_mw centroid_lat
-centroid_lon assigned_site site_dist_m band_rule_changed""".split()
+centroid_lon assigned_site site_dist_m band_rule_changed n_hot
+n_suppressed_maxima suppressed_max_m10 suppressed_saddle_ratio""".split()
 
 
 def peak_saddle(
@@ -195,13 +196,18 @@ def candidate_clusters(
             peaks.append((r, c))
         if not peaks:
             continue
-        retained, prominence = [peaks[0]], [0.0]
+        retained, prominence, suppressed = [peaks[0]], [0.0], []
         for peak in peaks[1:]:
             ratio = peak_saddle(pixels, l10, peak, set(retained)) / l10[peak]
             if ratio <= 0.5:
                 retained.append(peak)
                 prominence.append(float(ratio))
+            else:
+                suppressed.append((float(l10[peak]), float(ratio)))
         peaks = retained
+        # Suppressed maxima are exported per component so the saddle rule can
+        # be audited offline (D45).
+        top = max(suppressed) if suppressed else (np.nan, np.nan)
         groups = [[] for _ in peaks]
         for rc in pixels:
             j = min(
@@ -215,6 +221,9 @@ def candidate_clusters(
                     "component_id": int(ids[group[0]]),
                     "prominence_ratio": prominence[j],
                     "m10_peak": float(l10[peak]),
+                    "n_suppressed_maxima": len(suppressed),
+                    "suppressed_max_m10": top[0],
+                    "suppressed_saddle_ratio": top[1],
                     "pixels": groups[j],
                     "peak": peak,
                     "split_component": int(ids[group[0]]) if len(peaks) > 1 else None,
@@ -262,6 +271,9 @@ def summarize_clusters(
                 component_id=cluster.get("component_id"),
                 prominence_ratio=cluster.get("prominence_ratio", 0.0),
                 m10_peak=cluster.get("m10_peak", np.nan),
+                n_suppressed_maxima=cluster.get("n_suppressed_maxima", 0),
+                suppressed_max_m10=cluster.get("suppressed_max_m10", np.nan),
+                suppressed_saddle_ratio=cluster.get("suppressed_saddle_ratio", np.nan),
                 peak=peak,
                 peak_row=r,
                 peak_col=c,

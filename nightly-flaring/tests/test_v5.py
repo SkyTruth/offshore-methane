@@ -179,3 +179,31 @@ def test_good_fit_failing_guard_pins_without_elimination():
     t, _, chi, used, flag = nf.fit_planck(bands, obs, [0.01] * 6)
     assert chi <= nf.FIT_CHI2_MAX
     assert flag == "pinned:low_t" and used == ["M10", "T1810"] and t == 1810
+
+
+def test_atomic_cache_write_and_manifest(tmp_path):
+    job = dict(satellite="SNPP", gid="g1", sites=[(1, 0, 0)])
+    cache = tmp_path / "cache"
+    assert not p.cache_complete(job, cache)
+    (cache / "SNPP").mkdir(parents=True)
+    p._write_csv_atomic(
+        pd.DataFrame(columns=g.COPY_COLUMNS), p._copies_path(job, cache)
+    )
+    assert not p.cache_complete(job, cache)  # site file still missing
+    p._write_csv_atomic(pd.DataFrame({"a": [1]}), p._cache_path(job, cache))
+    assert p.cache_complete(job, cache)
+    assert not list((cache / "SNPP").glob("*.tmp"))
+    other = dict(satellite="SNPP", gid="g2", sites=[])
+    summary = p.write_manifest([job, other], cache, tmp_path / "jobs.csv")
+    assert summary["expected"] == 2 and summary["complete"] == 1
+    assert summary["missing"] == [["SNPP", "g2"]]
+
+
+def test_suppressed_maxima_exported():
+    arr = np.array([[0, 10, 9, 8, 9.5, 0]], dtype=float)
+    clusters = g.candidate_clusters(arr > 0, arr, np.array([0]), np.array([2]))
+    assert len(clusters) == 1
+    c = clusters[0]
+    assert c["n_suppressed_maxima"] == 1
+    assert c["suppressed_max_m10"] == 9.5
+    assert c["suppressed_saddle_ratio"] == pytest.approx(8 / 9.5)

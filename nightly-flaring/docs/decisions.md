@@ -550,6 +550,39 @@ view-angle effects and non-upstream classification remain deferred. The
   Pre-change outputs are in `outputs/dev_v5_preD43/`.
 - **Status:** active (v5).
 
+### D44 Atomic cache writes and job manifest (v5)
+- **Choice:** each granule writes its copy table, then its site table, each
+  through a temporary file and an atomic rename; a granule is cached only
+  when both files exist. `pipeline.main` writes `jobs_<tag>.csv` (every
+  expected granule and whether it completed) and `run_summary_<tag>.json`
+  (expected, complete, missing).
+- **Alternatives:** schema validation of existing files; non-empty size checks
+  (a header-only copy table is valid for zero-copy granules).
+- **Why:** review 4 P2/P3: a run killed mid-write left a truncated site file
+  that passed `cache_complete`, and totals were built after exhausted retries
+  without a record of what was missing.
+- **Evidence:** test `test_atomic_cache_write_and_manifest`.
+- **Status:** active (v5).
+
+### D45 Export suppressed maxima (v5)
+- **Choice:** each copy row carries its component's suppressed-maxima count,
+  the strongest suppressed maximum's M10 radiance and its saddle ratio, plus
+  the copy's hot-pixel count `n_hot`.
+- **Why:** review 4 P9: without them the D35 saddle rule cannot be audited
+  from the 30-night outputs.
+- **Evidence:** test `test_suppressed_maxima_exported`; smoke run on SNPP
+  `d20261029_t0703487` fills the columns (18 copies, 0 suppressed).
+- **Status:** active (v5).
+
+### D46 30-night v5 run in its own output folder (v5)
+- **Choice:** the 30-night v5 rerun writes to `outputs/v5_30n/`; the v3
+  30-night files stay at the top of `outputs/`, with SHA-256 checksums in
+  `outputs/v3_30n_checksums.sha256`.
+- **Why:** review 4 (Opus): the default `out_dir` would overwrite the v3
+  baseline in the git-ignored folder, and `compare_versions.py` reads v3 from
+  there.
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

@@ -6,6 +6,102 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 4: v5, development night and spot granules (2026-11-08)
+
+Code reviewed: commit `c40795c`. Evidence: the 2026-10-29 development night,
+the 21 development granule cases, and live v5 runs on new granules (Sol 4,
+Opus 10). Both reviewers ran the 68 unit tests (all pass). Scratch:
+`/private/tmp/nf-review5-gpt61/`, `/private/tmp/nf-review5-opus55/`.
+
+### Verdicts
+
+- **Sol: `RERUN: GO`.** No defect requires another full rerun; remaining
+  problems can be diagnosed from the site records and copy table, and a
+  damaged cache needs only the affected granules reprocessed.
+- **Opus: `RERUN: GO`.** N1, N2, N3, N6, N7 and the band-set guard work as
+  specified (0/767 spot fits accepted below 1,200 K or with a forbidden band
+  set). N4, N5 and N8 are partly fixed; what remains can be rebuilt offline
+  from the copy table. Required before the run: a separate `out_dir`, because
+  the default writes over the v3 30-night files in the git-ignored
+  `outputs/`.
+
+### N1–N9 in v5
+
+| Item | Sol | Opus |
+| --- | --- | --- |
+| N1 elimination | Fixed | Fixed; 0/767 spot fits accepted below 1,200 K |
+| N2 same-scan bridge | Fixed; 0 repeated scans in 954 dev and 93 spot groups | Fixed; 0 groups of more than two copies (954 dev, 263 spot) |
+| N3 attribution | Fixed | Fixed; 1/33 spot merged groups changes site, toward MYC `m_205` |
+| N4 merge distance | Fixed as specified | Partly: sites 4197/4202 again keep one flare's copies apart (1.26 px, ratio 3.17); 2/33 sub-pixel pairs with ratio about 11 stay apart |
+| N5 split prominence | Fixed as specified | Rule fixed; 80% (8/10) of dev split records still cloud-flagged |
+| N6 RH75% adjacency | Fixed | Fixed; RH75%/peak > 3 in 0/296 spot and 4/1,046 dev copies; 0 cap exclusions |
+| N7 copy RH | Fixed | Fixed; mean is 13% below max over 33 spot groups (363.6 vs 418.6 MW); en2025 §4.2 sums edge-of-scan footprint overlaps, so mean vs max vs sum is open |
+| N8 MYC frequency | Partly: "strict" applies infrastructure-pixel cloud flags to source-centred detections | Partly: "strict" includes the isolated-cloud clause, unlike MYC's cloud 0/1 rule |
+| N9 minor | Partly | Fixed or documented |
+
+### Non-blocking findings
+
+| ID | Finding | Location | Evidence | Found by |
+| --- | --- | --- | --- | --- |
+| P1 | MYC "strict" frequency uses site-pixel cloud flags, not the source's | `validate_myc25.py:103–125` | Synthetic: cloudy source with clear site pixel counts (1, 1); 17/912 dev assigned copies disagree with their site pixel's cloud class | Sol |
+| P2 | Cache files not written atomically; existence is not completeness | `pipeline.py:161–164` | A truncated site CSV passed `cache_complete` in a probe | Both |
+| P3 | Aggregates are built after exhausted retries without a job manifest | `pipeline.py:131–139, 302–320` | — | Sol |
+| P4 | RH-ratio guard applies at every distance, so a sub-pixel copy 10× weaker is kept and summed at the site | `granule.py:315` | Site 2828 (NOAA-21 `d20261024_t0118532`): 6.64 + 0.60 MW, 0.64 px; 6/58 dev candidate pairs at 0.5–1.0 px have ratio ≥ 3 | Opus |
+| P5 | Weak adjacent-scan copies become detections at neighbouring sites (glow test is same-scan only, since D10) | `granule.py:184–191` | 0.32 MW at 983 beside 50.2 MW at 989 (1.08 px, ratio 158); 0.29 MW at 3751 beside 55.0 MW at 3752; 0.51 MW at 984 beside 9.26 MW at 980 | Opus |
+| P6 | Site records mix fields from different copies | `granule.py:366–374, 417–418` | `peak_dist_m` from the centroid, `peak_lat/lon` from the strongest copy; site 4279 `rh_mw` 54.66 < `rh_peak_mw` 60.73 | Opus |
+| P7 | Copies in two different granules cannot merge | `pipeline.py:177–199` | 5 dev pairs under 1.5 px; 4 at one site, where dedupe keeps the smaller `dist_m` | Opus |
+| P8 | Guard validity ranks above χ² within elimination steps | `nightfire.py:191–203` | 1 `pinned:chi2`, 0 double eliminations in 767 spot fits | Opus |
+| P9 | Suppressed maxima are not exported, so the saddle rule cannot be audited | `granule.py:198–204` | — | Opus |
+
+Cantarell (Sol, SNPP 2026-10-15 `t0806449`): sites 983/989 at 9.79/17.94 MW
+in v3 become one 13.87 MW group at 989, 169 m from MYC `m_92`. The MYC
+`s_9056` vicinity goes to site 4513 on one pass and 4512 on a later one.
+
+### Expected 30-night effect (inferred)
+
+- Sol: pooled volume about 10–25% below v3 (new spots: detected RH −12.6%,
+  detected sites 83 → 78; dev local night −1.7%).
+- Opus: detected RH −11% to −16% (65–68 GW vs 76.9 GW); detections −2% to
+  +1%; summed strict-clear site means −5% to −12%. Fits with forbidden bands
+  or below 1,200 K were 101 v3 records holding 7.37 GW (9.6%).
+- Copy table about 15k–31k rows, 6–11 MB; runtime near v3's 105 min.
+
+### Gates for the 30-night rerun (merged)
+
+1. Baseline: the run uses its own `out_dir`; v3 file checksums unchanged
+   (`outputs/v3_30n_checksums.sha256`).
+2. Coverage: 100% of expected jobs complete in the manifest, or each missing
+   one explained; site-row count within ±0.1% of v3's 828,621; skipped dates
+   listed; site and copy tables reconcile (assigned groups ↔ site detections
+   and RH).
+3. Fits: 0 accepted fits below 1,200 K or above 3,500 K; 0 without two of
+   M10–M13 including M10 or M11; pinned share ≤ 5% (review if above 4%);
+   `pinned:low_t` records listed with `t_fit_rejected` and RH share;
+   `eliminated:M10` counted.
+4. RH tail: every copy with RH75%/peak > 3 and every cap exclusion listed
+   (together ≤ 0.5% of copies); top 20 site-nights checked against copy rows.
+5. Pairs: 0 groups repeating a scan; every accepted edge satisfies the guards;
+   group means and centroids reproduce; histogram of adjacent-scan candidates
+   (|Δcol| ≤ 1) by distance and RH ratio, ≤ 2% in 1.32–1.5 px; list unmerged
+   pairs under 1.0 px, pairs under 2 px with ratio ≥ 10 at different sites,
+   groups of three or more, and pairs split across granules.
+6. Attribution: swath-edge share of same-pass detections at sites < 2 km
+   apart ≤ 45% (v3 66%, n = 203; all-detection reference 35%); multi-source
+   edge share investigated above 45%; centroid site changes listed with MYC
+   distances (MYC sides with the centroid in ≥ 60%); cross-pass site switches
+   listed at MYC flares with ≥ 2 GFW sites within 2 km.
+7. Edge vs nadir: at persistent MYC flares with clear detections at both
+   nadir (cols 1,008–2,191) and edge (< 640 or ≥ 2,560), median edge/nadir RH
+   in 0.8–1.25; report it under mean, max and sum of copies to settle D38.
+8. Cross-satellite: same-night pairs differing > 2× below v3's 26–34% per
+   satellite pair.
+9. Splits: split components ≤ 1% of detections; cloud share reported.
+10. Totals: detected RH −8% to −20% vs v3 as an investigation trigger, not a
+    target; detections within ±5%; dedupe loses 0 detections.
+11. MYC: both frequency definitions published with cloud semantics named;
+    detections never exceed clear passes; log r and median ratio vs v3's 0.51
+    and 0.66 (n = 365), quoted with the greedy-matching limitation (B11).
+
 ## Main-session check of the v5 changes (2026-11-08)
 
 - D33 as first implemented also eliminated bands from fits with χ² ≤ 9 that

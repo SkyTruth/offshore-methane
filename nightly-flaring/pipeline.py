@@ -13,6 +13,7 @@ Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 import traceback
@@ -105,6 +106,36 @@ def _copies_path(job: dict, cache_dir: Path) -> Path:
     return _cache_path(job, cache_dir).with_name(f"{job['gid']}_copies.csv")
 
 
+def _write_csv_atomic(frame: pd.DataFrame, path: Path) -> None:
+    """Write ``frame`` to a temporary sibling, then rename it into place."""
+    tmp = path.with_name(path.name + ".tmp")
+    frame.to_csv(tmp, index=False)
+    tmp.replace(path)
+
+
+def write_manifest(jobs: list[dict], cache_dir: Path, path: Path) -> dict:
+    """Record every expected granule and whether both cache files exist."""
+    rows = [
+        dict(
+            satellite=j["satellite"],
+            granule=j["gid"],
+            n_sites=len(j.get("sites", [])),
+            complete=cache_complete(j, cache_dir),
+        )
+        for j in jobs
+    ]
+    frame = pd.DataFrame(rows, columns=["satellite", "granule", "n_sites", "complete"])
+    frame.to_csv(path, index=False)
+    missing = frame[~frame.complete]
+    summary = dict(
+        expected=len(frame),
+        complete=int(frame.complete.sum()),
+        missing=missing[["satellite", "granule"]].values.tolist(),
+    )
+    print(f"manifest: {summary['complete']}/{summary['expected']} granules complete")
+    return summary
+
+
 def cache_complete(job: dict, cache_dir: Path) -> bool:
     """Both site and copy tables must exist before a granule is cached."""
     return (
@@ -158,10 +189,13 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
             path = _cache_path(job, cache_dir)
             path.parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(recs, columns=granule.RECORD_COLUMNS)
-            pd.DataFrame(copies, columns=granule.COPY_COLUMNS).to_csv(
-                _copies_path(job, cache_dir), index=False
+            # Copies first, site records last: the site file marks completion,
+            # and each file appears only through an atomic rename (D44).
+            _write_csv_atomic(
+                pd.DataFrame(copies, columns=granule.COPY_COLUMNS),
+                _copies_path(job, cache_dir),
             )
-            df.to_csv(path, index=False)
+            _write_csv_atomic(df, path)
             nbytes += int(df["bytes_granule"].max()) if len(df) else 0
             if done % 25 == 0 or done == len(todo):
                 mins = (time.time() - t0) / 60
@@ -312,6 +346,10 @@ def main(
         else pd.DataFrame(columns=granule.COPY_COLUMNS)
     )
     tag = f"{start}_{end}"
+    summary = write_manifest(
+        jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", out_dir / f"jobs_{tag}.csv"
+    )
+    (out_dir / f"run_summary_{tag}.json").write_text(json.dumps(summary, indent=2))
     copies.to_csv(out_dir / f"copies_{tag}.csv", index=False)
     over.to_csv(out_dir / f"overpasses_{tag}.csv", index=False)
     nights = site_nights(over, sites, d0, d1)
