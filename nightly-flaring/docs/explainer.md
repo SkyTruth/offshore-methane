@@ -316,24 +316,113 @@ changes in its measured heat: a flare that fell from 50 MW to 8 MW before
 becoming dark is compared with its 8 MW state. A heat reduction and later
 darkness are separate observations.
 
-| Tier | What the card means |
-| --- | --- |
-| **High** | A recently bright flare has an unusually long clear dark spell under the conservative model, and measured nearby comparison flares show no sustained heat loss. |
-| **Mid** | A recently bright flare has at least six clear nights with no flare seen, but the spell is shorter, nearby heat also fell, or comparison coverage cannot resolve isolation. |
-| **Watch** | A smaller or less reliable source has a long clear dark spell, with enough earlier detections to make review useful. |
+![Source 4582/4583 and comparison flare 4500/4515, night by night](explainer/fo_record.svg)
 
-The conservative model allows missed detections to cluster. Its High threshold
-counts eligible sources in **each spell's own 30-night fleet window**, which
-always contains the spell's start. For an ended spell, the window ends at its
-last dark night and stays fixed on later builds. For an ongoing spell, it ends
-at the as-of night. Once either spell exceeds 30 nights, its window stays on
-its **first 30 nights**. During startup only available evaluation nights count;
-the family has a conservative floor of one tested unit per available night
-(at most 30). Adding older months or moving the calendar forward cannot move
-an ended spell's window; new thermal evidence can change eligibility or model
-calibration. Mid is a direct evidence rule and does not rely on treating
-successive nights as independent. These scores have not been validated as
-real-world false-alarm rates. The exact rules and arithmetic are in
+*Figure 20. The Mid card 4582/4583 in the Persian Gulf. Top: in the 29 nights
+before its spell the flare was seen on 27 of 28 clear nights (median 18.5 MW);
+then no flare on 14 clear nights from 21 October to 3 November; then 0.19 MW
+on 4 November. Bottom: the nearest bright comparison flare, 6.8 km away, fell
+from a median of 10.5 MW to 0.59 MW over the same nights, so the card reads
+"heat also fell nearby".*
+
+| Tier | What the card means | Clear dark nights needed |
+| --- | --- | --- |
+| **High** | A recently bright flare has an unusually long clear dark spell under the conservative model, and measured nearby comparison flares show no sustained heat loss. | Enough to pass the High threshold: 13 to 16 for the bright sources on 4 November (Figure 22) |
+| **Mid** | A recently bright flare has at least six clear nights with no flare seen, but the spell is shorter, nearby heat also fell, or comparison coverage cannot resolve isolation. | 6 |
+| **Watch** | A smaller or less reliable source has a long clear dark spell, with enough earlier detections to make review useful. | 28, with the spell still ongoing |
+
+![How a dark spell becomes a High, Mid or Watch card](explainer/fo_tiers.svg)
+
+*Figure 21. The rules a dark spell must pass to become a card. Counts are for
+4 November.*
+
+**Clear nights are not calendar days.** Cloud-only nights are skipped. At the
+median bright site (31 sites whose median nightly heat was 3 MW or more over
+88 nights), 88%
+of nights had at least one clear pass; at the cloudiest tenth of those sites,
+26%. Fifteen clear dark nights take about 17 calendar nights at the first and
+about 58 at the second.
+
+#### How long real flares stay out
+
+**A flare can go out for minutes or for weeks.** Flare pilots carry flame
+detectors and relight automatically when the flame is lost, so many flame-outs
+last minutes ([John Zink](https://www.johnzink.com/resources-training/knowledge-hub/ensuring-flare-pilot-reliability-preventing-and-mitigating-fuel-supply-failures)).
+Longer outages follow a failed ignition system, lost pilot gas, or work on the
+flare tip. At the Zaap-C platform in the Bay of Campeche, about 7 km
+east-southeast of site 927, the flare was reported unlit for 17 days in
+December 2021 while the platform vented about 40,000 t of methane
+(Irakulis-Loitxate et al. 2022). In US onshore basins, aerial surveys found
+3–5% of flares unlit at any one time (Plant et al. 2022), and in repeat
+Permian surveys over one week in 2020 more than half of the malfunctioning
+flares were unlit or partly lit on more than one day ([EDF](https://www.edf.org/media/helicopter-surveys-indicate-malfunctioning-flares-permian-basin-are-releasing-least-300000)).
+No published record gives the spread of outage durations offshore. A flare can
+also go dark because gas stopped flowing to it, which releases nothing.
+
+**VIIRS looks for about two hours a night.** Passes fall between about 00:50
+and 02:50 local time. An outage that starts and ends between passes leaves no
+record, and a flare relit the next day ends the spell on the next detection.
+
+**Single dark nights happen at steady flares, for unknown reasons.** At bright
+flares seen on at least 80% of clear nights (115 stable 29-night blocks), a
+clear night with no detection followed a detected night 1.7% of the time (43 of
+2,568). Nothing in the record says whether the flame was burning on those
+nights. A miss can be the sensor, thin cloud the cloud mask called clear, a
+flame turned down below detection, or a real outage of under a day. The misses
+do not gather where the sensor is weakest: 42 of the 56 had a clear pass near
+the centre of the swath and 46 had three or more clear passes. Of 50 misses
+with a following clear night, 37 were followed by a detection, so most are
+single nights. The screen treats every one of these misses as a missed
+detection of a burning flare. That assumption makes darkness easier to explain
+away, so it lowers the confidence numbers below; any real short outages among
+them would raise them.
+
+**Each source gets its own miss rate.** A source's rate is its own count of
+misses after detected nights in its 29 nights before, with one hit and one
+miss added so that a source never missed is not treated as never missing. On
+4 November the 42 bright, steady sources ranged from 3.4% to 16%; the 3.4% low
+end belongs to sources with no misses at all and is the added count alone.
+
+**Confidence grows with each clear dark night.** If a bright flare kept
+burning at its usual heat, a long run of clear misses would be rare. For
+4582/4583 (one miss in 26 clear nights that followed a detection, rate 7.1%),
+the confidence that
+its darkness is more than chance misses is 92.9% after one clear night, 99.5%
+after six and 99.99% after fourteen. The screen, though, watches every bright source every
+night: 1,348 source-nights in that spell's 30-night window. A long run of
+misses can happen somewhere by chance, so the fleet-wide confidence stays at
+0% through nine nights, then reaches 17% at 10, 51% at 11, 83% at 13, 89.9% at
+14 and 94% at 15. High requires 90% across the fleet.
+
+![Confidence that a dark spell is more than missed detections, by clear dark nights](explainer/fo_confidence.svg)
+
+*Figure 22. Confidence that a dark spell is more than missed detections, by
+clear nights in a row with no flare seen. "This flare alone" is 1 minus the
+model's chance of that many clear misses in a row if the flare had kept
+burning at its usual heat; "across all bright flares screened" multiplies that
+chance by the number of source-nights screened. The model's miss rates come
+from single dark nights at steady flares, counted as missed detections even
+though some may be real short outages. Bands span the 42 bright, steady
+sources on 4 November; lines use 4582/4583. Watch sources fail the bright rule
+and are not scored on these curves. These are model sensitivities, not
+validated rates. They say nothing about why the flame stopped: a shut-in
+with no gas flow and an unlit flare venting gas leave the same record.*
+
+The conservative model allows missed detections to cluster. After a clear
+miss, the next clear night at steady bright flares was also a miss 26% of the
+time (13 of 50; 95% upper bound 40%); the model uses 59%. If misses were
+independent, four clear dark nights would pass the High threshold instead of
+13 to 16. The High threshold counts eligible sources in **each spell's own
+30-night fleet window**, which always contains the spell's start. For an ended
+spell, the window ends at its last dark night and stays fixed on later builds.
+For an ongoing spell, it ends at the as-of night. Once either spell exceeds 30
+nights, its window stays on its **first 30 nights**. During startup only
+available evaluation nights count; the family has a conservative floor of one
+tested unit per available night (at most 30). Adding older months or moving
+the calendar forward cannot move an ended spell's window; new thermal evidence
+can change eligibility or model calibration. Mid is a direct evidence rule and
+does not rely on treating successive nights as independent. The exact rules and
+arithmetic are in
 [D58](decisions.md#d58-source-centred-flare-out-evidence-cards-and-tiers-v5).
 
 **We also compare heat at nearby flares.** A comparison flare must
@@ -341,10 +430,10 @@ have measured clear heat on at least three of the **14 nights before the
 spell**, with median heat **at least 3 MW**. We compare
 only nights when their heat was measured or when a clear view found no flare;
 cloud-only detections leave heat unknown. For example, 4500 continued to be
-detected while its heat fell sharply during the 4582/4583 spell. That makes a
-shared operating change a plausible explanation, without proving a shared
-cause. No comparison flare within 10 km means that isolation is unknown, and
-caps the card at Mid.
+detected while its heat fell sharply during the 4582/4583 spell (Figure 20,
+bottom). That makes a shared operating change a plausible explanation, without
+proving a shared cause. No comparison flare within 10 km means that isolation
+is unknown, and caps the card at Mid.
 
 Each card shows the earlier heat in megawatts (MW) and a **conditional heat
 bound** during darkness. This asks whether a flame like those we have detected
@@ -352,10 +441,24 @@ in a particular heat range would plausibly have escaped every clear night.
 It depends on that observed sample and on independent nights; it is not a
 physical upper limit. A flame smaller than any detected remains untested.
 
-**EMIT adds daytime review opportunities.** For High and Mid cards, a table
-lists scenes covering the source before, during, between the bracketing VIIRS
+![Conditional heat bound from same-night re-detection rates](explainer/fo_bound.svg)
+
+*Figure 23. Top: of flares detected on one clear pass, the share detected again
+on another clear pass the same night, by heat. Bottom: the chance that a flare
+of each size is missed on all 6 (927) or 14 (4582/4583) clear dark nights.
+The bound starts at the smallest size that, with every larger size, falls to
+5% or less.*
+
+**EMIT adds daytime review opportunities.** For every card, a table lists
+scenes covering the source before, during, between the bracketing VIIRS
 passes ("boundary"), or after the spell. Scene cloud cover does not tell us
 whether the source itself was clear. A covering scene is not a methane finding.
+
+![How EMIT scenes are labelled before, during, boundary or after a dark spell](explainer/fo_emit.svg)
+
+*Figure 24. Labels follow the VIIRS passes, not calendar dates. A scene between
+the last pass that saw the flare and the first clear miss is "boundary",
+because the flare may have stopped at any time in between.*
 
 When imagery is available, the card pairs true colour with a quick-look CH4
 absorption index. The index highlights relative absorption in two spectral
@@ -366,6 +469,19 @@ Earth Engine's measured EMIT collection cutoff, the card shows that date and
 remains unknown. The pipeline retries
 each build and retains cached images during offline rebuilds. No plume has
 been confirmed by this screen.
+
+![Two EMIT scenes in the Flare-outs review recipe](explainer/chips_emit.png)
+
+*Figure 25. EMIT review images as the Flare-outs tab draws them, from scenes
+before Earth Engine's 31 August cutoff and before the VIIRS record. Top: site
+927, 21 June 2026. A narrow band of high index values joins the marked source
+to a point about 7 km east-southeast, near the Zaap-C platform; a parallel band
+lies about 4–5 km to the east. Both bands narrow toward their east-southeast
+ends. The image alone does not show which end the gas came from, or that it is
+methane. Bottom: site 3644, 28 July 2026. A pale streak beside the source in
+true colour has no counterpart in the index; diagonal bands of weak index
+values cross the chip. NASA's public EMIT plume list ends on 22 September 2025
+and covers neither date.*
 
 The record cannot show whether production continued, whether a stop was
 planned, whether a flame is out, or whether gas is vented. The
@@ -451,7 +567,7 @@ removes errors in v3's handling.
 
 ![Where the 20% drop in radiant heat from v3 to v5 comes from](explainer/waterfall.svg)
 
-*Figure 20. Radiant heat summed over all detections, v3 to v5, by cause,
+*Figure 26. Radiant heat summed over all detections, v3 to v5, by cause,
 over the 30 nights run with both versions.*
 
 ### A. Scope: where and when we look
@@ -533,7 +649,7 @@ and 0.3% of radiant heat.
 
 ![A fit that used the wrong bands, and the corrected fit](explainer/fitguard.svg)
 
-*Figure 21. Site 3802: the v3 fit (dashed) matches M7 and M8 but overshoots
+*Figure 27. Site 3802: the v3 fit (dashed) matches M7 and M8 but overshoots
 every other band; the corrected fit (solid) matches five bands.*
 
 **4. Radiant heat anchored on the flare's peak.** EOG's RH75% adds pixels
@@ -546,7 +662,7 @@ detections; site 3804 on 3 November fell from
 
 ![Which pixels add up to a flare's radiant heat](explainer/rh75.svg)
 
-*Figure 22. The same hot patch under the old and new rule.*
+*Figure 28. The same hot patch under the old and new rule.*
 
 **5. Bow-tie copies matched and averaged.** EOG drops copies closer than half
 a pixel and keeps one. Here, 61% of matched copy pairs (2,282 of 3,757) sit
@@ -628,6 +744,14 @@ These changes do not alter values:
   (MYC25Q4, CC BY-NC 4.0).
 - Global Fishing Watch, offshore fixed infrastructure.
 - NOAA Open Data Dissemination: VIIRS sensor data records and cloud mask.
+- Irakulis-Loitxate et al. 2022, *Environmental Science & Technology Letters*
+  9:520: the Zaap-C venting event, December 2021.
+- Plant et al. 2022, *Science*, doi:10.1126/science.abq0385: unlit and
+  inefficient flares in US basins.
+- Environmental Defense Fund 2020, Permian helicopter flare surveys.
+- NASA EMIT L1B radiance, L2A reflectance and L2B CH4 enhancement products
+  (LP DAAC; Earth Engine `NASA/EMIT/L1B/RAD`).
 
 Figures are generated by [`explainer/make_figures.py`](explainer/make_figures.py)
-from the run outputs.
+from the run outputs; Figures 20–25 by
+[`explainer/make_flareout_figures.py`](explainer/make_flareout_figures.py).

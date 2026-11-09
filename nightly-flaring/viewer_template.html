@@ -286,6 +286,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
 }
 .doc h2::after { content: ""; position: absolute; left: 0; bottom: 0; width: 40px; height: 3px; background: var(--accent); }
 .doc h3 { margin: 34px 0 8px; font-family: var(--serif); font-size: 23px; font-weight: 500; text-wrap: balance; }
+.doc h4 { margin: 28px 0 8px; font-family: var(--serif); font-size: 19px; font-weight: 500; color: var(--ink-2); text-wrap: balance; }
 .doc p, .doc ul, .doc ol { margin: 0 0 14px; max-width: 68ch; }
 .doc ul, .doc ol { padding-left: 22px; display: grid; gap: 6px; }
 .doc strong { font-weight: 700; color: var(--ink); }
@@ -1649,7 +1650,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   }
   function foEmitLabel(c) {
     const e = c.emit;
-    return !e ? "EMIT: review tiers only" : e.status !== "available" ? "EMIT: listing " + e.status
+    return !e ? "EMIT: not listed" : e.status !== "available" ? "EMIT: listing " + e.status
       : "EMIT: " + e.during_count + " during · " + e.scenes.filter(s => s.phase === "before").length + " before";
   }
   function foBadge(tier, suffix = "") {
@@ -1698,7 +1699,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     const box = el("section", null, el("h3", {text:"EMIT overpasses"}),
       infoBtn("EMIT review", "An ISS daytime overpass can support methane review. Scene cloud cover does not measure cloud over this source. Transition times between VIIRS passes are labelled boundary."));
     const e = c.emit;
-    if (!e) { box.append(el("p", {class:"fo-muted",text:"EMIT review is prepared for High and Mid cards."})); return box; }
+    if (!e) { box.append(el("p", {class:"fo-muted",text:"EMIT overpasses were not listed in this build."})); return box; }
     box.append(el("p", {class:"fo-muted",text:e.window_start+" to "+e.window_end+" · "+foEmitLabel(c)}));
     if (!e.scenes.length) box.append(el("p", {text:e.status === "available" ? "No EMIT scene covers the source in this window." : "The listing is incomplete; coverage is unknown."}));
     else box.append(foTable(["Time UTC","Timing","Cloud","Imagery","Browse"],e.scenes.map(s=>[

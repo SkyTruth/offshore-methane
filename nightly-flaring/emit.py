@@ -461,9 +461,7 @@ def enrich(
     """Attach public listing and imagery statuses without failing a site build."""
     client = None
     tried_client = False
-    for candidate in payload["candidates"]:
-        if candidate["tier"] not in ("High", "Mid"):
-            continue
+    for candidate in payload["candidates"]:  # every tier, Watch included (D61)
         start, end = cmr_window(candidate, payload["as_of"])
         entries, failures = [], []
         u = candidate["unit"]

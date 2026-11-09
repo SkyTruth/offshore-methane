@@ -1035,6 +1035,53 @@ view-angle effects and non-upstream classification remain deferred. The
   empty-copy replacement, and three-segment full-build offline regressions.
 - **Status:** active; no new VIIRS acquisition or publication in this change.
 
+### D61 EMIT for every tier; flare-out explainer figures (v5)
+- **Choice:** `emit.enrich` lists EMIT overpasses for High, Mid and Watch
+  cards (D59 had High and Mid only). Watch spells are long and ongoing, so their
+  ±14-night windows are wider; the listing, timing labels and chip rules are
+  unchanged.
+- **Result (4 Nov build):** the three Watch cards (3644, 3662, 6011) have no
+  EMIT scene from early September to 4 November. NASA CMR lists 15, 17 and 14
+  scenes at those sources since January 2025, the latest in July (3644, 3662)
+  and June 2026 (6011), so the listing works and the gap is in acquisitions.
+- **Explainer:** Figures 20–25 (`docs/explainer/make_flareout_figures.py`):
+  one card night by night with its comparison flare, the tier rules, confidence
+  by clear dark nights, the conditional heat bound, EMIT timing labels, and two
+  pre-cutoff EMIT scenes drawn with the review recipe. Part 2 figures become
+  26–28.
+- **Confidence curve:** "this flare alone" is 1 − p₁·q^(k−1), the D58 Markov
+  tail for k clear dark nights; "across the fleet" is 1 − min(1, F·p₁·q^(k−1)),
+  the D58 conservative score, so High (score ≤ 0.1) is fleet confidence ≥ 90%.
+  Bands span the 42 sources passing the bright rule at 4 November (p₁ 3.4–16%,
+  F from the 4582/4583 spell, 1,348). High then needs 13 to 16 clear dark
+  nights; with independent misses it would need 4. These are model
+  sensitivities, not validated rates.
+- **What a "miss" is:** no record shows a flare burning on a dark night. In the
+  115 stable blocks, a clear miss followed a detected night on 1.7% of such
+  nights (43/2,568). The 56 clear misses do not concentrate where detection is
+  weakest: 42 had a near-nadir clear pass and 46 had ≥3 clear passes; after a
+  detection the miss rate was 1.4% (27/1,902) on nights with ≥3 clear passes
+  including near nadir, and 2.5–3.0% on single-pass nights (2/81, 1/42, 2/67).
+  So the misses are consistent with a mix of detection failures, thin cloud
+  the mask calls clear, turndowns and real sub-day outages. Counting them all
+  as detection misses of a burning flare lowers fleet confidence (conservative
+  for flagging). Per-source p₁ adds one hit and one miss, so the 3.4% low end of
+  the 3.4–16% range is sources with zero misses (the added count alone). Explainer wording
+  corrected from "a flare that kept burning … was missed" to this.
+- **Real-world durations (cited, not modelled):** automatic pilot relight
+  (minutes); Zaap-C unlit 17 days while venting, December 2021
+  (Irakulis-Loitxate et al. 2022); 3–5% of US onshore flares unlit at a time
+  (Plant et al. 2022); in EDF's 2020 repeat Permian surveys, over half of
+  malfunctioning flares were unlit or partly lit on more than one day of a week.
+  No offshore duration distribution is published.
+- **Clear vs calendar nights:** 31 sites with median nightly heat ≥3 MW had a
+  clear pass on a median 88% of the 88 nights (tenth percentile 26%).
+- **EMIT example:** scene `20260621T173441_2617211_045` shows two parallel
+  high-index bands; one joins 927's position to a point near Zaap-C, about 7 km
+  east-southeast. Both narrow toward their east-southeast ends. The explainer
+  describes the image only and assigns no source.
+- **Status:** active.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

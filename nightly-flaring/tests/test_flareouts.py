@@ -302,6 +302,25 @@ def test_emit_network_failure_is_graceful(tmp_path):
     assert not list(tmp_path.rglob("*.json"))
 
 
+def test_emit_lists_overpasses_for_every_tier(tmp_path):
+    entry = dict(
+        producer_granule_id="EMIT_L1B_RAD_002_20261101T154451",
+        time_start="2026-11-01T15:44:51Z",
+    )
+    session = Mock()
+    session.get.return_value = fake_response([entry])
+    cards = []
+    for tier in ("High", "Mid", "Watch"):
+        c = candidate()
+        c.update(id=f"{tier}_2026-10-30", tier=tier)
+        cards.append(c)
+    p = dict(as_of="2026-11-04", candidates=cards)
+    emit.enrich(p, cache_dir=tmp_path, session=session, imagery=False)
+    for c in p["candidates"]:
+        assert c["emit"]["status"] == "available"
+        assert [s["scene_id"] for s in c["emit"]["scenes"]] == ["20261101T154451"]
+
+
 def test_ee_missing_recent_scene_is_pending_and_retried(tmp_path):
     ee = Mock()
     ee.ImageCollection.return_value.filterDate.return_value.filterBounds.return_value.aggregate_array.return_value.getInfo.return_value = []
