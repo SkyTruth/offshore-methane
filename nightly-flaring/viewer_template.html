@@ -703,7 +703,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     }
     ctx.lineWidth = 1.3; ctx.strokeStyle = C["flare-4"];
     for (const [x, y] of rings) { ctx.beginPath(); ctx.arc(x, y, dot + 2.2, 0, 2 * Math.PI); ctx.stroke(); }
-    flares.sort((a, b) => a[3] - b[3]);
+    flares.sort((a, b) => b[3] - a[3]); // largest first: smaller flares stay visible on top
     ctx.globalCompositeOperation = "lighter";
     for (const [x, y, , v, alpha] of flares) {
       const r = radiusOf(v) * 2.6, c = d3.color(colorOf(v));
@@ -1059,7 +1059,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   const pad2 = n => String(n).padStart(2, "0");
   const hhmm = m => pad2(Math.floor(((m % 1440) + 1440) % 1440 / 60)) + ":" + pad2(((m % 60) + 60) % 60);
   function passChart(s, rows, a, b, w, h) {
-    const padL = 34, padR = 6, top = 8, bot = 18, ph = h - top - bot;
+    const padL = 46, padR = 6, top = 8, bot = 18, ph = h - top - bot;
     const off = Math.round(s.lon * 4); // local solar time minus UTC, minutes
     const lo = 720 + a * 1440, hi = 720 + (b + 1) * 1440, n = b - a + 1;
     const inWin = rows.filter(r => r[0] + off >= lo && r[0] + off < hi);
@@ -1075,6 +1075,9 @@ details.card li b { color: var(--ink); font-weight: 500; }
       if (i === state.night) root.append(svg("rect", { x: x0, y: top, width: x1 - x0, height: ph, fill: "none", stroke: C.focus, "stroke-width": 1 }));
       if ((i - a) % every === 0) root.append(svgText(x0 + 1, h - 4, n <= 10 ? wd(NIGHTS[i]) + " " + dateOf(NIGHTS[i]).getUTCDate() : md(NIGHTS[i]), { "text-anchor": "start" }));
     }
+    const yTitle = svgText(10, top + ph / 2, "Radiant heat (MW)", { "text-anchor": "middle", fill: C["ink-2"], transform: `rotate(-90 10 ${top + ph / 2})` });
+    yTitle.setAttribute("font-family", "Roboto, Arial, sans-serif");
+    root.append(yTitle);
     y.ticks(3).forEach(v => {
       root.append(svg("line", { x1: padL, x2: w - padR, y1: y(v), y2: y(v), stroke: C.rule, "stroke-width": 1 }));
       root.append(svgText(padL - 5, y(v) + 3, Number.isInteger(v) ? fmtInt(v) : fmtMW(v), { "text-anchor": "end" }));

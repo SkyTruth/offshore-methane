@@ -813,6 +813,20 @@ view-angle effects and non-upstream classification remain deferred. The
   empty selection ring that changed size with the night's value.
 - **Status:** active (v5).
 
+### D55 Larger flare circles drawn beneath smaller ones (v5)
+- **Choice:** map flare circles are drawn largest first, so smaller flares sit
+  on top, each with a dark outline. Hover and click pick the nearest site
+  centre, so the order does not change what they select. The pass chart in
+  the site panel gets a y-axis title, "Radiant heat (MW)".
+- **Alternatives:** largest on top (the previous order: small flares beside a
+  large one were hidden, understating how many sources share an area);
+  semi-transparent fills (colour encodes radiant heat, and blending would
+  change it).
+- **Why:** user question, 2026-11-09; drawing large proportional symbols
+  first is the usual practice in thematic cartography (Slocum et al.,
+  Thematic Cartography and Geovisualization).
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained
