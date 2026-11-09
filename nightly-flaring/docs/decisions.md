@@ -745,6 +745,13 @@ view-angle effects and non-upstream classification remain deferred. The
     same rule as the nightly values (`dedupe_overpasses`, `strict_clear`), so
     a detection under cloud that does not count is drawn as a ring. The time
     axis is the site's local solar time, so each band is that site's night.
+  - *Controls* sit next to what they act on (user request, 2026-11-09):
+    Play at the left of the timeline bars; Range mean / Single night above
+    the four statistics, with the period they cover; All sites / Flaring
+    only in the map legend (which then drops the clear and cloudy keys);
+    the percentile filter at the top of the flare list, noting that it also
+    hides flares on the map and in the totals. The separate night slider is
+    removed: the bars, their playhead and the arrow keys select nights.
   - The tooltip and detail panel said EOG flares were matched "within 1 km";
     the matching radius is 2 km (D20), and the text now says so.
 - **Alternatives:** inline the pass rows (page about 8.6 MB at 88 nights,

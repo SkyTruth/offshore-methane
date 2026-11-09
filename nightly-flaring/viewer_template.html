@@ -71,7 +71,6 @@ h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45)
   display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--flare-3);
   color: var(--flare-5); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; vertical-align: 1px;
 }
-.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--panel); }
 .seg button {
   border: 0; background: transparent; padding: 6px 10px; font-size: 12.5px; color: var(--ink-2); cursor: pointer;
@@ -80,23 +79,22 @@ h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45)
 .seg button:last-child { border-right: 0; }
 .seg button:hover { color: var(--ink); background: var(--raise); }
 .seg button[aria-pressed="true"] { color: var(--night); background: var(--flare-5); font-weight: 650; }
-.player {
-  display: inline-flex; align-items: center; gap: 8px;
-  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); padding: 3px 10px 3px 3px;
+.tl-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; }
+.playbtn {
+  margin-top: 14px; border: 1px solid transparent; border-radius: 8px; background: var(--flare-4); color: var(--night); font-weight: 650;
+  padding: 8px 12px; cursor: pointer; font-size: 13px; min-width: 84px; text-align: left; white-space: nowrap;
 }
-.player button {
-  border: 0; border-radius: 6px; background: var(--flare-4); color: var(--night); font-weight: 650;
-  padding: 4px 10px; cursor: pointer; font-size: 12.5px; min-width: 78px; text-align: left;
-}
-.player button[aria-pressed="true"] { background: var(--raise); color: var(--ink); }
-.player input { width: 120px; max-width: 30vw; accent-color: var(--flare-4); margin: 0; }
-.pct {
-  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid var(--rule); border-radius: 8px; background: var(--panel); padding: 4px 10px;
-  font-size: 12.5px; color: var(--ink-2);
-}
-.pct input { width: 150px; max-width: 40vw; accent-color: var(--flare-4); margin: 0; }
-.pct output { font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 21ch; }
+.playbtn:hover { background: var(--flare-5); }
+.playbtn[aria-pressed="true"] { background: var(--raise); color: var(--ink); border-color: var(--rule); }
+.stats { display: grid; gap: 8px; }
+.modebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.modeinfo { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.modeinfo b { color: var(--ink); font-weight: 600; }
+.pctrow { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 2px 10px; margin: 0 0 10px; font-size: 12px; color: var(--ink-2); }
+.pctrow output { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pctrow input { grid-column: 1 / -1; width: 100%; accent-color: var(--flare-4); margin: 2px 0 0; }
+.legend .seg { justify-self: start; }
+.legend-keys { display: grid; gap: 6px; }
 
 .timeline { position: relative; border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); padding: 8px 12px 4px; }
 .tl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
@@ -314,24 +312,6 @@ details.card li b { color: var(--ink); font-weight: 600; }
       <button type="button" id="view-how" aria-pressed="false">How it works</button>
     </div>
   </nav>
-  <div class="controls" id="controls">
-    <div class="player">
-      <button type="button" id="play" aria-pressed="false">▶ Play</button>
-      <input type="range" id="scrub" min="0" max="1" step="0.01" value="0" aria-label="Night timeline position">
-    </div>
-    <div class="seg" role="group" aria-label="Value shown">
-      <button type="button" id="mode-mean" aria-pressed="true">Range mean</button>
-      <button type="button" id="mode-night" aria-pressed="false">Single night</button>
-    </div>
-    <div class="seg" role="group" aria-label="Sites shown">
-      <button type="button" id="show-all" aria-pressed="true">All sites</button>
-      <button type="button" id="show-flaring" aria-pressed="false">Flaring only</button>
-    </div>
-    <label class="pct" for="pct">Hide below
-      <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out">
-      <output id="pct-out" for="pct"></output>
-    </label>
-  </div>
 </header>
 
 <section class="timeline" id="timeline" aria-label="Night timeline">
@@ -339,7 +319,10 @@ details.card li b { color: var(--ink); font-weight: 600; }
     <div class="tl-title">Radiant heat seen each night <span id="tl-sub"></span></div>
     <div class="tl-range"><span id="tl-range"></span><div class="seg sm" role="group" aria-label="Nights averaged" id="presets"></div></div>
   </div>
-  <svg id="strip" tabindex="0" role="img" aria-label="Bar chart of total radiant heat per night. Click a night or drag to average a range; left and right arrow keys step through nights."></svg>
+  <div class="tl-row">
+    <button type="button" class="playbtn" id="play" aria-pressed="false">▶ Play</button>
+    <svg id="strip" tabindex="0" role="img" aria-label="Bar chart of total radiant heat per night. Click a night or drag to average a range; left and right arrow keys step through nights."></svg>
+  </div>
   <div class="tl-tip" id="tl-tip" hidden></div>
 </section>
 
@@ -352,15 +335,35 @@ details.card li b { color: var(--ink); font-weight: 600; }
       <button type="button" id="zout" aria-label="Zoom out">−</button>
       <button type="button" id="zreset">World</button>
     </div>
-    <div class="legend" id="legend"></div>
+    <div class="legend" id="legend">
+      <div class="seg sm" role="group" aria-label="Sites shown">
+        <button type="button" id="show-all" aria-pressed="true">All sites</button>
+        <button type="button" id="show-flaring" aria-pressed="false">Flaring only</button>
+      </div>
+      <div class="legend-keys" id="legend-keys"></div>
+    </div>
     <div class="tip" id="tip" hidden></div>
   </section>
 
   <aside class="panel" aria-label="Flaring summary">
-    <div class="tiles" id="tiles"></div>
+    <div class="stats">
+      <div class="modebar">
+        <div class="seg" role="group" aria-label="Value shown">
+          <button type="button" id="mode-mean" aria-pressed="true">Range mean</button>
+          <button type="button" id="mode-night" aria-pressed="false">Single night</button>
+        </div>
+        <span class="modeinfo" id="modeinfo"></span>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </div>
     <section class="card" id="detail" hidden></section>
     <section class="card">
       <h2><span id="rank-title">Strongest flares</span> <span class="aside" id="rank-aside"></span></h2>
+      <div class="pctrow" title="Hides weaker flares on the map, in this list and in the totals">
+        <label for="pct">Hide flares below</label>
+        <output id="pct-out" for="pct"></output>
+        <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out">
+      </div>
       <div class="seg sortseg" role="group" aria-label="Order flares by">
         <button type="button" data-sort="strong" aria-pressed="true">Strongest</button>
         <button type="button" data-sort="consistent" aria-pressed="false">Most consistent</button>
@@ -1265,7 +1268,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     t.append(tb);
   }
   function renderLegend() {
-    const lg = document.getElementById("legend");
+    const lg = document.getElementById("legend-keys");
     lg.replaceChildren();
     lg.append(el("div", { class: "lt", text: state.night < 0 ? "Mean radiant heat (MW)" : "Radiant heat (MW)" }));
     const row = el("div", { class: "row" });
@@ -1278,8 +1281,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
     const row2 = el("div", { class: "row" });
     const dotK = c => { const s = svg("svg", { width: 8, height: 8 }); s.append(svg("circle", { cx: 4, cy: 4, r: 2.6, fill: c })); return s; };
     const ringK = () => { const s = svg("svg", { width: 10, height: 10 }); s.append(svg("circle", { cx: 5, cy: 5, r: 3.6, fill: "none", stroke: C["flare-4"], "stroke-width": 1.3 })); return s; };
-    row2.append(el("span", { class: "k" }, ringK(), "lit, seen through cloud"),
-      el("span", { class: "k" }, dotK(C.clear), "clear, no flare"), el("span", { class: "k" }, dotK(C.cloud), "cloudy every pass"));
+    row2.append(el("span", { class: "k" }, ringK(), "lit, seen through cloud"));
+    if (!state.flaringOnly) row2.append(el("span", { class: "k" }, dotK(C.clear), "clear, no flare"), el("span", { class: "k" }, dotK(C.cloud), "cloudy every pass"));
     lg.append(row2);
   }
   function renderValidation() {
@@ -1356,16 +1359,16 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
   pctIn.addEventListener("input", () => { state.pct = Number(pctIn.value); refresh(); });
   function renderPct() {
-    if (state.thr == null) { pctOut.textContent = "off · all sites"; return; }
+    if (state.thr == null) { pctOut.textContent = "off · all " + fmtInt(state.nFl) + " shown"; return; }
     const shown = S.filter(s => statusOf(s) === "F" && visible(s)).length;
-    pctOut.textContent = ordinal(state.pct) + " pct · ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(shown) + " sites";
+    pctOut.textContent = ordinal(state.pct) + " pct · ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(shown) + " of " + fmtInt(state.nFl);
   }
   document.getElementById("zin").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 2));
   document.getElementById("zout").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 0.5));
   document.getElementById("zreset").addEventListener("click", () => go(worldView()));
 
   // ---------- playback ----------
-  const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub");
+  const playBtn = document.getElementById("play");
   const clock = document.getElementById("clock");
   const END_HOLD = 0.6;
   // about 25 s for any range, never faster than 6 nights a second
@@ -1383,16 +1386,11 @@ details.card li b { color: var(--ink); font-weight: 600; }
     clock.append(el("div", { class: "d", text: wd(NIGHTS[k]) + " " + md(NIGHTS[k]) }),
       el("div", { class: "s", text: "night " + (k + 1) + " of " + NN + " · passes near 01:30 local" }));
   }
-  function syncScrub() {
-    scrub.min = String(state.range[0]); scrub.max = String(Math.max(state.range[1], state.range[0] + 0.01));
-    const pos = state.animT != null ? state.animT : state.night >= 0 ? state.night : state.range[0];
-    scrub.value = String(Math.min(pos, state.range[1]));
-  }
   function setFrame(t) {
     state.animT = t;
     const k = Math.min(state.range[1], Math.round(Math.min(t, state.range[1])));
     if (k !== state.night) { state.night = k; refreshPanels(); if (state.selected) renderDetail(); }
-    syncScrub(); updateClock(); styleStrip(); draw();
+    updateClock(); styleStrip(); draw();
   }
   function tick(ts) {
     const dt = lastTs == null ? 0 : Math.min(ts - lastTs, 100);
@@ -1422,13 +1420,15 @@ details.card li b { color: var(--ink); font-weight: 600; }
     playBtn.setAttribute("aria-pressed", "false"); playBtn.textContent = "▶ Play";
   }
   playBtn.addEventListener("click", () => (raf ? pause() : play()));
-  scrub.addEventListener("input", () => { pause(); setFrame(Number(scrub.value)); });
 
   function refreshPanels() {
     computeThreshold();
     renderPct();
     modeMean.setAttribute("aria-pressed", String(state.night < 0));
     modeNight.setAttribute("aria-pressed", String(state.night >= 0));
+    document.getElementById("modeinfo").replaceChildren(...(state.night < 0
+      ? [el("b", { text: rangeLabel(...state.range) }), " · " + (state.range[1] - state.range[0] + 1) + " nights"]
+      : [el("b", { text: wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]) }), " · night " + (state.night + 1) + " of " + NN]));
     showAll.setAttribute("aria-pressed", String(!state.flaringOnly));
     showFl.setAttribute("aria-pressed", String(state.flaringOnly));
     renderTiles(); renderRank(); renderRegions(); renderLegend();
@@ -1437,14 +1437,13 @@ details.card li b { color: var(--ink); font-weight: 600; }
     refreshPanels();
     renderDetail();
     updateClock();
-    syncScrub();
     styleStrip();
     draw();
   }
 
   // ---------- views: map / how it works (#how-it-works) ----------
   const views = {
-    map: [document.getElementById("timeline"), document.querySelector("main.app"), document.getElementById("controls")],
+    map: [document.getElementById("timeline"), document.querySelector("main.app")],
     how: [document.getElementById("explainer")],
   };
   const viewBtn = { map: document.getElementById("view-map"), how: document.getElementById("view-how") };
