@@ -12,8 +12,11 @@ the numbers can and cannot tell you. Part 2 lists every place this
 implementation departs from the published method, why, and how each change
 moves the numbers.
 
-Figures use the 30-night run of 6 October to 4 November 2026 (pipeline v5)
-unless a caption says otherwise.
+Figures use all 88 nights from 9 August to 4 November 2026 (pipeline v5)
+unless a caption says otherwise. Comparisons with the earlier version, v3, use
+6 October to 4 November, the 30 nights run with both versions. The first
+night, 9 August, is partial: NOAA had already deleted some of its satellite
+files.
 
 ---
 
@@ -39,13 +42,13 @@ satellite (nadir) and grow to about 1.6 km at the edges of the sweep.
 *Figure 2. Pixels grow toward the edges of each sweep (top). All three
 satellites pass a site within the same two hours of the night (bottom).*
 
-Clouds block the view. Over these 30 nights a site averaged 1.8 clear looks a
-night, and 63% of site-nights had at least one clear pass.
+Clouds block the view. Over these 88 nights a site averaged 1.9 clear looks a
+night, and 66% of site-nights had at least one clear pass.
 
 ### A flare is far smaller than a pixel
 
 A gas flare is a flame a few metres across at the end of a boom. The median
-flare detected here has about 2 m² of flame, which fills about 1/270,000 of a
+flare detected here has about 2 m² of flame, which fills about 1/260,000 of a
 nadir pixel. The satellite cannot see the flame's shape. It records how much
 extra light the whole pixel gives off, and everything else is worked back from
 that.
@@ -107,7 +110,7 @@ bands with these shapes (Planck curves) and finds the one that fits. Two
 numbers come out:
 
 - **Temperature**, from where the curve peaks. Detected flares have a median
-  of 1,751 K (5th to 95th percentile 1,496 to 2,113 K).
+  of 1,747 K (5th to 95th percentile 1,488 to 2,109 K).
 - **How much of the pixel the flame fills**, from the curve's height. Times
   the pixel's area, this is the flame's area in square metres.
 
@@ -123,7 +126,7 @@ bands agree on a 1,699 K flame; M7 is set aside.*
 
 Temperature and area give the heat the flame radiates, by the
 Stefan–Boltzmann law: heat = area × σ × temperature⁴. The result is in
-megawatts (MW). The median detection is 1.16 MW, and 95% are below 24 MW.
+megawatts (MW). The median detection is 1.19 MW, and 95% are below 29 MW.
 
 A flare that spills into neighbouring pixels gets their heat added, counting
 only neighbours that read at least 75% of the peak pixel. EOG calls this value
@@ -131,12 +134,12 @@ RH75%.
 
 ![Radiant heat from temperature and flame area, with typical values](explainer/heat.svg)
 
-*Figure 8. The radiant-heat formula and typical values over 11,527
+*Figure 8. The radiant-heat formula and typical values over 34,087
 detections.*
 
 ### One flare, recorded once, at one site
 
-Two effects can make one flare look like two.
+Bow-tie copies and neighbouring platforms can each make one flare look like two.
 
 **Bow-tie copies.** VIIRS sweeps 16 rows of detectors at a time. Toward the
 edges of the swath each sweep widens and overlaps the next, so a flare can be
@@ -188,9 +191,9 @@ Each satellite pass over a site gives one of four outcomes:
 A night's value is the mean over its clear passes. A longer period's value is
 the mean over nights that had a clear pass.
 
-![Thirty nights of passes over one Bay of Campeche site](explainer/nights.svg)
+![88 nights of passes over one Bay of Campeche site](explainer/nights.svg)
 
-*Figure 13. Every pass over site 928 (Bay of Campeche, Mexico) for 30 nights.
+*Figure 13. Every pass over site 928 (Bay of Campeche, Mexico) for 88 nights.
 Hover a dot in the app to see its value.*
 
 ### Converting heat into gas
@@ -208,8 +211,8 @@ kept the average seen over the nights observed.
 
 ![Converting mean radiant heat into an annual gas volume](explainer/volume.svg)
 
-*Figure 14. The conversion scale, with the 492 sites seen flaring on clear
-nights. The median flaring site averages 0.29 MW, about 3.4 million m³ a
+*Figure 14. The conversion scale, with the 651 sites seen flaring on clear
+nights. The median flaring site averages 0.14 MW, about 1.7 million m³ a
 year.*
 
 ### What the numbers can and cannot tell you
@@ -227,7 +230,7 @@ from the sensor's limit.*
 **One pass is a sample.** Flames flicker and wind bends them, and the
 satellites see a site minutes apart from different angles. When two
 satellites both saw the same flare on the same clear night, 30% of the pairs
-differed by more than a factor of two (n = 1,598 site-nights). Averages over
+differed by more than a factor of two (n = 4,961 site-nights). Averages over
 weeks are much steadier than any single night.
 
 ![How two satellites' readings of the same flare compare](explainer/satellites.svg)
@@ -244,8 +247,9 @@ background. The night's value is the mean of the four.*
 
 **Viewing angle changes the reading.** Flames are taller than they are wide,
 so a satellite looking from the side sees more flame than one looking
-straight down. Passes near the swath edge read 1.53 times the nadir passes at
-the same flares (median of 42 persistent flares). EOG's calibration does not
+straight down. Passes near the swath edge read 1.58 times the nadir passes at
+the same flares (median of 39 persistent flares seen on at least 80% of clear
+passes from both angles). EOG's calibration does not
 correct for this, and neither does this pipeline; it averages out over many
 passes.
 
@@ -264,7 +268,7 @@ at that hour only.
 
 **Nearby platforms are hard to tell apart.** Where two GFW sites sit within
 2 km of one known flare, the flare is assigned to one site on some passes and
-the other on other passes in 52% of cases (92 of 178 such flares). Totals over
+the other on other passes in 64% of cases (126 of 197 such flares). Totals over
 an area are more reliable than the split between neighbouring platforms.
 
 **Not every flare is from oil production.** The site list is GFW's offshore
@@ -276,10 +280,10 @@ tests and national totals; the 2025 calibration paper's text gives 0.0124,
 7% higher. Individual flares burn gas of different composition and
 efficiency.
 
-**Agreement with EOG.** At 363 sites flaring in both this pipeline (30 nights
+**Agreement with EOG.** At 429 sites flaring in both this pipeline (88 nights
 of 2026) and EOG's 2025 annual catalog, the two agree in order of magnitude
-and rank (correlation of the logs r = 0.51) and our values are lower (median
-ratio 0.63). The comparison mixes different years, period lengths and site
+and rank (correlation of the logs r = 0.59) and our values are lower (median
+ratio 0.68). The comparison mixes different years, period lengths and site
 lists.
 
 ![Site volumes from this pipeline against EOG's 2025 annual catalog](explainer/validation.svg)
@@ -295,6 +299,34 @@ format and calibration and is not yet read by this pipeline.
 
 - **Map colour** is the site's mean radiant heat over the selected nights.
   Gas volume in the side panel uses the 0.0116 conversion.
+- **The timeline.** Each bar is the radiant heat summed over every site seen
+  flaring that night. The band beneath it shows the share of all sites seen in
+  clear sky that night, lighter where clearer: a low bar over a dark band
+  means cloud, not less flaring. The tooltip flags partial nights, when
+  satellite files are missing at either end of the record. Click a night,
+  drag across bars to average a range, or pick Last 7, Last 30 or All; Last 90
+  appears once the record passes 90 nights. The ← and → keys step one night.
+- **Ordering the flare list.**
+    - *Strongest*: mean clear-sky radiant heat over the selected nights, with
+      clear nights showing no flare counted as zero. In single-night mode,
+      that night's value.
+    - *Most consistent*: the share of clear nights with a flare. Sites are
+      ranked by the low end of that share's 95% range, so a site flaring on 4
+      of 4 clear nights ranks below one flaring on 40 of 44.
+    - *Most clear views*: the number of satellite passes that saw the site
+      through clear sky in the selected nights. More clear views give a
+      steadier average.
+- **Small charts**, beside each flare, in the map tooltip and in the site
+  panel, have one column per night. A column's height is that night's clear-sky
+  radiant heat, relative to the site's highest night. A strip along the bottom
+  gives each night's status: amber flaring, dark amber lit through cloud,
+  blue-grey clear with no flare, grey cloudy, and a gap where no satellite
+  passed.
+- **Site detail.** Clicking a site shows every night as an overview, with a
+  14-night window you can drag. Below it is each satellite pass in the window:
+  a filled amber dot is a detection in clear sky, an amber ring a detection
+  through cloud (not used for volume), a blue ring a clear pass with no
+  detection, and a cross a cloudy pass.
 - **A single night** is a sample of one to three passes. Use ranges of a week
   or more to compare sites.
 - **"Lit under cloud"** means the flare was seen through cloud. It shows the
@@ -315,20 +347,22 @@ here, and reliability work that does not change values.
 Each version was reviewed by two independent AI models (GPT-6.1 Sol and Claude
 Opus 5.5) against the papers and the run outputs; five reviews so far.
 Every choice, with its evidence, is in the
-[decision log](decisions.md) (entries D01 to D50), and every review finding is
+[decision log](decisions.md) (entries D01 to D52), and every review finding is
 in the [review record](reviews.md).
 
 ### Net effect of the corrections
 
 The corrections in group D below were made between pipeline v3 and v5. Over
-the same 30 nights they cut detected radiant heat by 20%, while the number of
-detections fell by only 1.4% (11,695 to 11,527). The summed site means fell
-from 944 to 759 MW, or from 10.95 to 8.80 billion m³ a year. 81% of the drop
+the 30 nights run with both versions (6 October to 4 November 2026) they cut
+detected radiant heat by 20%, while the number of detections fell by only
+1.4% (11,695 to 11,527). The summed site means fell from 944 to 759 MW, or
+from 10.95 to 8.80 billion m³ a year. 81% of the drop
 removes errors in v3's handling.
 
 ![Where the 20% drop in radiant heat from v3 to v5 comes from](explainer/waterfall.svg)
 
-*Figure 20. Radiant heat summed over all detections, v3 to v5, by cause.*
+*Figure 20. Radiant heat summed over all detections, v3 to v5, by cause,
+over the 30 nights run with both versions.*
 
 ### A. Scope: where and when we look
 
@@ -338,7 +372,7 @@ Fishing Watch's offshore oil infrastructure: 11,342 active structures, merged
 into 7,637 sites where they sit within 750 m of each other (about one pixel).
 *Why:* the goal is a value per platform. *Effect on interpretation:* a flare
 more than 2 km from any listed structure is not counted, and totals cover
-GFW-listed infrastructure only. 126 of our flaring sites have no EOG flare
+GFW-listed infrastructure only. 215 of our flaring sites have no EOG flare
 within 2 km.
 
 **Nightly values from NOAA's free bucket.** EOG publishes annual values
@@ -359,9 +393,9 @@ These published steps are not reproduced:
 | --- | --- | --- |
 | Spectral response of each band | Planck curve evaluated at the band centre | A few percent of model error (decision D12), covered by the 10% allowance in group C |
 | Two-curve fit (flame plus warm background) | One flame curve; mid-infrared bands have the local background subtracted first | Not compared directly |
-| Triggers from M11 and from the mid-infrared bands | Detection starts from M10 only | The faintest and coolest flares are missed: 21% (74 of 356) of EOG's persistent flares had no clear-night detection in 30 nights |
+| Triggers from M11 and from the mid-infrared bands | Detection starts from M10 only | The faintest and coolest flares are missed: 12% (41 of 356) of EOG's persistent flares had no clear-night detection in 88 nights |
 | Atmospheric correction (VIIRS Nightfire v4) | None | Matches the v3 top-of-atmosphere values the 0.0116 slope was calibrated on |
-| Cross-calibration between satellites | None | Satellite differences enter the average unadjusted: NOAA-20 reads 0.93 times NOAA-21 at the same flares (median, n = 1,598) |
+| Cross-calibration between satellites | None | Satellite differences enter the average unadjusted: NOAA-20 reads 0.95 times NOAA-21 at the same flares (median, n = 4,961) |
 | Day/Night Band, for flares seen only at 1.6 µm | Not used; a candidate needs a second infrared band | Such single-band candidates are dropped: 1 of 93 candidates near sites in a five-image check |
 
 ### C. Settings the papers leave open
@@ -390,10 +424,10 @@ real measurement. *Effect:* removes false zeros that pulled site means down.
 large flare's glow as a second flare at the neighbouring platform: 12.7% of
 detections (501 of 3,935). The pipeline now groups hot pixels into one
 source, applies the glow test, and assigns the source to one site by its
-centre. *Effect:* glow detections fell below 1%. From v3 to v5 the
-source-centre assignment removed a further 3,783 MW of double counting, and
-same-pass detections at two sites under 2 km apart fell from 196 to 72 pairs
-(Figure 11).
+centre. *Effect:* glow detections fell below 1%. Over the 30 nights run with
+both versions, the source-centre assignment removed a further 3,783 MW of
+double counting, and same-pass detections at two sites under 2 km apart fell
+from 196 (v3) to 72 pairs (v5) (Figure 11).
 
 **3. Physical limits on the temperature fit.** A fit that uses only the two
 shortest bands (M7 and M8) can match them with a cool, very large "flame",
@@ -401,10 +435,11 @@ which inflates radiant heat many times over. The pipeline now requires at
 least two of the four flare bands (M10 to M13), including M10 or M11, and a
 temperature of 1,200 to 3,500 K (two-band fits 1,200 to 2,500 K). A good fit
 that breaks a limit is replaced by a standard 1,810 K estimate from M10,
-instead of dropping bands until the limit passes. *Effect:* removed
-5,917 MW (7.7% of v3's detected heat) from 330 detections. At site 3802 one
-pass fell from 3,127 MW to 115 MW. Fits replaced by the standard estimate are
-3.2% of detections and 0.4% of radiant heat.
+instead of dropping bands until the limit passes. *Effect:* over the 30
+nights run with both versions, removed 5,917 MW (7.7% of v3's detected heat)
+from 330 detections. At site 3802 one pass fell from 3,127 MW to 115 MW. Over
+all 88 nights, fits replaced by the standard estimate are 3.0% of detections
+and 0.3% of radiant heat.
 
 ![A fit that used the wrong bands, and the corrected fit](explainer/fitguard.svg)
 
@@ -415,7 +450,8 @@ every other band; the corrected fit (solid) matches five bands.*
 above 75% of the patch's highest-heat pixel. One badly fitted pixel can then
 set the whole value. The pipeline anchors on the brightest 1.6 µm pixel,
 which locates the flare, and adds only its touching neighbours. *Effect:*
-removed 3,010 MW over 200 detections; site 3804 on 3 November fell from
+over the 30 nights run with both versions, removed 3,010 MW over 200
+detections; site 3804 on 3 November fell from
 1,776 MW to 71 MW.
 
 ![Which pixels add up to a flare's radiant heat](explainer/rh75.svg)
@@ -423,21 +459,23 @@ removed 3,010 MW over 200 detections; site 3804 on 3 November fell from
 *Figure 22. The same hot patch under the old and new rule.*
 
 **5. Bow-tie copies matched and averaged.** EOG drops copies closer than half
-a pixel and keeps one. Here, 59% of matched copies (756 of 1,271) sit more
-than half a pixel apart, so the half-pixel rule would count them as second
+a pixel and keeps one. Here, 61% of matched copy pairs (2,282 of 3,757) sit
+more than half a pixel apart, so the half-pixel rule would count them as second
 flares. The pipeline pairs copies in consecutive sweeps up to 1.5 pixels
 apart, in the same column (±1), within a factor of 3 in heat, one copy per
 sweep; averages their heat; and places the flare at their heat-weighted
-centre. *Effect:* 1,271 copy pairs merged over 30 nights. Averaging gives
-1,981 MW less than keeping the stronger copy; keeping the stronger copy, as
-EOG does, would make the v3-to-v5 change −18.0% instead of −19.9%. Read our
+centre. *Effect:* 3,757 copy pairs merged over 88 nights. Over the 30 nights
+run with both versions, averaging gives 1,981 MW less than keeping the
+stronger copy; keeping the stronger copy, as EOG does, would make the
+v3-to-v5 change −18.0% instead of −19.9%. Read our
 totals as about 3% below an EOG-style count.
 
 **6. Two flares in one hot patch.** Flares on one platform can merge into one
 hot patch. The pipeline splits a patch at a second brightness peak only when
 the brightness between the two peaks drops below half of the smaller peak.
-*Effect:* 0.75% of detections (87 of 11,527) come from split patches. Of the
-75 detections new in v5, 8 of the 10 largest come from split patches.
+*Effect:* 0.87% of detections (298 of 34,087) come from split patches. Of the
+75 detections new in v5 over the 30 nights run with both versions, 8 of the
+10 largest come from split patches.
 
 **7. Clear-sky rule kept strict.** The first version counted every detection
 as clear sky. 30% of its detections were under cloud flags, carrying 18% of
@@ -447,10 +485,11 @@ clear-sky averages; the on/off record still uses the cloudy detections.
 
 **8. Detections kept when images overlap.** When a site appears in two
 consecutive images seconds apart, the pipeline keeps the record with a
-detection, if either has one. *Effect:* 0 detections lost in 30 nights.
+detection, if either has one. *Effect:* none of the 34,242 observations with
+a detection was lost over 88 nights.
 
 **9. Viewing angle measured, not corrected.** Section "Viewing angle" above.
-Edge passes read 1.53 times nadir passes (n = 42 flares). Elvidge et al. 2016
+Edge passes read 1.58 times nadir passes (n = 39 flares). Elvidge et al. 2016
 corrected flame area to a side view; the operational calibration and this
 pipeline do not. *Effect:* single-night values depend on which satellite
 looked from where; averages over many passes mix geometries the same way
@@ -458,7 +497,7 @@ EOG's do.
 
 **10. Like-for-like comparison with EOG.** EOG reports how often a flare is
 detected per clear pass. Measured the way EOG counts, detections per clear
-pass at persistent flares are 0.39 here (strict clear sky, n = 356) or 0.51
+pass at persistent flares are 0.38 here (strict clear sky, n = 356) or 0.47
 (counting a detection as proof of clear sky), against EOG's 0.63. *Effect:*
 the published per-site rate (0.27 in v3) understated detection. Review 2
 split v3's gap into roughly equal parts: cloud handling, attribution among

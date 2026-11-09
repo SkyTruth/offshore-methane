@@ -674,6 +674,23 @@ view-angle effects and non-upstream classification remain deferred. The
   08-09 is therefore partial on all satellites, and night 08-10 is partial
   on SNPP. Any change to fits or to the RH75% stencil after these UTC dates
   expire needs the NASA archive (O11).
+- **Result:** finished 2026-11-09 02:21 UTC after 224.5 min; 36,875/36,875
+  granules, 328 GB downloaded. 80 granules failed on pass 1 with NOAA
+  connection resets and all 80 completed on pass 2. 442,946 site-nights
+  (7,637 sites × 58 nights): clear, no flare 64.4%; cloudy 32.2%; flaring
+  1.75%; flaring under cloud 0.64%; not observed 0.96% (4,255, of which
+  4,223 on partial night 08-09). Flaring sites per night, nights 08-10 to
+  10-05: median 130, range 85–195 (n=57); the 30-night run has median 130,
+  range 104–182 (n=30). Summed radiant heat at flaring sites per night:
+  median 688 MW, range 324–963 (n=57), against 548 MW, 238–709 (n=30) for
+  10-06 to 11-04. MYC25 sites matched within 2 km and detected at least
+  once: persistent 86.0% (306/356; 30-night run 79.2%, 282/356),
+  intermittent 51.2% (87/170; 40.9%, 70/171), sporadic 19.4% (13/67;
+  16.4%, 11/67), undetected 4.2% (5/118; 2.5%, 3/118). Log-RH correlation
+  with MYC25 r = 0.56 (n=406; 30-night 0.51, n=363), median ratio 0.67
+  (0.63). Per-pass detection frequency at persistent sites, like-for-like
+  clears: 0.50 (22,046/44,654) against 0.51 in the 30-night run and 0.63
+  in MYC25.
 - **Status:** active (v5).
 
 ### D51 Viewer published on GitHub Pages, with the explainer as a tab (v5)
@@ -691,7 +708,61 @@ view-angle effects and non-upstream classification remain deferred. The
   so the page is public. It shows EOG MYC25Q4 values (CC BY-NC 4.0) and
   site positions derived from GFW fixed infrastructure, both attributed in the
   page footer.
-- **Status:** active. The Claude artifact (v3 data) is no longer updated.
+- **Status:** active; D52 changes the build and the page. The Claude artifact
+  (v3 data) was deleted on 2026-11-09 at the user's request.
+
+### D52 Website built for a growing night series (v5)
+- **Choice:**
+  - *Data.* `build_viewer.main` joins every run segment under `outputs/v5_*`
+    into one night series. Where segments overlap, the later segment wins;
+    a night no segment covers shows as not observed. The build writes a
+    folder, `outputs/site/`: `index.html` with the per-night data inlined,
+    `passes/<site_id>.json` for each site that flared (fetched when the site
+    is opened), and `img/` for the explainer chips. `publish_pages` pushes the
+    folder as one parentless commit. Each site carries a status string (one
+    code per night), clear-sky radiant heat only for flaring and
+    lit-through-cloud nights, and, for sites that flared, clear passes per
+    night as one base-36 digit.
+  - *Flare list.* Three orders: Strongest (mean clear-sky radiant heat, or the
+    night's value in single-night mode); Most consistent (share of clear
+    nights with a flare, ranked by the lower end of its 95% Wilson interval);
+    Most clear views (clear satellite passes in the selected nights). On a
+    single night the list holds that night's flaring sites, ordered by their
+    figures over the selected range. Pages of 25 rows (10 on screens up to
+    900 px) with "Show more".
+  - *Timeline.* A band under the bars shows the share of all sites seen in
+    clear sky each night. Date labels follow the space per night: every
+    night, Mondays, months, or quarters. Buttons set the last 7, 30, 90 or
+    365 nights (those shorter than the record) or All; ←/→ step a night,
+    Home/End jump to the range ends. A night is flagged partial when fewer
+    than 90% of the median number of sites were passed over.
+  - *Small charts.* Line sparklines become one column per night (height
+    relative to the site's maximum) over a strip coloured by status;
+    adjacent nights share a column when nights outnumber pixels.
+  - *Site detail.* An overview of every night carries a draggable window of
+    14 nights (the whole range when it is 21 nights or fewer); the pass chart
+    below covers the window. Passes are deduplicated and classed clear by the
+    same rule as the nightly values (`dedupe_overpasses`, `strict_clear`), so
+    a detection under cloud that does not count is drawn as a ring. The time
+    axis is the site's local solar time, so each band is that site's night.
+  - The tooltip and detail panel said EOG flares were matched "within 1 km";
+    the matching radius is 2 km (D20), and the text now says so.
+- **Alternatives:** inline the pass rows (page about 8.6 MB at 88 nights,
+  growing about 67 KB per night); keep line sparklines (0.8 px per night at
+  72 px and 88 nights); rank consistency by the raw share (a site flaring on
+  its only clear night would top the list at 100%, 1/1); count clear nights
+  for "clear views" (ties at the night count).
+- **Why:** the user asked for the three list orders and a site designed for
+  90 nights and more.
+- **Evidence:** 88-night build (segments `v5_backfill` and `v5_30n`):
+  `index.html` 2.7 MB (0.58 MB gzip), 736 pass files 5.9 MB. A synthetic
+  365-night page (the 88 nights repeated) is 5.3 MB; in headless Chrome a
+  preset click (range statistics plus redraw) took 12 ms against 8 ms at 88
+  nights, and labels switched to months. Combined validation (MYC25, 2 km,
+  one-to-one): detected on at least one clear night at persistent sites
+  88.5% (315/356), intermittent 57.3% (98/171), sporadic 23.9% (16/67),
+  undetected 5.9% (7/118); log-RH r = 0.59.
+- **Status:** active (v5).
 
 ## V5 development evidence (2026-11-08)
 

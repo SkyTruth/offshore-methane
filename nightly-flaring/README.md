@@ -29,7 +29,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
-| `build_viewer.py` | Builds the self-contained viewer (data, basemap and explainer inlined); `publish_pages` deploys it to GitHub Pages (D51). |
+| `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with data, basemap and explainer; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
 | `docs/` | `explainer.md` and its figures (`explainer/`: charts from `make_figures.py`, real VIIRS image chips from `make_chips.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
@@ -54,21 +54,24 @@ Manager as `production-gfw-infra-api-key`) in the shell or the repo-root `.env`.
 .venv/bin/python granule_coverage.py     # -> outputs/granule_sites_<date>.csv
 .venv/bin/python -c "import pipeline; pipeline.main(start='2026-10-29', end='2026-11-04', workers=12)"
 .venv/bin/python validate_myc25.py
-.venv/bin/python build_viewer.py         # -> outputs/flaring_viewer.html
+.venv/bin/python build_viewer.py         # -> outputs/site/ (serve it: python -m http.server -d outputs/site)
 .venv/bin/python -m pytest -q tests
 ```
 
-The viewer maps every site for one night or the mean over a range of nights:
-flaring sites glow on an amber scale sized by radiant heat, and hovering shows
-a sparkline of the nightly values. A timeline strip shows the radiant heat seen
-each night; click a night, or drag to average a range. Play animates the range,
-easing each site's brightness between nights (cloudy nights hold the last clear
-value at low opacity); a percentile slider hides sites below a chosen
-radiant-heat percentile. `build_viewer.py` builds from the run with the latest
-end date and longest span unless `start`/`end` are given. Clicking pins a per-overpass chart, the
-matched EOG MYC25Q4 2025 flare, GFW structure IDs and a satellite-view link.
-The side panel ranks the strongest flares, totals by region, and compares the
-run with MYC25Q4.
+The website maps every site for one night or the mean over a range of nights:
+flaring sites glow on an amber scale sized by radiant heat. A timeline shows
+the radiant heat seen each night over a band giving the share of sites in
+clear sky; click a night, drag to average a range, use Last 7 / 30 / 90 / All,
+or step with ← and →. Play animates the range; a percentile slider hides sites
+below a chosen radiant-heat percentile. The flare list orders sites by
+strength, consistency (share of clear nights with a flare, by the lower end of
+its 95% interval) or clear views (clear passes), each row with a
+one-column-per-night chart. Opening a site shows every night with a movable 14-night
+window over its satellite passes, the matched EOG MYC25Q4 2025 flare, GFW
+structure IDs and a satellite-view link. The side panel also totals by region
+and compares the record with MYC25Q4. `build_viewer.py` takes every
+`outputs/v5_*` segment (D52); pass files load over HTTP, so preview the folder
+through a local server.
 
 Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which

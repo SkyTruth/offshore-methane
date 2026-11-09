@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Nightly Offshore Flaring</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23091017%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2211%22 fill=%22%23f28d27%22 opacity=%22.35%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%226.5%22 fill=%22%23ffbc5f%22/%3E%3C/svg%3E">
 <meta name="description" content="Nightly gas flaring at 7,637 offshore oil sites from VIIRS satellite data, after EOG's VIIRS Nightfire method, with an explainer of the science and its limits.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -101,19 +102,26 @@ h1 .glow { color: var(--flare-5); text-shadow: 0 0 18px rgba(242, 141, 39, 0.45)
 .tl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
 .tl-title { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-2); }
 .tl-title span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-3); margin-left: 6px; font-size: 11.5px; }
-.tl-range { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--ink-2); }
+.tl-range { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--ink-2); }
+.tl-range .seg { flex-wrap: nowrap; }
 .tl-range b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .linkbtn { border: 1px solid var(--rule); background: transparent; color: var(--focus); border-radius: 6px; padding: 1px 8px; cursor: pointer; font-size: 11.5px; }
-#strip { display: block; width: 100%; height: 74px; touch-action: none; }
+.seg.sm button { padding: 3px 9px; font-size: 11.5px; }
+#strip { display: block; width: 100%; height: 88px; touch-action: none; }
+#strip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 #strip .selection { fill: var(--focus); fill-opacity: 0.08; stroke: var(--focus); stroke-opacity: 0.6; }
+.tl-key { display: inline-flex; align-items: center; gap: 5px; }
+.tl-key i { display: inline-block; width: 26px; height: 6px; border-radius: 2px; background: linear-gradient(90deg, var(--raise), #9cbdd2); }
 .tl-tip {
   position: absolute; z-index: 6; pointer-events: none; background: rgba(10, 18, 26, 0.96); border: 1px solid var(--coast);
-  border-radius: 8px; padding: 6px 9px; font-size: 12px; white-space: nowrap;
+  border-radius: 8px; padding: 7px 10px; font-size: 12px; width: max-content; max-width: 280px; display: grid; gap: 2px;
 }
-.tl-tip b { font-family: var(--mono); font-weight: 600; }
+.tl-tip b { font-weight: 650; }
 .tl-tip span { color: var(--ink-2); }
+.tl-tip .warn { color: var(--flare-5); }
+.tl-tip .hint { color: var(--ink-3); font-size: 11px; margin-top: 2px; }
 
-.app { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 12px; }
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; }
 .mapwrap { position: relative; min-height: 0; border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; background: var(--sea); }
 #map { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #map.dragging { cursor: grabbing; }
@@ -167,18 +175,29 @@ h2 .aside { text-transform: none; letter-spacing: 0; font-weight: 400; color: va
 .tile .num small { font-size: 12px; color: var(--ink-2); font-weight: 400; margin-left: 3px; }
 .tile .ctx { font-size: 11.5px; color: var(--ink-2); }
 
+.sortseg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.sortseg button { padding: 6px 4px; text-align: center; line-height: 1.2; }
+.rank-hint { font-size: 11.5px; color: var(--ink-3); margin: 7px 0 6px; min-height: 2.4em; }
+.rank-hint b { color: var(--ink-2); font-weight: 600; }
+.microkey { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 10.5px; color: var(--ink-3); margin: 0 0 6px; }
+.microkey span { display: inline-flex; align-items: center; gap: 4px; }
+.microkey i { display: inline-block; width: 12px; height: 3px; border-radius: 1px; }
+.microkey i.bar { width: 4px; height: 9px; background: var(--flare-4); }
+.more { width: 100%; margin-top: 6px; border: 1px dashed var(--rule); background: transparent; color: var(--ink-2); border-radius: 6px; padding: 6px; cursor: pointer; font-size: 12px; }
+.more:hover { color: var(--ink); border-color: var(--ink-3); }
 ol.rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 ol.rank button {
-  width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) 72px 82px; align-items: center; gap: 8px;
+  width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) 90px 80px; align-items: center; gap: 8px;
   border: 0; border-radius: 6px; background: transparent; padding: 5px 6px; cursor: pointer; text-align: left;
 }
+ol.rank .spark svg { display: block; width: 100%; height: 26px; }
 ol.rank button:hover, ol.rank button.on { background: var(--raise); }
 ol.rank .i { font-family: var(--mono); font-size: 11px; color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums; }
 ol.rank .n { min-width: 0; }
 ol.rank .n b { display: block; font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ol.rank .n span { display: block; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ol.rank .val { font-family: var(--mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
-ol.rank .val small { display: block; font-size: 10.5px; color: var(--ink-3); white-space: nowrap; }
+ol.rank .val small { display: block; font-size: 10px; color: var(--ink-3); white-space: nowrap; }
 
 .tbl-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -194,10 +213,19 @@ tr.click:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; 
 .detail-head h3 { margin: 0; font-size: 16px; font-stretch: 85%; font-weight: 700; }
 .detail-head p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
 .close { border: 1px solid var(--rule); background: transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer; color: var(--ink-2); }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
 .facts div { min-width: 0; }
-.facts .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.facts .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .facts .num { font-family: var(--mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.facts .unit { font-size: 10.5px; color: var(--ink-2); }
+.subhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 12px 0 4px; font-size: 11.5px; color: var(--ink-2); }
+.subhead b { color: var(--ink); font-weight: 600; }
+.subhead .nav { display: inline-flex; gap: 4px; }
+.subhead .nav button { border: 1px solid var(--rule); background: transparent; border-radius: 6px; padding: 0 9px; height: 24px; cursor: pointer; color: var(--ink); }
+.subhead .nav button:disabled { opacity: 0.35; cursor: default; }
+.overview { cursor: ew-resize; touch-action: none; display: block; }
+.passbox { min-height: 150px; }
+.passbox .foot { padding: 50px 0; text-align: center; }
 .note { font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
 .note b { color: var(--ink); font-weight: 600; }
 .chartkey { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--ink-2); margin-top: 4px; }
@@ -263,7 +291,11 @@ details.card li b { color: var(--ink); font-weight: 600; }
 }
 @media (max-width: 420px) {
   .facts { grid-template-columns: 1fr 1fr; }
-  ol.rank button { grid-template-columns: 20px minmax(0, 1fr) 82px; }
+  ol.rank button { grid-template-columns: 22px minmax(0, 1fr) 60px 78px; gap: 6px; }
+  .tl-hint { display: none; }
+}
+@media (max-width: 340px) {
+  ol.rank button { grid-template-columns: 20px minmax(0, 1fr) 78px; }
   ol.rank .spark { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -304,10 +336,10 @@ details.card li b { color: var(--ink); font-weight: 600; }
 
 <section class="timeline" id="timeline" aria-label="Night timeline">
   <div class="tl-head">
-    <div class="tl-title">Radiant heat seen each night <span id="tl-sub">sum over flaring sites · click a night, drag to average a range</span></div>
-    <div class="tl-range"><span id="tl-range"></span><button type="button" class="linkbtn" id="tl-reset" hidden>Whole period</button></div>
+    <div class="tl-title">Radiant heat seen each night <span id="tl-sub"></span></div>
+    <div class="tl-range"><span id="tl-range"></span><div class="seg sm" role="group" aria-label="Nights averaged" id="presets"></div></div>
   </div>
-  <svg id="strip" role="img" aria-label="Bar chart of total radiant heat per night"></svg>
+  <svg id="strip" tabindex="0" role="img" aria-label="Bar chart of total radiant heat per night. Click a night or drag to average a range; left and right arrow keys step through nights."></svg>
   <div class="tl-tip" id="tl-tip" hidden></div>
 </section>
 
@@ -328,8 +360,16 @@ details.card li b { color: var(--ink); font-weight: 600; }
     <div class="tiles" id="tiles"></div>
     <section class="card" id="detail" hidden></section>
     <section class="card">
-      <h2>Strongest flares <span class="aside" id="rank-aside"></span></h2>
+      <h2><span id="rank-title">Strongest flares</span> <span class="aside" id="rank-aside"></span></h2>
+      <div class="seg sortseg" role="group" aria-label="Order flares by">
+        <button type="button" data-sort="strong" aria-pressed="true">Strongest</button>
+        <button type="button" data-sort="consistent" aria-pressed="false">Most consistent</button>
+        <button type="button" data-sort="clear" aria-pressed="false">Most clear views</button>
+      </div>
+      <p class="rank-hint" id="rank-hint"></p>
+      <div class="microkey" id="microkey"></div>
       <ol class="rank" id="rank"></ol>
+      <button type="button" class="more" id="rank-more" hidden></button>
     </section>
     <section class="card">
       <h2>By region <span class="aside">click to zoom</span></h2>
@@ -361,7 +401,6 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const D = JSON.parse(document.getElementById("flaring-data").textContent);
   const TOPO = JSON.parse(document.getElementById("basemap").textContent);
   const META = D.meta, NIGHTS = D.nights, NN = NIGHTS.length, SLOPE = META.bcm_per_mw_year;
-  const LONG = NN > 14;
   const CSS = getComputedStyle(document.documentElement);
   const C = {};
   ["sea", "land", "coast", "clear", "cloud", "focus", "ink", "ink-2", "ink-3", "rule", "raise", "panel",
@@ -373,40 +412,68 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const MONO = "IBM Plex Mono, monospace";
 
   // ---------- data ----------
-  const S = D.sites.map(r => ({
-    id: r[0], lat: r[1], lon: r[2], nstruct: r[3], st: r[4], rh: r[5], tmax: r[6], mean: r[7],
-    region: r[8], mycRegime: r[9], mycBcm: r[10], mycIso: r[11], mycClass: r[12], structs: r[13],
-  }));
+  // st: one code per night (F flaring, D lit through cloud, C clear no flare,
+  // K cloudy, N not observed). rv: clear-sky MW for each F/D night in order.
+  // cp: clear passes per night, one base-36 digit (sites that flared only).
+  const S = D.sites.map(r => {
+    const st = r[4], rv = r[5], rh = new Array(NN);
+    let k = 0;
+    for (let i = 0; i < NN; i++) {
+      const ch = st[i];
+      rh[i] = ch === "C" ? 0 : (ch === "F" || ch === "D") ? rv[k++] : null;
+    }
+    let cp = null;
+    if (r[14]) { cp = new Uint8Array(NN); for (let i = 0; i < NN; i++) cp[i] = parseInt(r[14][i], 36); }
+    return {
+      id: r[0], lat: r[1], lon: r[2], nstruct: r[3], st, rh, tmax: r[6], mean: r[7],
+      region: r[8], mycRegime: r[9], mycBcm: r[10], mycIso: r[11], mycClass: r[12], structs: r[13], cp,
+      max: d3.max(rh) || 0,
+    };
+  });
   S.forEach(s => { s.name = s.region + (s.mycIso ? " · " + s.mycIso : ""); });
 
   // Nightly totals for the timeline (all sites, independent of filters).
   const NIGHT_TOT = NIGHTS.map((n, i) => {
-    let mw = 0, nf = 0, nc = 0;
+    let mw = 0, nf = 0, nc = 0, no = 0;
     for (const s of S) {
       const ch = s.st[i];
+      if (ch !== "N") no++;
       if (ch === "F") { mw += s.rh[i] || 0; nf++; nc++; } else if (ch === "C") nc++;
     }
-    return { mw, nf, nc };
+    return { mw, nf, nc, no };
   });
+  // A night is partial when far fewer sites were passed over than usual
+  // (satellite files missing at either end of the archive).
+  const OBS_TYPICAL = d3.median(NIGHT_TOT, d => d.no) || 1;
+  NIGHT_TOT.forEach(d => { d.partial = d.no < 0.9 * OBS_TYPICAL; });
 
+  const RANK_PAGE = window.matchMedia("(max-width: 900px)").matches ? 10 : 25;
   const state = {
     night: -1, range: [0, NN - 1], flaringOnly: false, selected: null, hover: null, hl: null,
-    pct: 0, thr: null, nFl: 0, animT: null,
+    pct: 0, thr: null, nFl: 0, animT: null, sort: "strong", rankN: RANK_PAGE, win: null, winManual: false,
   };
 
+  // Lower end of the 95% Wilson interval for k successes in n trials.
+  function wilsonLo(k, n) {
+    if (!n) return 0;
+    const z = 1.96, z2 = z * z, p = k / n;
+    return (p + z2 / (2 * n) - z * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))) / (1 + z2 / n);
+  }
   // Per-site stats over the selected range (mean counts clear no-flare nights as 0).
   function computeRange() {
     const [a, b] = state.range;
     for (const s of S) {
-      let sum = 0, nC = 0, nF = 0, nO = 0, nD = 0;
+      let sum = 0, nC = 0, nF = 0, nO = 0, nD = 0, nP = 0;
       for (let i = a; i <= b; i++) {
         const ch = s.st[i];
         if (ch === "F") { sum += s.rh[i] || 0; nC++; nF++; nO++; }
         else if (ch === "C") { nC++; nO++; }
         else if (ch === "K") nO++;
         else if (ch === "D") { nD++; nO++; if (s.rh[i] != null) { nC++; sum += s.rh[i]; } }
+        if (s.cp) nP += s.cp[i];
       }
       s.rFlare = nF; s.rClear = nC; s.rObs = nO; s.rCloudFlare = nD; s.rMean = nC ? sum / nC : null;
+      s.rPasses = nP; s.rShare = nC ? nF / nC : 0; s.rLo = wilsonLo(nF, nC);
     }
   }
   // F flaring (clear sky), D seen lit through cloud, C clear no flare, K cloudy, N not observed
@@ -446,7 +513,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   }
 
   // ---------- formatting ----------
-  const fmtMW = v => v == null ? "–" : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3);
+  const fmtMW = v => v == null ? "–" : v === 0 ? "0" : v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3);
   const fmtInt = d3.format(",");
   const mcm = mw => mw * SLOPE * 1000; // million m3 per year
   const fmtMcm = v => v >= 100 ? d3.format(",.0f")(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
@@ -602,51 +669,81 @@ details.card li b { color: var(--ink); font-weight: 600; }
     quad = d3.quadtree().x(d => d[0]).y(d => d[1]).addAll(pts);
   }
 
-  // ---------- sparkline (whole period, selected range shaded) ----------
-  function spark(s, w, h, opts) {
+  // ---------- night chart (whole period, one column per night) ----------
+  // Columns: that night's clear-sky radiant heat, relative to the site's maximum.
+  // Baseline strip: the night's status, so presence and gaps read at any width.
+  // When nights outnumber pixels, adjacent nights share a column (mean value,
+  // strongest status).
+  const ST_RANK = { N: 0, K: 1, C: 2, D: 3, F: 4 };
+  const stColor = ch => ch === "F" ? C["flare-5"] : ch === "D" ? C["flare-2"] : ch === "C" ? C.clear : ch === "K" ? C.cloud : null;
+  function nightChart(s, w, h, opts) {
     opts = opts || {};
-    const padX = 5, top = 6, bot = opts.axis ? 15 : 5, ph = h - top - bot;
-    const max = Math.max(d3.max(s.rh, v => v || 0) || 0, 0.1);
-    const x = i => padX + (NN === 1 ? 0 : i * (w - 2 * padX) / (NN - 1));
-    const y = v => top + ph - (v / max) * ph;
+    const padX = opts.padX != null ? opts.padX : 1, top = opts.axis ? 15 : 1, bot = opts.axis ? 14 : 0;
+    const base = opts.base || 3, gapB = 1, ph = h - top - bot - base - gapB;
+    const innerW = w - 2 * padX, minPx = opts.minPx || 1;
+    const per = Math.max(1, Math.ceil(NN / Math.max(1, Math.floor(innerW / minPx))));
+    const nb = Math.ceil(NN / per), cw = innerW / nb;
+    const bin = i => Math.floor(i / per), xb = b => padX + b * cw;
+    const max = Math.max(s.max || 0, 0.1);
     const root = svg("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}`, "aria-hidden": "true" });
+    if (opts.stretch) root.setAttribute("preserveAspectRatio", "none");
     if (!isFull()) {
-      const a = x(state.range[0]) - (NN > 1 ? 0.5 * (w - 2 * padX) / (NN - 1) : 0);
-      const b = x(state.range[1]) + (NN > 1 ? 0.5 * (w - 2 * padX) / (NN - 1) : 0);
-      root.append(svg("rect", { x: Math.max(a, 0), y: top - 2, width: Math.min(b, w) - Math.max(a, 0), height: ph + 2, fill: C.focus, opacity: 0.08 }));
+      const a = xb(bin(state.range[0])), b = xb(bin(state.range[1]) + 1);
+      root.append(svg("rect", { x: a, y: top - 1, width: b - a, height: ph + base + gapB + 2, fill: C.focus, opacity: 0.1 }));
     }
-    root.append(svg("line", { x1: padX, x2: w - padX, y1: top + ph + 0.5, y2: top + ph + 0.5, stroke: C.rule, "stroke-width": 1 }));
-    if (state.night >= 0) {
-      root.append(svg("line", { x1: x(state.night), x2: x(state.night), y1: top - 2, y2: top + ph, stroke: C["ink-3"], "stroke-width": 1, "stroke-dasharray": "2 2" }));
-    }
-    const vals = s.rh.map((v, i) => (s.st[i] === "F" || s.st[i] === "C") ? (v || 0) : null);
-    const curve = LONG ? d3.curveLinear : d3.curveMonotoneX;
-    const area = d3.area().defined(v => v != null).x((v, i) => x(i)).y0(top + ph).y1(v => y(v)).curve(curve);
-    const line = d3.line().defined(v => v != null).x((v, i) => x(i)).y(v => y(v)).curve(curve);
-    const fillC = d3.color(C["flare-4"]); fillC.opacity = 0.18;
-    root.append(svg("path", { d: area(vals) || "", fill: fillC.formatRgb(), stroke: "none" }));
-    root.append(svg("path", { d: line(vals) || "", fill: "none", stroke: C["flare-4"], "stroke-width": LONG ? 1.5 : 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
-    let last = -1;
-    vals.forEach((v, i) => { if (v != null) last = i; });
-    const small = w < 120;
-    s.st.split("").forEach((ch, i) => {
-      if (ch === "F" && (!small || i === last)) {
-        root.append(svg("circle", { cx: x(i), cy: y(vals[i]), r: i === last ? 3.2 : (LONG ? 1.8 : 2.6), fill: C["flare-5"], stroke: C.sea, "stroke-width": LONG ? 0.6 : 1 }));
-      } else if (ch === "C" && !small && !LONG) {
-        root.append(svg("circle", { cx: x(i), cy: y(0), r: 2.4, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 }));
-      } else if (ch === "D" && !small) {
-        root.append(svg("circle", { cx: x(i), cy: top + ph, r: LONG ? 1.8 : 2.4, fill: C.sea, stroke: C["flare-4"], "stroke-width": 1.2 }));
-      } else if (ch === "K" && !small) {
-        root.append(LONG ? svg("line", { x1: x(i), x2: x(i), y1: top + ph + 2, y2: top + ph + 5, stroke: C["ink-3"], "stroke-width": 1 })
-          : cross(x(i), top + ph, 2.5, C["ink-3"]));
+    let pBar = "";
+    const pSt = { F: "", D: "", C: "", K: "" };
+    const yBase = top + ph + gapB, bw = cw >= 2.5 ? cw - 0.8 : cw;
+    for (let b = 0; b < nb; b++) {
+      let sum = 0, n = 0, best = "N";
+      for (let i = b * per, e = Math.min(NN, (b + 1) * per); i < e; i++) {
+        const ch = s.st[i], v = s.rh[i];
+        if (v != null) { sum += v; n++; }
+        if (ST_RANK[ch] > ST_RANK[best]) best = ch;
       }
-    });
-    if (opts.axis) {
-      root.append(svgText(x(0), h - 3, md(NIGHTS[0]), { "text-anchor": "start" }));
-      root.append(svgText(x(NN - 1), h - 3, md(NIGHTS[NN - 1]), { "text-anchor": "end" }));
-      root.append(svgText(padX, top + 3, "max " + fmtMW(max) + " MW", { "dominant-baseline": "hanging" }));
+      const x0 = xb(b);
+      if (n && sum > 0) {
+        const bh = Math.max(1, (sum / n) / max * ph);
+        pBar += `M${x0.toFixed(2)},${top + ph}h${bw.toFixed(2)}v${(-bh).toFixed(2)}h${(-bw).toFixed(2)}z`;
+      }
+      if (best !== "N") pSt[best] += `M${x0.toFixed(2)},${yBase}h${bw.toFixed(2)}v${base}h${(-bw).toFixed(2)}z`;
     }
+    if (pBar) root.append(svg("path", { d: pBar, fill: C["flare-4"], opacity: 0.92 }));
+    for (const ch of ["K", "C", "D", "F"]) if (pSt[ch]) root.append(svg("path", { d: pSt[ch], fill: stColor(ch) }));
+    if (state.night >= 0) {
+      const xc = xb(bin(state.night)) + bw / 2;
+      root.append(svg("line", { x1: xc, x2: xc, y1: top - 1, y2: yBase + base + 1, stroke: C.focus, "stroke-width": 1, opacity: 0.85 }));
+    }
+    if (opts.axis) {
+      root.append(svgText(padX, h - 3, md(NIGHTS[0]), { "text-anchor": "start" }));
+      root.append(svgText(w - padX, h - 3, md(NIGHTS[NN - 1]), { "text-anchor": "end" }));
+      root.append(svgText(padX, 1, "max " + fmtMW(max) + " MW", { "dominant-baseline": "hanging" }));
+    }
+    if (opts.win) {
+      const wr = svg("rect", { y: top - 2, height: ph + base + gapB + 3, rx: 2, fill: C.focus, "fill-opacity": 0.1, stroke: C.focus, "stroke-width": 1.3 });
+      root.append(wr);
+      root.setWin = ([a, b]) => {
+        const x0 = xb(bin(a)), x1 = xb(bin(b) + 1);
+        wr.setAttribute("x", x0 - 0.5); wr.setAttribute("width", Math.max(x1 - x0 + 1, 3));
+      };
+      root.setWin(opts.win);
+    }
+    root.nightAt = px => Math.max(0, Math.min(NN - 1, Math.floor((px - padX) / cw) * per + Math.floor(per / 2)));
     return root;
+  }
+  // Legend for the night charts, built once per container.
+  function microKey(box) {
+    box.replaceChildren();
+    const item = (cls, color, label) => {
+      const i = el("i", { class: cls });
+      if (color) i.style.background = color;
+      box.append(el("span", null, i, label));
+    };
+    item("bar", null, "nightly heat");
+    item("", C["flare-5"], "flaring");
+    item("", C["flare-2"], "lit through cloud");
+    item("", C.clear, "clear, no flare");
+    item("", C.cloud, "cloudy");
   }
 
   // ---------- map tooltip ----------
@@ -655,12 +752,13 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function siteFacts(s) {
     const dl = el("dl");
     const add = (k, v) => dl.append(el("dt", { text: k }), el("dd", { text: v }));
-    add("Flaring nights", s.rFlare + " of " + s.rClear + " clear");
+    add("Flaring nights", s.rFlare + " of " + s.rClear + " clear" + (s.rClear ? " (" + Math.round(100 * s.rShare) + "%)" : ""));
+    if (s.cp) add("Clear passes", fmtInt(s.rPasses));
     if (s.rCloudFlare) add("Lit through cloud", s.rCloudFlare + (s.rCloudFlare === 1 ? " night" : " nights"));
     if (s.rFlare) add("Gas flared (est.)", fmtMcm(mcm(s.rMean)) + " M m³/yr");
     if (s.tmax) add("Peak temperature", fmtInt(s.tmax) + " K");
     add("GFW structures", String(s.nstruct));
-    add("EOG 2025", s.mycRegime ? s.mycRegime + (s.mycBcm != null ? ", " + (s.mycBcm * 1000).toFixed(0) + " M m³" : "") : "no flare ≤1 km");
+    add("EOG 2025", s.mycRegime ? s.mycRegime + (s.mycBcm != null ? ", " + (s.mycBcm * 1000).toFixed(0) + " M m³" : "") : "no flare ≤2 km");
     return dl;
   }
   function showTip(s, mx, my) {
@@ -671,7 +769,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
     else head.append(el("span", { class: "v", text: st === "C" ? "No flare" : st === "D" ? "Lit, cloudy" : st === "K" ? "Cloudy" : "Not observed" }),
       el("span", { class: "u", text: state.night < 0 ? rangeLabel(...state.range) : wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]) }));
     tip.append(head, el("div", { class: "nm" }, el("b", { text: s.name }), " · site " + s.id));
-    tip.append(spark(s, 238, 62, { axis: true }));
+    tip.append(nightChart(s, 240, 62, { axis: true, minPx: 2 }));
     tip.append(siteFacts(s));
     tip.append(el("div", { class: "hint", text: "Click for overpass detail" }));
     tip.hidden = false;
@@ -697,46 +795,98 @@ details.card li b { color: var(--ink); font-weight: 600; }
   });
 
   // ---------- timeline strip ----------
+  // Bars: radiant heat summed over flaring sites each night. Band beneath:
+  // share of all sites seen in clear sky that night, so a short bar over a
+  // dark band reads as cloud (or missing passes) rather than less flaring.
   const strip = document.getElementById("strip"), tlTip = document.getElementById("tl-tip");
   const tlBox = document.getElementById("timeline");
-  const tl = { w: 0, h: 74, padL: 6, padR: 6, top: 6, bot: 18 };
+  const tl = { w: 0, h: 90, padL: 6, padR: 6, top: 6, gap: 3, cov: 9, bot: 16 };
   let tlX = null, brush = null, gBrush = null, tlBars = null, tlHead = null;
+  const covRamp0 = d3.interpolateRgb(C.raise, "#9cbdd2"), covRamp = v => covRamp0(Math.max(0, Math.min(1, (v - 0.2) / 0.6)));
+  const YEAR = iso => dateOf(iso).getUTCFullYear();
+  const monthOf = iso => dateOf(iso).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
   // one night = bar + gap (step); half the gap on each side belongs to the nearest bar
   const nightAt = px => Math.max(0, Math.min(NN - 1,
     Math.floor((px - tl.padL + (tlX.step() - tlX.bandwidth()) / 2) / tlX.step())));
+  // Date labels sized to the space per night: every night, Mondays, months, or quarters.
+  function tickPlan(step) {
+    const labels = [], minor = [];
+    if (step >= 34) {
+      NIGHTS.forEach((n, i) => labels.push({ i, text: NN <= 10 ? wd(n) + " " + dateOf(n).getUTCDate() : md(n), anchor: "middle" }));
+    } else if (step * 7 >= 52) {
+      NIGHTS.forEach((n, i) => { if (dateOf(n).getUTCDay() === 1) labels.push({ i, text: md(n), anchor: "middle" }); });
+    } else {
+      const every = step * 30 >= 36 ? 1 : 3;
+      NIGHTS.forEach((n, i) => {
+        const d = dateOf(n);
+        if (d.getUTCDay() === 1 && step * 7 >= 7) minor.push(i);
+        if (d.getUTCDate() === 1 && d.getUTCMonth() % every === 0) {
+          labels.push({ i, text: monthOf(n) + (d.getUTCMonth() === 0 ? " " + d.getUTCFullYear() : ""), anchor: "start" });
+        }
+      });
+    }
+    if (!labels.length || labels[0].i * step > 44) labels.unshift({ i: 0, text: md(NIGHTS[0]), anchor: "start" });
+    else labels[0].anchor = "start";
+    return { labels, minor };
+  }
   function renderStrip() {
     tl.w = Math.max(strip.getBoundingClientRect().width, 100);
     strip.setAttribute("viewBox", `0 0 ${tl.w} ${tl.h}`);
     strip.replaceChildren();
-    const ph = tl.h - tl.top - tl.bot;
-    tlX = d3.scaleBand().domain(d3.range(NN)).range([tl.padL, tl.w - tl.padR]).paddingInner(NN > 60 ? 0.08 : 0.2);
+    const ph = tl.h - tl.top - tl.gap - tl.cov - tl.gap - tl.bot;
+    const step0 = (tl.w - tl.padL - tl.padR) / NN;
+    tlX = d3.scaleBand().domain(d3.range(NN)).range([tl.padL, tl.w - tl.padR])
+      .paddingInner(step0 > 6 ? 0.2 : step0 > 3 ? 0.12 : 0);
+    const step = tlX.step(), bw = tlX.bandwidth();
     const max = d3.max(NIGHT_TOT, d => d.mw) || 1;
     const y = d3.scaleLinear().domain([0, max]).range([tl.top + ph, tl.top]);
     strip.append(svg("line", { x1: tl.padL, x2: tl.w - tl.padR, y1: tl.top + ph + 0.5, y2: tl.top + ph + 0.5, stroke: C.rule }));
     tlBars = NIGHT_TOT.map((d, i) => {
       const bh = Math.max(tl.top + ph - y(d.mw), d.mw > 0 ? 1 : 0);
-      const r = svg("rect", { x: tlX(i), y: tl.top + ph - bh, width: tlX.bandwidth(), height: bh, rx: Math.min(2, tlX.bandwidth() / 3) });
+      const r = svg("rect", { x: tlX(i), y: tl.top + ph - bh, width: bw, height: bh, rx: Math.min(2, bw / 3) });
       strip.append(r);
       return r;
     });
-    // date ticks: every night when short, else Mondays and the first night
-    NIGHTS.forEach((n, i) => {
-      const day = dateOf(n).getUTCDay();
-      const show = NN <= 10 || i === 0 || (day === 1 && i > 2) || (NN > 60 && dateOf(n).getUTCDate() === 1);
-      if (!show) return;
-      const cx = tlX(i) + tlX.bandwidth() / 2;
-      const label = NN <= 10 ? wd(n) + " " + dateOf(n).getUTCDate() : md(n);
-      strip.append(svgText(cx, tl.h - 4, label, { "text-anchor": i === 0 ? "start" : "middle" }));
+    const covY = tl.top + ph + tl.gap;
+    NIGHT_TOT.forEach((d, i) => {
+      strip.append(svg("rect", { x: tlX(i) - (step - bw) / 2, y: covY, width: step + 0.3, height: tl.cov, fill: covRamp(d.nc / META.n_sites) }));
     });
-    document.getElementById("tl-sub").textContent =
-      "sum over flaring sites, tallest bar " + fmtMW(max) + " MW · click a night, drag to average a range";
-    tlHead = svg("line", { y1: tl.top - 2, y2: tl.top + ph + 2, stroke: C.focus, "stroke-width": 1.5 });
+    const plan = tickPlan(step);
+    const labelY = tl.h - 4, tickTop = covY + tl.cov + 1;
+    plan.minor.forEach(i => strip.append(svg("line", { x1: tlX(i) + bw / 2, x2: tlX(i) + bw / 2, y1: tickTop, y2: tickTop + 3, stroke: C["ink-3"], "stroke-width": 1 })));
+    let lastRight = -Infinity;
+    plan.labels.forEach(({ i, text, anchor }) => {
+      const wEst = text.length * 6.1;
+      const x = anchor === "start" ? tlX(i) : tlX(i) + bw / 2;
+      const left = anchor === "start" ? x : x - wEst / 2;
+      if (left < lastRight + 8 || left + wEst > tl.w) return;
+      lastRight = left + wEst;
+      if (anchor === "start") strip.append(svg("line", { x1: x, x2: x, y1: tickTop, y2: tickTop + 4, stroke: C["ink-3"], "stroke-width": 1 }));
+      strip.append(svgText(anchor === "start" ? x + (i ? 3 : 0) : x, labelY, text, { "text-anchor": anchor }));
+    });
+    const sub = document.getElementById("tl-sub");
+    sub.replaceChildren("summed over flaring sites, tallest bar " + fmtMW(max) + " MW · ",
+      el("span", { class: "tl-key" }, el("i"), "band: sites in clear sky (dark few, light most)"),
+      el("span", { class: "tl-hint", text: " · click a night, drag to average a range" }));
+    tlHead = svg("line", { y1: tl.top - 2, y2: covY + tl.cov + 1, stroke: C.focus, "stroke-width": 1.5 });
     tlHead.style.display = "none";
     strip.append(tlHead);
-    brush = d3.brushX().extent([[tl.padL, 0], [tl.w - tl.padR, tl.top + ph + 2]]).on("end", brushed);
+    brush = d3.brushX().extent([[tl.padL, 0], [tl.w - tl.padR, covY + tl.cov]]).on("end", brushed);
     gBrush = d3.select(strip).append("g").call(brush);
     styleStrip();
   }
+  // Range presets: the most recent 7 / 30 / 90 / 365 nights (shorter than the record), and All.
+  const presetBox = document.getElementById("presets");
+  const presetBtns = [7, 30, 90, 365].filter(k => k < NN).map(k => {
+    const b = el("button", { type: "button", "aria-pressed": "false", text: "Last " + k, title: "Mean over the last " + k + " nights" });
+    b.addEventListener("click", () => setRange(NN - k, NN - 1));
+    presetBox.append(b);
+    return [b, NN - k];
+  });
+  const allBtn = el("button", { type: "button", "aria-pressed": "true", text: "All", title: "Mean over all " + NN + " nights" });
+  allBtn.addEventListener("click", () => setRange(0, NN - 1));
+  presetBox.append(allBtn);
+  presetBtns.push([allBtn, 0]);
   function styleStrip() {
     if (!tlBars) return;
     const [a, b] = state.range;
@@ -747,14 +897,15 @@ details.card li b { color: var(--ink); font-weight: 600; }
     });
     const pos = state.animT != null ? state.animT : state.night >= 0 ? state.night : null;
     if (pos != null) {
-      const cx = tlX(Math.floor(Math.min(pos, NN - 1))) + tlX.bandwidth() * (0.5 + Math.min(pos, NN - 1) - Math.floor(Math.min(pos, NN - 1)));
+      const p = Math.min(pos, NN - 1), f = Math.floor(p);
+      const cx = tlX(f) + tlX.bandwidth() * (0.5 + p - f);
       tlHead.setAttribute("x1", cx); tlHead.setAttribute("x2", cx); tlHead.style.display = "";
     } else tlHead.style.display = "none";
     // keep the brush showing the averaging range (programmatic moves have no sourceEvent)
     gBrush.call(brush.move, isFull() ? null : [tlX(a), tlX(b) + tlX.bandwidth()]);
     document.getElementById("tl-range").replaceChildren(
       el("b", { text: rangeLabel(a, b) }), " · " + (b - a + 1) + (b === a ? " night" : " nights"));
-    document.getElementById("tl-reset").hidden = isFull();
+    presetBtns.forEach(([btn, start]) => btn.setAttribute("aria-pressed", String(state.night < 0 && a === start && b === NN - 1)));
   }
   function brushed(e) {
     if (!e.sourceEvent) return;
@@ -776,101 +927,196 @@ details.card li b { color: var(--ink); font-weight: 600; }
   }
   function setRange(a, b) {
     pause(); state.animT = null;
-    state.range = [a, b]; state.night = -1;
+    state.range = [a, b]; state.night = -1; state.winManual = false;
     computeRange(); refresh();
   }
   function showNight(i) {
-    pause(); state.animT = null;
+    pause(); state.animT = null; state.winManual = false;
     if (i < state.range[0] || i > state.range[1]) { state.range = [0, NN - 1]; computeRange(); }
     state.night = i; refresh();
+  }
+  function stepNight(delta) {
+    const cur = state.night >= 0 ? state.night : delta < 0 ? state.range[1] + 1 : state.range[0] - 1;
+    showNight(Math.max(0, Math.min(NN - 1, cur + delta)));
   }
   strip.addEventListener("pointermove", e => {
     if (e.buttons) { tlTip.hidden = true; return; }
     const r = strip.getBoundingClientRect();
     const i = nightAt((e.clientX - r.left) * tl.w / r.width), d = NIGHT_TOT[i];
-    tlTip.replaceChildren(el("b", { text: wd(NIGHTS[i]) + " " + md(NIGHTS[i]) }),
-      el("span", { text: " · " + fmtMW(d.mw) + " MW · " + fmtInt(d.nf) + " flaring of " + fmtInt(d.nc) + " clear" }));
+    tlTip.replaceChildren(
+      el("b", { text: wd(NIGHTS[i]) + " " + md(NIGHTS[i]) + ", " + YEAR(NIGHTS[i]) }),
+      el("span", { text: fmtMW(d.mw) + " MW from " + fmtInt(d.nf) + " flaring sites" }),
+      el("span", { text: "Clear sky at " + fmtInt(d.nc) + " of " + fmtInt(META.n_sites) + " sites (" + Math.round(100 * d.nc / META.n_sites) + "%)" }),
+      d.partial ? el("span", { class: "warn", text: "Partial night: " + fmtInt(d.no) + " sites passed over (usually " + fmtInt(OBS_TYPICAL) + ")" }) : null,
+      el("span", { class: "hint", text: "Click to show this night · drag to average a range · ← → step" }));
     tlTip.hidden = false;
     const bx = tlBox.getBoundingClientRect();
     const left = Math.min(Math.max(6, e.clientX - bx.left + 12), bx.width - tlTip.offsetWidth - 6);
-    tlTip.style.left = left + "px"; tlTip.style.top = (e.clientY - bx.top - 34) + "px";
+    tlTip.style.left = left + "px"; tlTip.style.top = (e.clientY - bx.top + 16) + "px";
   });
   strip.addEventListener("pointerleave", () => { tlTip.hidden = true; });
-  document.getElementById("tl-reset").addEventListener("click", () => setRange(0, NN - 1));
 
   // ---------- detail ----------
+  // Overview of every night with a movable window; below it, every satellite
+  // pass in the window. Pass rows load per site from passes/<id>.json:
+  // [minutes after the first night 00:00 UTC, satellite, MW, flags, K]
+  // with flags bit 0 = detected, bit 1 = counted as clear sky.
   const detail = document.getElementById("detail");
-  function overpassChart(s, w, h) {
-    const rows = (D.detail[String(s.id)] || []);
+  const WIN = 14, WIN_MAX = 21;
+  const passRows = new Map(), passLoads = new Map();
+  function loadPasses(s) {
+    if (passRows.has(s.id)) return Promise.resolve(passRows.get(s.id));
+    if (!passLoads.has(s.id)) {
+      const p = fetch("passes/" + s.id + ".json")
+        .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(rows => { passRows.set(s.id, rows); return rows; })
+        .finally(() => passLoads.delete(s.id));
+      passLoads.set(s.id, p);
+    }
+    return passLoads.get(s.id);
+  }
+  function fitWindow() {
+    const [a, b] = state.range;
+    if (b - a + 1 <= WIN_MAX) return [a, b];
+    const len = Math.min(WIN, NN);
+    if (state.night >= 0) {
+      const w0 = Math.max(0, Math.min(NN - len, state.night - Math.floor(len / 2)));
+      return [w0, w0 + len - 1];
+    }
+    return [b - len + 1, b];
+  }
+  function moveWindow(start) {
+    const len = state.win[1] - state.win[0] + 1;
+    const a = Math.max(0, Math.min(NN - len, start));
+    if (a === state.win[0]) return;
+    state.win = [a, a + len - 1]; state.winManual = true;
+    drawWindow();
+  }
+  const pad2 = n => String(n).padStart(2, "0");
+  const hhmm = m => pad2(Math.floor(((m % 1440) + 1440) % 1440 / 60)) + ":" + pad2(((m % 60) + 60) % 60);
+  function passChart(s, rows, a, b, w, h) {
     const padL = 34, padR = 6, top = 8, bot = 18, ph = h - top - bot;
-    const max = Math.max(d3.max(rows, r => r[2]) || 0, 0.1);
-    const x = d3.scaleLinear().domain([720, 720 + NN * 1440]).range([padL, w - padR]);
+    const off = Math.round(s.lon * 4); // local solar time minus UTC, minutes
+    const lo = 720 + a * 1440, hi = 720 + (b + 1) * 1440, n = b - a + 1;
+    const inWin = rows.filter(r => r[0] + off >= lo && r[0] + off < hi);
+    const max = Math.max(d3.max(inWin, r => r[2]) || 0, d3.max(s.rh.slice(a, b + 1), v => v || 0) || 0, 0.1);
+    const x = d3.scaleLinear().domain([lo, hi]).range([padL, w - padR]);
     const y = d3.scaleLinear().domain([0, max]).nice(3).range([top + ph, top]);
-    const root = svg("svg", { width: "100%", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Radiant heat at each satellite overpass" });
-    const every = Math.max(1, Math.ceil(NN / 7));
-    NIGHTS.forEach((n, i) => {
-      const a = x(720 + i * 1440), b = x(720 + (i + 1) * 1440);
+    const root = svg("svg", { width: "100%", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Radiant heat at each satellite pass, " + rangeLabel(a, b) });
+    const every = n <= 10 ? 1 : Math.ceil(n / 7);
+    for (let i = a; i <= b; i++) {
+      const x0 = x(720 + i * 1440), x1 = x(720 + (i + 1) * 1440);
       const inR = i >= state.range[0] && i <= state.range[1];
-      if (i % 2 === 0) root.append(svg("rect", { x: a, y: top, width: b - a, height: ph, fill: C.raise, opacity: inR ? 0.6 : 0.25 }));
-      if (i % every === 0) root.append(svgText(a, h - 4, NN <= 10 ? wd(n) + " " + dateOf(n).getUTCDate() : md(n), { "text-anchor": "start" }));
-    });
+      if (i % 2 === 0) root.append(svg("rect", { x: x0, y: top, width: x1 - x0, height: ph, fill: C.raise, opacity: inR ? 0.6 : 0.25 }));
+      if (i === state.night) root.append(svg("rect", { x: x0, y: top, width: x1 - x0, height: ph, fill: "none", stroke: C.focus, "stroke-width": 1 }));
+      if ((i - a) % every === 0) root.append(svgText(x0 + 1, h - 4, n <= 10 ? wd(NIGHTS[i]) + " " + dateOf(NIGHTS[i]).getUTCDate() : md(NIGHTS[i]), { "text-anchor": "start" }));
+    }
     y.ticks(3).forEach(v => {
       root.append(svg("line", { x1: padL, x2: w - padR, y1: y(v), y2: y(v), stroke: C.rule, "stroke-width": 1 }));
-      root.append(svgText(padL - 5, y(v) + 3, fmtMW(v), { "text-anchor": "end" }));
+      root.append(svgText(padL - 5, y(v) + 3, Number.isInteger(v) ? fmtInt(v) : fmtMW(v), { "text-anchor": "end" }));
     });
-    s.rh.forEach((v, i) => {
-      if (v == null) return;
+    for (let i = a; i <= b; i++) {
+      const v = s.rh[i];
+      if (v == null) continue;
       root.append(svg("line", { x1: x(720 + i * 1440) + 1.5, x2: x(720 + (i + 1) * 1440) - 1.5, y1: y(v), y2: y(v), stroke: C["flare-4"], "stroke-width": 2, "stroke-linecap": "round", opacity: 0.9 }));
-    });
-    const r0 = LONG ? 2.2 : 3.4;
-    rows.forEach(r => {
-      const [tm, sat, rh, det, cloud, temp] = r;
-      const cx = x(tm), when = new Date(dateOf(NIGHTS[0]).getTime() + tm * 60000);
-      const label = D.satellites[sat] + " · " + when.toISOString().slice(5, 16).replace("T", " ") + " UTC · " +
-        (det ? fmtMW(rh) + " MW, " + fmtInt(temp) + " K" : (cloud === 0 || cloud === 1) ? "clear, no detection" : "cloudy");
+    }
+    const r0 = n <= 14 ? 3.3 : 2.7;
+    const t0 = dateOf(NIGHTS[0]).getTime();
+    inWin.forEach(([tm, sat, rh, flags, temp]) => {
+      const det = flags & 1, clear = flags & 2, cx = x(tm + off);
+      const utc = new Date(t0 + tm * 60000).toISOString();
+      const what = det ? fmtMW(rh) + " MW" + (temp ? ", " + fmtInt(temp) + " K" : "") + (clear ? "" : ", through cloud (not used)")
+        : clear ? "clear, no detection" : "cloudy";
+      const label = D.satellites[sat] + " · " + utc.slice(5, 10) + " " + utc.slice(11, 16) + " UTC (" + hhmm(tm + off) + " local) · " + what;
       let m;
-      if (det) m = svg("circle", { cx, cy: y(rh), r: r0, fill: C["flare-5"], stroke: C.sea, "stroke-width": 0.8 });
-      else if (cloud === 0 || cloud === 1) m = svg("circle", { cx, cy: y(0), r: r0 * 0.75, fill: C.sea, stroke: C.clear, "stroke-width": 1.2 });
+      if (det && clear) m = svg("circle", { cx, cy: y(rh), r: r0, fill: C["flare-5"], stroke: C.sea, "stroke-width": 0.8 });
+      else if (det) m = svg("circle", { cx, cy: y(rh), r: r0, fill: C.sea, stroke: C["flare-4"], "stroke-width": 1.4 });
+      else if (clear) m = svg("circle", { cx, cy: y(0), r: r0 * 0.75, fill: C.sea, stroke: C.clear, "stroke-width": 1.2 });
       else m = cross(cx, y(0), r0 * 0.7, C["ink-3"]);
       const ttl = svg("title"); ttl.textContent = label; m.append(ttl);
       root.append(m);
     });
     return root;
   }
+  // Redraw only the window parts (keeps pointer capture on the overview during a drag).
+  let detailParts = null;
+  function drawWindow() {
+    if (!detailParts) return;
+    const s = state.selected, [a, b] = state.win;
+    const { overview, label, prev, next, passBox } = detailParts;
+    overview.setWin(state.win);
+    label.replaceChildren(el("b", { text: "Passes " + rangeLabel(a, b) }), " · " + (b - a + 1) + " nights");
+    prev.disabled = a === 0; next.disabled = b === NN - 1;
+    passBox.replaceChildren();
+    if (!s.cp) { passBox.append(el("p", { class: "foot", text: "No flare seen here in this period, so passes are not stored for this site." })); return; }
+    const rows = passRows.get(s.id);
+    if (rows) { passBox.append(passChart(s, rows, a, b, 360, 150)); return; }
+    passBox.append(el("p", { class: "foot", text: "Loading passes…" }));
+    loadPasses(s).then(() => { if (state.selected === s) drawWindow(); }, () => {
+      if (state.selected !== s) return;
+      passBox.replaceChildren(el("p", { class: "foot", text: "Pass detail could not be loaded (it needs the page served over the web)." }));
+    });
+  }
   function renderDetail() {
     const s = state.selected;
     detail.hidden = !s;
     detail.replaceChildren();
+    detailParts = null;
     if (!s) return;
+    if (!state.winManual || !state.win) state.win = fitWindow();
     const close = el("button", { type: "button", class: "close", "aria-label": "Close site detail", text: "Close" });
     close.addEventListener("click", () => select(null, false));
     detail.append(el("div", { class: "detail-head" },
       el("div", null, el("h3", { text: s.name }), el("p", { text: "Site " + s.id + " · " + s.lat.toFixed(4) + ", " + s.lon.toFixed(4) })),
       close));
     const facts = el("div", { class: "facts" });
-    const fact = (l, v) => facts.append(el("div", null, el("div", { class: "lbl", text: l }), el("div", { class: "num", text: v })));
-    fact("Mean heat", s.rFlare ? fmtMW(s.rMean) + " MW" : "–");
-    fact("Gas flared", s.rFlare ? fmtMcm(mcm(s.rMean)) + " M m³/yr" : "–");
-    fact("Flaring nights", s.rFlare + "/" + s.rClear);
+    const fact = (l, v, u) => facts.append(el("div", null, el("div", { class: "lbl", text: l }),
+      el("div", { class: "num", text: v }), el("div", { class: "unit", text: u || "" })));
+    fact("Mean heat", s.rFlare ? fmtMW(s.rMean) : "–", "MW");
+    fact("Gas flared", s.rFlare ? fmtMcm(mcm(s.rMean)) : "–", "M m³/yr");
+    fact("Flaring", s.rFlare + "/" + s.rClear, s.rClear ? Math.round(100 * s.rShare) + "% of clear nights" : "clear nights");
+    fact("Clear passes", s.cp ? fmtInt(s.rPasses) : "–", "satellite views");
     detail.append(facts);
-    if (!isFull()) detail.append(el("p", { class: "note", text: "Figures cover " + rangeLabel(...state.range) + "; the chart shows the whole period." }));
-    detail.append(overpassChart(s, 360, 150));
+    detail.append(el("p", { class: "note", text: (isFull() ? "Figures cover all " + NN + " nights" : "Figures cover " + rangeLabel(...state.range) + " (shaded)") +
+      ". Drag the window on the overview to see passes on other nights." }));
+    const overview = nightChart(s, 360, 64, { axis: true, minPx: 2, padX: 2, base: 4, win: state.win });
+    overview.setAttribute("width", "100%");
+    overview.classList.add("overview");
+    const toNight = e => {
+      const r = overview.getBoundingClientRect();
+      return overview.nightAt((e.clientX - r.left) * 360 / r.width);
+    };
+    const centre = e => { const len = state.win[1] - state.win[0] + 1; moveWindow(toNight(e) - Math.floor(len / 2)); };
+    overview.addEventListener("pointerdown", e => { overview.setPointerCapture(e.pointerId); centre(e); });
+    overview.addEventListener("pointermove", e => { if (e.buttons) centre(e); });
+    detail.append(overview);
+    const label = el("span");
+    const prev = el("button", { type: "button", "aria-label": "Earlier nights", text: "‹" });
+    const next = el("button", { type: "button", "aria-label": "Later nights", text: "›" });
+    prev.addEventListener("click", () => moveWindow(state.win[0] - (state.win[1] - state.win[0] + 1)));
+    next.addEventListener("click", () => moveWindow(state.win[0] + (state.win[1] - state.win[0] + 1)));
+    detail.append(el("div", { class: "subhead" }, label, el("span", { class: "nav" }, prev, next)));
+    const passBox = el("div", { class: "passbox" });
+    detail.append(passBox);
     const key = el("div", { class: "chartkey" });
     const keySvg = kind => {
       const k = svg("svg", { width: 10, height: 10, viewBox: "0 0 10 10" });
       if (kind === "det") k.append(svg("circle", { cx: 5, cy: 5, r: 3.4, fill: C["flare-5"] }));
+      if (kind === "lit") k.append(svg("circle", { cx: 5, cy: 5, r: 3, fill: C.sea, stroke: C["flare-4"], "stroke-width": 1.4 }));
       if (kind === "clr") k.append(svg("circle", { cx: 5, cy: 5, r: 2.8, fill: C.sea, stroke: C.clear, "stroke-width": 1.4 }));
       if (kind === "cld") k.append(cross(5, 5, 2.5, C["ink-3"]));
       if (kind === "mean") k.append(svg("line", { x1: 0, x2: 10, y1: 5, y2: 5, stroke: C["flare-4"], "stroke-width": 2 }));
       return k;
     };
-    key.append(el("span", null, keySvg("det"), "Detection"), el("span", null, keySvg("clr"), "Clear, no flare"),
-      el("span", null, keySvg("cld"), "Cloudy"), el("span", null, keySvg("mean"), "Nightly clear-sky mean"));
+    key.append(el("span", null, keySvg("det"), "Detection, clear"), el("span", null, keySvg("lit"), "Through cloud (not used)"),
+      el("span", null, keySvg("clr"), "Clear, no flare"), el("span", null, keySvg("cld"), "Cloudy"), el("span", null, keySvg("mean"), "Night's clear-sky mean"));
     detail.append(key);
+    detailParts = { overview, label, prev, next, passBox };
+    drawWindow();
     const eog = el("p", { class: "note" });
     if (s.mycRegime) eog.append("EOG MYC25Q4 2025: ", el("b", { text: s.mycRegime }), " " + (s.mycClass || "") + " flare, ",
-      el("b", { text: (s.mycBcm * 1000).toFixed(0) + " M m³" }), " flared in 2025 (matched within 1 km).");
-    else eog.append("No EOG MYC25Q4 2025 upstream flare within 1 km.");
+      el("b", { text: (s.mycBcm * 1000).toFixed(0) + " M m³" }), " flared in 2025 (matched within 2 km).");
+    else eog.append("No EOG MYC25Q4 2025 upstream flare matched within 2 km.");
     detail.append(eog);
     detail.append(el("p", { class: "note", text: "GFW structure IDs: " + s.structs.join(", ") + (s.nstruct > s.structs.length ? " …" : "") }));
     const coords = s.lat.toFixed(5) + ", " + s.lon.toFixed(5);
@@ -883,6 +1129,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
       el("a", { href: "https://www.google.com/maps/@" + s.lat + "," + s.lon + ",15z/data=!3m1!1e3", target: "_blank", rel: "noopener", text: "Satellite view ↗" })));
   }
   function select(s, zoomTo) {
+    if (s !== state.selected) { state.winManual = false; state.win = null; }
     state.selected = s;
     renderDetail();
     renderRank();
@@ -892,10 +1139,23 @@ details.card li b { color: var(--ink); font-weight: 600; }
     } else draw();
     if (s && window.matchMedia("(max-width: 900px)").matches) detail.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
   }
-  document.addEventListener("keydown", e => { if (e.key === "Escape" && state.selected) select(null, false); });
+  // Keys (map view, outside form fields): ← → step nights, Home/End jump,
+  // Esc closes the site detail, then returns from a single night to the range mean.
+  document.addEventListener("keydown", e => {
+    if (!document.getElementById("explainer").hidden || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target.closest && e.target.closest("input, textarea, select")) return;
+    if (e.key === "Escape") {
+      if (state.selected) select(null, false);
+      else if (state.night >= 0) { pause(); state.animT = null; state.night = -1; refresh(); }
+      return;
+    }
+    if (e.target.closest && e.target.closest("button, a") && e.target !== strip) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); stepNight(e.key === "ArrowLeft" ? -1 : 1); }
+    else if (e.key === "Home") { e.preventDefault(); showNight(state.range[0]); }
+    else if (e.key === "End") { e.preventDefault(); showNight(state.range[1]); }
+  });
 
   // ---------- panel ----------
-  const viewLabel = () => state.night < 0 ? "mean " + rangeLabel(...state.range) : wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]);
   function renderTiles() {
     const box = document.getElementById("tiles");
     box.replaceChildren();
@@ -915,17 +1175,61 @@ details.card li b { color: var(--ink); font-weight: 600; }
     tile(state.night < 0 ? "Sites observed" : "Clear this night", fmtInt(state.night < 0 ? seen : clear.length), null,
       "of " + fmtInt(META.n_sites) + " oil sites");
   }
-  const rankBox = document.getElementById("rank");
+  // Flare list, three orders. Range figures use the selected nights; on a
+  // single night the list holds that night's flaring sites.
+  const rankBox = document.getElementById("rank"), rankMore = document.getElementById("rank-more");
+  const sortBtns = Array.from(document.querySelectorAll(".sortseg button"));
+  const nightName = () => wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]);
+  const SORTS = {
+    strong: {
+      title: "Strongest flares",
+      cmp: (a, b) => valueOf(b) - valueOf(a),
+      hint: () => state.night < 0
+        ? [el("b", { text: "Mean radiant heat" }), " over clear nights, " + rangeLabel(...state.range) + "; clear nights with no flare count as 0."]
+        : [el("b", { text: "Radiant heat" }), " on " + nightName() + ", from that night's clear passes."],
+      val: s => [fmtMW(valueOf(s)), el("small", { text: fmtMcm(mcm(valueOf(s))) + " M m³/yr" })],
+      sub: s => "site " + s.id + " · " + s.rFlare + "/" + s.rClear + " nights",
+    },
+    consistent: {
+      title: "Most consistent flares",
+      cmp: (a, b) => b.rLo - a.rLo || b.rShare - a.rShare || b.rClear - a.rClear || valueOf(b) - valueOf(a),
+      hint: () => [state.night < 0 ? "" : "Sites flaring on " + nightName() + ", by ",
+        el("b", { text: state.night < 0 ? "Share of clear nights with a flare" : "share of clear nights with a flare" }),
+        ", " + rangeLabel(...state.range) + ". Ranked by the low end of its 95% range, so a site seen clear on few nights ranks lower."],
+      val: s => [Math.round(100 * s.rShare) + "%", el("small", { text: s.rFlare + " of " + s.rClear + " nights" })],
+      sub: s => "site " + s.id + " · mean " + fmtMW(s.rMean) + " MW",
+    },
+    clear: {
+      title: "Flares with most clear views",
+      cmp: (a, b) => b.rPasses - a.rPasses || b.rClear - a.rClear || valueOf(b) - valueOf(a),
+      hint: () => [state.night < 0 ? "" : "Sites flaring on " + nightName() + ", by ",
+        el("b", { text: state.night < 0 ? "Satellite passes with a clear view" : "satellite passes with a clear view" }),
+        " of the site, " + rangeLabel(...state.range) + ". More clear views make a steadier mean."],
+      val: s => [fmtInt(s.rPasses), el("small", { text: s.rClear + " nights" })],
+      sub: s => "site " + s.id + " · flaring " + s.rFlare + "/" + s.rClear,
+    },
+  };
+  sortBtns.forEach(btn => btn.addEventListener("click", () => {
+    state.sort = btn.dataset.sort; state.rankN = RANK_PAGE;
+    renderRank();
+  }));
+  rankMore.addEventListener("click", () => { state.rankN += RANK_PAGE; renderRank(); });
+  microKey(document.getElementById("microkey"));
   function renderRank() {
+    const sort = SORTS[state.sort];
+    sortBtns.forEach(btn => btn.setAttribute("aria-pressed", String(btn.dataset.sort === state.sort)));
+    document.getElementById("rank-title").textContent = sort.title;
+    document.getElementById("rank-hint").replaceChildren(...sort.hint());
+    const all = S.filter(s => statusOf(s) === "F" && visible(s)).sort(sort.cmp);
+    document.getElementById("rank-aside").textContent = fmtInt(all.length) + (state.night < 0 ? " sites flared" : " sites flaring");
+    const fl = all.slice(0, state.rankN);
     rankBox.replaceChildren();
-    const fl = S.filter(s => statusOf(s) === "F" && visible(s)).sort((a, b) => valueOf(b) - valueOf(a)).slice(0, 25);
-    document.getElementById("rank-aside").textContent = viewLabel() + ", MW";
     fl.forEach((s, i) => {
       const b = el("button", { type: "button", class: s === state.selected ? "on" : "" },
         el("span", { class: "i", text: String(i + 1) }),
-        el("span", { class: "n" }, el("b", { text: s.name }), el("span", { text: "site " + s.id + " · " + s.rFlare + "/" + s.rClear + " nights" })),
-        el("span", { class: "spark" }, spark(s, 72, 24)),
-        el("span", { class: "val" }, fmtMW(valueOf(s)), el("small", { text: fmtMcm(mcm(valueOf(s))) + " M m³/yr" })));
+        el("span", { class: "n" }, el("b", { text: s.name }), el("span", { text: sort.sub(s) })),
+        el("span", { class: "spark" }, nightChart(s, 90, 26, { stretch: true })),
+        el("span", { class: "val" }, ...sort.val(s)));
       b.addEventListener("click", () => select(s, true));
       b.addEventListener("pointerenter", () => { state.hl = s; draw(); });
       b.addEventListener("pointerleave", () => { state.hl = null; draw(); });
@@ -934,6 +1238,9 @@ details.card li b { color: var(--ink); font-weight: 600; }
       rankBox.append(el("li", null, b));
     });
     if (!fl.length) rankBox.append(el("li", { class: "foot", text: "No flares detected for this selection." }));
+    const left = all.length - fl.length;
+    rankMore.hidden = left <= 0;
+    if (left > 0) rankMore.textContent = "Show " + Math.min(RANK_PAGE, left) + " more · " + fmtInt(all.length) + " in all";
   }
   function renderRegions() {
     const t = document.getElementById("regions");
@@ -1029,7 +1336,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
     li("Gas volume.", "Annualised with EOG's calibration, " + SLOPE + " BCM/yr per MW (MYC25Q4). Single nights are noisy; read volumes as rough rates.");
     li("Clear sky.", "NOAA enterprise cloud mask at the site pixel (clear or probably clear), solar zenith ≥ 97°. A detection under cloud counts as clear only when at least 6 of its 8 neighbours are clear; otherwise the night shows as lit through cloud and carries no clear-sky value.");
     li("Satellites.", "SNPP " + fmtInt(META.by_satellite.SNPP) + ", NOAA-20 " + fmtInt(META.by_satellite["NOAA-20"]) + ", NOAA-21 " + fmtInt(META.by_satellite["NOAA-21"]) + " site passes. " + (META.notes || ""));
-    li("Timeline.", "Bars sum the radiant heat of every site seen flaring that night, so cloudy nights and missing satellite passes lower them.");
+    li("Timeline.", "Bars sum the radiant heat of every site seen flaring that night, so cloudy nights and missing satellite passes lower them. The band beneath shows the share of all sites seen in clear sky that night; a short bar over a dark band is cloud or a partial night. Last 7 / 30 / 90 and All set the nights averaged; ← and → step one night.");
+    li("Flare list.", "Strongest: mean clear-sky radiant heat over the selected nights. Most consistent: share of clear nights with a flare, ranked by the lower end of its 95% Wilson interval so a site seen clear on few nights ranks below one with the same share over many. Most clear views: satellite passes with a clear view of the site. Each row's chart has one column per night (height: that night's heat relative to the site's maximum) over a strip coloured by status.");
     li("Sites.", "GFW fixed infrastructure labelled oil and active in the latest month, merged within 750 m (" + fmtInt(META.n_structures) + " structures → " + fmtInt(META.n_sites) + " sites). Region names come from bounding boxes; country codes from the matched EOG flare.");
     li("Not yet modelled.", "M11-only and mid-infrared-only triggers, spectral response, dual-curve background fit, atmospheric correction, view-angle normalisation, cross-satellite calibration, and flagging of non-upstream flares among GFW oil sites.");
   }
@@ -1060,7 +1368,8 @@ details.card li b { color: var(--ink); font-weight: 600; }
   const playBtn = document.getElementById("play"), scrub = document.getElementById("scrub");
   const clock = document.getElementById("clock");
   const END_HOLD = 0.6;
-  const msPerNight = () => Math.max(300, Math.min(1500, 22000 / (state.range[1] - state.range[0] + 1)));
+  // about 25 s for any range, never faster than 6 nights a second
+  const msPerNight = () => Math.max(160, Math.min(1500, 25000 / (state.range[1] - state.range[0] + 1)));
   let raf = null, lastTs = null, stepAcc = 0;
   function updateClock() {
     clock.replaceChildren();
@@ -1082,7 +1391,7 @@ details.card li b { color: var(--ink); font-weight: 600; }
   function setFrame(t) {
     state.animT = t;
     const k = Math.min(state.range[1], Math.round(Math.min(t, state.range[1])));
-    if (k !== state.night) { state.night = k; refreshPanels(); }
+    if (k !== state.night) { state.night = k; refreshPanels(); if (state.selected) renderDetail(); }
     syncScrub(); updateClock(); styleStrip(); draw();
   }
   function tick(ts) {

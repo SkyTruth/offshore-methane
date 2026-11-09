@@ -203,7 +203,10 @@ def test_viewer_validation_keeps_contract_and_uses_pooled_values(tmp_path, monke
         )
     )
     monkeypatch.setattr(viewer.validate_myc25, "load_myc", lambda year: myc)
-    meta = viewer.build_data(tag, tmp_path)["meta"]["validation"]
+    nights, over = viewer.load_segments([(tmp_path, tag)])
+    data, passes = viewer.build_data(nights, over, tmp_path)
+    meta = data["meta"]["validation"]
+    assert set(passes) <= {int(s) for s in nights["site_id"]}
     assert {
         "matched",
         "observed",

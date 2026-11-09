@@ -1,9 +1,10 @@
 # %%
 """Write the SVG figures for docs/explainer.md.
 
-Charts are computed from the 30-night v5 run (``outputs/v5_30n``) and the v3
-baseline at the top of ``outputs/``; diagrams are drawn to scale where a scale
-is stated. Every figure uses the viewer's night palette on its own dark panel,
+Charts are computed from every v5 run segment (``outputs/v5_*``, joined by
+``build_viewer.load_segments``): 88 nights, 9 August to 4 November 2026. The
+v3-to-v5 waterfall uses the 30 nights run with both versions (6 October to
+4 November). Diagrams are drawn to scale where a scale is stated. Every figure uses the viewer's night palette on its own dark panel,
 so it reads on light and dark pages alike. Run from ``nightly-flaring/``:
 ``.venv/bin/python docs/explainer/make_figures.py``.
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 import itertools
 import math
 import sys
+import tempfile
 from html import escape
 from pathlib import Path
 
@@ -23,12 +25,17 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT))
 
+import build_viewer as BV  # noqa: E402
 import gates_30n as G  # noqa: E402
 import nightfire as nf  # noqa: E402
 import pipeline as p  # noqa: E402
+import validate_myc25 as V  # noqa: E402
 
-RUN = p.OUT_DIR / "v5_30n"
-TAG = G.TAG
+SEGMENTS = BV.find_segments()
+TAG88 = f"{SEGMENTS[0][1][:10]}_{SEGMENTS[-1][1][11:]}"
+_T0, _T1 = (pd.Timestamp(d) for d in TAG88.split("_"))
+N_NIGHTS = (_T1 - _T0).days + 1
+PERIOD = f"{_T0:%-d %b}–{_T1:%-d %b %Y}"
 
 # Night palette (viewer_template.html tokens).
 BG = "#0b141c"
@@ -166,6 +173,14 @@ def yticks(sc, vals, x, fmt=str, grid_right=None, size=11):
     return out
 
 
+def nice_step(vmax: float, max_ticks: int = 6) -> int:
+    """Smallest 1-2-5 step giving at most ``max_ticks`` ticks up to ``vmax``."""
+    for step in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000):
+        if vmax / step <= max_ticks:
+            return step
+    return 10000
+
+
 def sup(v):
     """10^k label for log axes."""
     k = int(round(math.log10(v)))
@@ -174,12 +189,30 @@ def sup(v):
 
 # --------------------------------------------------------------------- data
 def load():
+    """Every v5 segment joined: sites, records (as gates_30n.load), nights,
+    MYC25 matches and the bow-tie copy table."""
     sites = pd.read_csv(p.SITES_CSV)
-    run = G.load(RUN, TAG, sites)
-    old = G.load(p.OUT_DIR, TAG, sites)
-    nights = pd.read_csv(RUN / f"site_nights_{TAG}.csv")
-    val = pd.read_csv(RUN / f"validation_myc25_{TAG}.csv")
-    return sites, run, old, nights, val
+    nights, over = BV.load_segments(SEGMENTS)
+    dd = p.dedupe_overpasses(over)
+    dd = dd[dd.sza >= p.SZA_CLEAR].copy()
+    lon = dd.site_id.map(sites.set_index("site_id").lon)
+    local = pd.to_datetime(dd.time_utc) + pd.to_timedelta(lon / 15, "h")
+    dd["night"] = (local - pd.Timedelta(hours=12)).dt.date.astype(str)
+    dd["clear"] = p.strict_clear(dd)
+    start, end = TAG88.split("_")
+    dd = dd[(dd.night >= start) & (dd.night <= end)].copy()
+    run = dict(over=over, dd=dd, det=dd[dd.detected].copy())
+    _lh(run)
+    run["det"] = run["dd"][run["dd"].detected].copy()
+    val = V.match_sites(nights, V.load_myc(2025), 2000.0, over)
+    copies = (
+        pd.concat(
+            [pd.read_csv(f / f"copies_{t}.csv") for f, t in SEGMENTS], ignore_index=True
+        )
+        .drop_duplicates(["satellite", "granule", "group_id", "scan", "peak_row", "peak_col"])
+        .reset_index(drop=True)
+    )
+    return sites, run, nights, val, copies
 
 
 # ------------------------------------------------------------------ figures
@@ -244,7 +277,7 @@ def fig_swath(run):
     body += text(30 + 350, 160, "about 3,000 km of sea in one sweep; pixels grow toward both edges", size=12, fill=INK3, anchor="middle")
     # Right/below: local pass times per satellite.
     y0 = 200
-    body += text(24, y0, "When each satellite passes a site (local solar time, 30 nights)", size=13, fill=INK2, weight=600)
+    body += text(24, y0, f"When each satellite passes a site (local solar time, {N_NIGHTS} nights)", size=13, fill=INK2, weight=600)
     sc = Lin(24.0, 28.0, 120, 720)
     body += line(120, y0 + 108, 720, y0 + 108, stroke=COAST)
     for h in (24.0, 25.0, 26.0, 27.0, 28.0):
@@ -455,7 +488,7 @@ def fig_heat(run):
         body += text(x + 16, 162, f"{fmt(q[1])} {unit}", size=26, fill=GOLD if unit == "MW" else INK, weight=600, mono=True)
         body += text(x + 16, 192, f"5th–95th pct {fmt(q[0])}–{fmt(q[2])}", size=11.5, fill=INK2, mono=True)
         x += tw + gap
-    body += text(W / 2, 244, f"Typical values over {len(det):,} detections, 30 nights (v5). One megawatt is the output of about 400 electric space heaters.", size=12, fill=INK3, anchor="middle")
+    body += text(W / 2, 244, f"Typical values over {len(det):,} detections, {N_NIGHTS} nights (v5). One megawatt is the output of about 400 electric space heaters.", size=12, fill=INK3, anchor="middle")
     svg("heat", 264, "Radiant heat from temperature and flame area, with typical values", body)
 
 
@@ -463,56 +496,69 @@ def fig_nights(run, nights):
     dd = run["dd"]
     sid = 928
     s = dd[dd.site_id == sid].copy()
-    nl = sorted(nights.night.unique())
+    nl = [d.strftime("%Y-%m-%d") for d in pd.date_range(_T0, _T1, freq="D")]
     idx = {n: i for i, n in enumerate(nl)}
     s["i"] = s.night.map(idx)
     x0, x1, y0, y1 = 70, 730, 36, 240
     xs = Lin(-0.6, len(nl) - 0.4, x0, x1)
-    ymax = max(10, float(s.rh_mw.max()) * 1.1)
+    ymax = max(10, float(s.rh_mw.max()) * 1.08)
     ys = Lin(0, ymax, y1, y0)
     body = frame(x0, y0, x1, y1)
-    body += yticks(ys, range(0, int(ymax) + 1, 2), x0, fmt=lambda v: f"{v}", grid_right=x1)
+    body += yticks(ys, range(0, int(ymax) + 1, nice_step(ymax)), x0, fmt=lambda v: f"{v}", grid_right=x1)
     body += text(16, (y0 + y1) / 2, "MW per pass", size=12, fill=INK3, anchor="middle", transform=f"rotate(-90 16 {(y0 + y1) / 2})")
+    # date labels on the 1st and 15th of each month
     for i, n in enumerate(nl):
-        if i % 5 == 0:
-            body += text(xs(i), y1 + 17, pd.Timestamp(n).strftime("%-d %b"), size=11, fill=INK3, anchor="middle", mono=True)
-    # cloud strip
-    cy = y1 + 36
+        d = pd.Timestamp(n)
+        if d.day in (1, 15):
+            body += line(xs(i), y1, xs(i), y1 + 4, stroke=INK3)
+            body += text(xs(i), y1 + 17, d.strftime("%-d %b"), size=11, fill=INK3, anchor="middle", mono=True)
+    # cloud strip: one cell per night, darker the more of its passes were cloudy
+    cy = y1 + 34
     body += text(x0 - 8, cy + 4, "cloud", size=11, fill=INK3, anchor="end")
     site_n = nights[nights.site_id == sid].set_index("night")
+    cw = xs(1) - xs(0)
+    jit = 0.28
     for n, f in s.groupby("night"):
         i = idx[n]
-        jit = np.linspace(-0.22, 0.22, len(f)) if len(f) > 1 else [0]
-        for j, r in zip(jit, f.itertuples()):
+        cloudy = int((~f.clear & ~f.detected).sum())
+        if cloudy:
+            share = cloudy / len(f)
+            body += rect(xs(i) - cw / 2 + 0.6, cy - 4, cw - 1.2, 8, fill=CLOUD, opacity=round(0.35 + 0.65 * share, 2),
+                         rx=1.5) .replace("/>", f"><title>{n}: {cloudy} of {len(f)} passes cloudy</title></rect>")
+        offs = np.linspace(-jit, jit, len(f)) if len(f) > 1 else [0]
+        for j, r in zip(offs, f.itertuples()):
             x = xs(i + j)
             tip = f"{n} {r.satellite}: "
             if r.clear and r.detected:
-                body += circle(x, ys(r.rh_mw), 4.5, fill=AMBER, tip=tip + f"{r.rh_mw:.2f} MW, clear")
+                body += circle(x, ys(r.rh_mw), 2.6, fill=AMBER, tip=tip + f"{r.rh_mw:.2f} MW, clear")
             elif r.clear:
-                body += circle(x, ys(0), 4, fill=CLEAR, tip=tip + "clear, no flare seen (counts as 0)")
+                body += circle(x, ys(0), 2.3, fill=CLEAR, tip=tip + "clear, no flare seen (counts as 0)")
             elif r.detected:
-                body += circle(x, ys(r.rh_mw), 4.5, fill=BG, stroke=AMBER, sw=1.6, tip=tip + f"{r.rh_mw:.2f} MW under cloud (not averaged)")
-            else:
-                body += rect(x - 3.5, cy - 3.5, 7, 7, fill=CLOUD, tip=None)
+                body += circle(x, ys(r.rh_mw), 2.6, fill=BG, stroke=AMBER, sw=1.2, tip=tip + f"{r.rh_mw:.2f} MW under cloud (not averaged)")
     for n, r in site_n.iterrows():
-        if pd.notna(r.rh_mw) and r.n_clear > 0:
+        if n in idx and pd.notna(r.rh_mw) and r.n_clear > 0:
             i = idx[n]
-            body += line(xs(i) - 9, ys(r.rh_mw), xs(i) + 9, ys(r.rh_mw), stroke=GOLD, w=2.5)
+            body += line(xs(i) - cw * 0.42, ys(r.rh_mw), xs(i) + cw * 0.42, ys(r.rh_mw), stroke=GOLD, w=2.2)
     mean = site_n.rh_mw.mean()
     body += line(x0, ys(mean), x1, ys(mean), stroke=CYAN, w=1.5, dash="6 4")
-    body += halo(x1 - 4, ys(mean) - 8, f"30-night mean {mean:.2f} MW → {mean * 0.0116:.3f} BCM/yr", size=12.5, fill=CYAN, anchor="end", weight=600)
+    label = f"{len(nl)}-night mean {mean:.2f} MW → {mean * 0.0116:.3f} BCM/yr"
+    body += text(x1, 22, label, size=12.5, fill=CYAN, anchor="end", weight=600)
+    body += line(x1 - 7.4 * len(label) - 34, 18, x1 - 7.4 * len(label) - 8, 18, stroke=CYAN, w=1.5, dash="6 4")
     ly = cy + 34
     keys = [
-        (circle(0, 0, 4.5, fill=AMBER), "flare seen, clear sky"),
-        (circle(0, 0, 4, fill=CLEAR), "clear, no flare (0 MW)"),
-        (circle(0, 0, 4.5, fill=BG, stroke=AMBER, sw=1.6), "seen through cloud (not averaged)"),
-        (rect(-3.5, -3.5, 7, 7, fill=CLOUD), "cloudy, unknown"),
-        (line(-9, 0, 9, 0, stroke=GOLD, w=2.5), "night's mean"),
+        (circle(0, 0, 3.4, fill=AMBER), "flare seen, clear sky"),
+        (circle(0, 0, 3, fill=CLEAR), "clear, no flare (0 MW)"),
+        (circle(0, 0, 3.4, fill=BG, stroke=AMBER, sw=1.4), "seen through cloud (not averaged)"),
+        (rect(-4, -4, 8, 8, fill=CLOUD, rx=1.5), "cloudy passes that night"),
+        (line(-7, 0, 7, 0, stroke=GOLD, w=2.4), "night's mean"),
     ]
     for k, (mark, lab) in enumerate(keys):
         x, yy = x0 + (k % 3) * 220, ly + (k // 3) * 20
         body += f'<g transform="translate({x + 6},{yy - 4})">{mark}</g>' + text(x + 20, yy, lab, size=11.5, fill=INK2)
-    svg("nights", ly + 40, "Thirty nights of passes over one Bay of Campeche site", body)
+    clear_n = int((site_n.n_clear > 0).sum())
+    flare_n = int((site_n.status == "flaring").sum())
+    body += text(x0, ly + 52, f"{len(s)} passes; {clear_n} of {len(nl)} nights had a clear pass, and the flare was seen on {flare_n} of them.", size=12, fill=INK3)
+    svg("nights", ly + 70, f"{len(nl)} nights of passes over one Bay of Campeche site", body)
 
 
 def fig_volume(nights):
@@ -543,7 +589,7 @@ def fig_volume(nights):
     body += text(xs(q) + 9, ya + 38, f"median flaring site {q:.2f} MW", size=11.5, fill=INK)
     total = m.sum()
     body += lines(x0, yb + 84, [
-        f"Ticks: the {len(fl)} sites seen flaring on clear nights, 6 Oct–4 Nov 2026. Together they average {total:,.0f} MW,",
+        f"Ticks: the {len(fl)} sites seen flaring on clear nights, {PERIOD}. Together they average {total:,.0f} MW,",
         f"which converts to {total * 0.0116:.1f} billion m³ a year. One megawatt held all year is 11.6 million m³ of gas.",
     ], size=12.5, fill=INK2)
     svg("volume", yb + 118, "Converting mean radiant heat into an annual gas volume", body)
@@ -606,7 +652,7 @@ def fig_neighbours():
     svg("neighbours", 398, "Assigning one flare to one of two nearby platforms", body)
 
 
-def fig_viewangle(run, copies):
+def fig_viewangle(edge):
     body = ""
     # Left: flame seen from above and from the side.
     body += text(30, 34, "Same flame, two views", size=13.5, fill=INK, weight=650)
@@ -636,8 +682,8 @@ def fig_viewangle(run, copies):
     body += text(x0 - 40, y0 - 14, "apparent flame area vs. straight down", size=12, fill=INK3)
     body += lines(30, 300, [
         "Flames are taller than wide (published H/R 1–4, mean 1.6), so a satellite near the swath edge sees more flame.",
-        "Measured at 42 persistent flares: edge passes read 1.53× nadir passes (median); H/R 1.6 predicts 1.36.",
-        "EOG's calibration does not correct for this, and neither does this pipeline.",
+        f"Measured at {edge['n_sites']} persistent flares over {N_NIGHTS} nights: edge passes read {edge['median']:.2f}× nadir passes (median);",
+        f"H/R 1.6 predicts {G.flame_zone_ratio(1.6):.2f}. EOG's calibration does not correct for this, and neither does this pipeline.",
     ], size=12.5, fill=INK2)
     svg("viewangle", 356, "Flames look larger from the side than from above", body)
 
@@ -650,7 +696,7 @@ def fig_sizes(run):
     xs = Log(0.03, 1000, x0, x1)
     ys = Lin(0, h.max() * 1.1, y1, y0)
     body = frame(x0, y0, x1, y1)
-    step = 200 if h.max() < 1200 else 400
+    step = nice_step(h.max() * 1.1)
     body += yticks(ys, range(0, int(h.max() * 1.1), step), x0, fmt=lambda v: f"{v:,}", grid_right=x1)
     body += xticks(xs, (0.1, 1, 10, 100, 1000), y1, fmt=lambda v: f"{v:g}")
     for i, c in enumerate(h):
@@ -664,7 +710,7 @@ def fig_sizes(run):
     body += text((x0 + x1) / 2, y1 + 38, "radiant heat per detection (MW, log scale)", size=12, fill=INK3, anchor="middle")
     body += text(16, (y0 + y1) / 2, "detections", size=12, fill=INK3, anchor="middle", transform=f"rotate(-90 16 {(y0 + y1) / 2})")
     body += lines(x0, y1 + 66, [
-        f"{len(det):,} detections, 6 Oct–4 Nov 2026. The left edge is set by the sensor, not by the flares:",
+        f"{len(det):,} detections, {PERIOD}. The left edge is set by the sensor, not by the flares:",
         "flares below roughly 0.3 MW are often missed, more so at the swath edge than at nadir.",
     ], size=12.5, fill=INK2)
     svg("sizes", y1 + 100, "How large detected flares are", body)
@@ -683,7 +729,7 @@ def fig_satellites(run):
     body = frame(x0, y0, x1, y1)
     body += rect(xs(-4), y0, xs(-1) - xs(-4), y1 - y0, fill=FL[1], opacity=0.18)
     body += rect(xs(1), y0, xs(4) - xs(1), y1 - y0, fill=FL[1], opacity=0.18)
-    body += yticks(ys, range(0, int(h.max() * 1.15), 50), x0, fmt=lambda v: f"{v}", grid_right=x1)
+    body += yticks(ys, range(0, int(h.max() * 1.15), nice_step(h.max() * 1.15)), x0, fmt=lambda v: f"{v:,}", grid_right=x1)
     for v, lab in ((-3, "⅛×"), (-2, "¼×"), (-1, "½×"), (0, "same"), (1, "2×"), (2, "4×"), (3, "8×")):
         body += text(xs(v), y1 + 17, lab, size=11.5, fill=INK3, anchor="middle", mono=True)
     for i, c in enumerate(h):
@@ -703,7 +749,8 @@ def fig_satellites(run):
 def fig_validation(val):
     v = val[(val.bcm_per_year > 0) & (val.myc_bcm > 0)]
     x0, x1, y0, y1 = 80, 450, 30, 400
-    lo = 10 ** math.floor(math.log10(min(v.bcm_per_year.min(), v.myc_bcm.min())))
+    # axis floor at 10^-6; the rare value below it is drawn hollow on the edge
+    lo = max(1e-6, 10 ** math.floor(math.log10(min(v.bcm_per_year.min(), v.myc_bcm.min()))))
     xs = Log(lo, 3, x0, x1)
     ys = Log(lo, 3, y1, y0)
     body = frame(x0, y0, x1, y1)
@@ -713,10 +760,16 @@ def fig_validation(val):
     body += xticks(xs, ticks, y1, fmt=fmt, grid_top=y0)
     body += line(xs(lo), ys(lo), xs(3), ys(3), stroke=INK3, w=1.2, dash="5 4")
     body += text(xs(1.2), ys(2.2) - 6, "1:1", size=11.5, fill=INK3, anchor="end", mono=True)
+    n_edge = 0
     for r in v.itertuples():
-        body += circle(xs(r.myc_bcm), ys(r.bcm_per_year), 3.2, fill=AMBER, opacity=0.75, tip=f"site {r.site_id}: ours {r.bcm_per_year:.4f}, EOG {r.myc_bcm:.4f} BCM/yr")
+        edge = r.myc_bcm < lo or r.bcm_per_year < lo
+        n_edge += edge
+        tip = f"site {r.site_id}: ours {r.bcm_per_year:.2g}, EOG {r.myc_bcm:.2g} BCM/yr"
+        body += circle(xs(max(r.myc_bcm, lo)), ys(max(r.bcm_per_year, lo)), 3.2,
+                       fill=BG if edge else AMBER, stroke=AMBER if edge else None, sw=1.3,
+                       opacity=1 if edge else 0.75, tip=tip)
     body += text((x0 + x1) / 2, y1 + 38, "EOG annual catalog, 2025 (BCM/yr)", size=12, fill=INK3, anchor="middle")
-    body += text(18, (y0 + y1) / 2, "this pipeline, 30 nights (BCM/yr)", size=12, fill=INK3, anchor="middle", transform=f"rotate(-90 18 {(y0 + y1) / 2})")
+    body += text(18, (y0 + y1) / 2, f"this pipeline, {N_NIGHTS} nights (BCM/yr)", size=12, fill=INK3, anchor="middle", transform=f"rotate(-90 18 {(y0 + y1) / 2})")
     lr = np.corrcoef(np.log(v.myc_bcm), np.log(v.bcm_per_year))[0, 1]
     ratio = float((v.bcm_per_year / v.myc_bcm).median())
     tx = 486
@@ -727,12 +780,17 @@ def fig_validation(val):
     body += text(tx, 216, f"{ratio:.2f}×", size=22, fill=INK, weight=600, mono=True)
     body += lines(tx, 240, ["median of ours ÷ EOG"], size=12, fill=INK2)
     body += lines(tx, 290, [
-        "Different years (2026 autumn",
-        "vs 2025 full year), 30 nights",
+        "Different years (Aug–Nov 2026",
+        f"vs all of 2025), {N_NIGHTS} nights",
         "vs 365, and a different site list.",
         "Agreement is in rank and order",
         "of magnitude, not site by site.",
     ], size=12, fill=INK3)
+    if n_edge:
+        body += lines(tx, 394, [
+            f"Hollow: {n_edge} site{'s' if n_edge > 1 else ''} below {lo:.6f}",
+            "BCM/yr, drawn on the edge.",
+        ], size=12, fill=INK3)
     svg("validation", y1 + 52, "Site volumes from this pipeline against EOG's 2025 annual catalog", body)
 
 
@@ -811,14 +869,24 @@ def fig_waterfall():
             body += rect(xs(a), y + 8, max(xs(b) - xs(a), 2), row - 14, fill=CLEAR if v < 0 else CYAN, rx=2)
             body += text(xs(a) - 6, y + 19, f"{v:+,}", size=12, fill=INK2, anchor="end", mono=True)
             run += v
-    body += text(30, y0 + row * len(steps) + 44, "Radiant heat summed over every detection in each 30-night run. 81% of the drop removes v3 errors.", size=12, fill=INK3)
-    svg("waterfall", y0 + row * len(steps) + 62, "Where the 20% drop in radiant heat from v3 to v5 comes from", body)
+    body += lines(30, y0 + row * len(steps) + 44, [
+        "Radiant heat summed over every detection, 6 October to 4 November 2026: the 30 nights run with both v3 and v5.",
+        "81% of the drop removes v3 errors.",
+    ], size=12, fill=INK3)
+    svg("waterfall", y0 + row * len(steps) + 80, "Where the 20% drop in radiant heat from v3 to v5 comes from", body)
+
+
+def edge_nadir(run, val, copies) -> dict:
+    """Gate 7's edge/nadir ratio (sites detected on >= 80% of clear passes at
+    both geometries) over every segment."""
+    with tempfile.TemporaryDirectory() as tmp:
+        val.to_csv(Path(tmp) / f"validation_myc25_{TAG88}.csv", index=False)
+        g7 = G.gate7(run, run, copies, Path(tmp), TAG88, {})
+    return g7["run_site_col"]["rh_mw"]["rate_ge_0.8"]
 
 
 def main():
-    sites, run, old, nights, val = load()
-    _lh(run)
-    copies = pd.read_csv(RUN / f"copies_{TAG}.csv")
+    sites, run, nights, val, copies = load()
     fig_pipeline()
     fig_swath(run)
     fig_subpixel()
@@ -830,7 +898,7 @@ def main():
     fig_volume(nights)
     fig_bowtie()
     fig_neighbours()
-    fig_viewangle(run, copies)
+    fig_viewangle(edge_nadir(run, val, copies))
     fig_sizes(run)
     fig_satellites(run)
     fig_validation(val)
