@@ -80,10 +80,6 @@ h1 {
 h1 .glow { color: var(--flare-4); text-shadow: 0 0 22px rgba(253, 142, 40, 0.35); }
 .sub { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
 .sub b { color: var(--ink); font-weight: 500; }
-.pill {
-  display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 999px; background: var(--accent);
-  color: #fff; font-size: 11.5px; font-weight: 500; vertical-align: 1px;
-}
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; background: var(--panel); }
 .seg button {
   border: 0; background: transparent; padding: 6px 13px; font-size: 13px; color: var(--ink-2); cursor: pointer;
@@ -106,6 +102,8 @@ h1 .glow { color: var(--flare-4); text-shadow: 0 0 22px rgba(253, 142, 40, 0.35)
 .pctrow { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 2px 10px; margin: 0 0 10px; font-size: 12px; color: var(--ink-2); }
 .pctrow output { text-align: right; font-family: var(--num); font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pctrow input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+.pct-hint { grid-column: 1 / -1; margin: 2px 0 0; font-size: 11.5px; color: var(--ink-3); }
+.pct-hint b { color: var(--ink-2); font-weight: 500; }
 .legend .seg { justify-self: start; }
 .legend-keys { display: grid; gap: 6px; }
 
@@ -381,10 +379,11 @@ details.card li b { color: var(--ink); font-weight: 500; }
     <section class="card" id="detail" hidden></section>
     <section class="card">
       <h2><span id="rank-title">Strongest flares</span> <span class="aside" id="rank-aside"></span></h2>
-      <div class="pctrow" title="Hides weaker flares on the map, in this list and in the totals">
-        <label for="pct">Hide flares below</label>
+      <div class="pctrow">
+        <label for="pct">Radiant-heat filter</label>
         <output id="pct-out" for="pct"></output>
-        <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out">
+        <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out pct-hint">
+        <p class="pct-hint" id="pct-hint"></p>
       </div>
       <div class="seg sortseg" role="group" aria-label="Order flares by">
         <button type="button" data-sort="strong" aria-pressed="true">Strongest</button>
@@ -510,18 +509,25 @@ details.card li b { color: var(--ink); font-weight: 500; }
     if (state.night < 0) return s.rFlare ? s.rMean : null;
     return s.st[state.night] === "F" ? s.rh[state.night] : null;
   }
+  // The radiant-heat filter ranks sites once, by mean clear-sky radiant heat over
+  // the selected nights, so the same sites stay shown on a single night and while
+  // playing (a per-night cut-off made sites, and an opened site, blink in and out).
   function computeThreshold() {
-    const vals = S.filter(s => statusOf(s) === "F").map(valueOf).sort(d3.ascending);
+    const vals = S.filter(s => s.rFlare > 0).map(s => s.rMean).sort(d3.ascending);
     state.nFl = vals.length;
     state.thr = state.pct > 0 && vals.length ? d3.quantileSorted(vals, state.pct / 100) : null;
+    state.nPass = state.thr == null ? vals.length : vals.filter(v => v >= state.thr).length;
   }
-  function visible(s) {
+  const passesThr = s => state.thr == null || (s.rFlare > 0 && s.rMean >= state.thr);
+  // inFilter: counted in the list, regions and totals. visible: drawn on the map,
+  // where an opened site always shows its state for the night.
+  function inFilter(s) {
     const st = statusOf(s);
-    if (st === "N") return false;
+    if (st === "N" || !passesThr(s)) return false;
     if (state.flaringOnly && st !== "F" && st !== "D") return false;
-    if (state.thr != null) return st === "F" && valueOf(s) >= state.thr;
     return true;
   }
+  function visible(s) { return s === state.selected ? statusOf(s) !== "N" : inFilter(s); }
   // Animation frame at fractional night t: ease between adjacent nights; cloudy
   // or unobserved nights hold the neighbouring clear value at low opacity.
   const nightVal = (s, n) => s.st[n] === "F" ? s.rh[n] : s.st[n] === "C" ? 0 : null;
@@ -598,8 +604,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   document.getElementById("sub").append(...[
     "VIIRS night passes over ", el("b", { text: fmtInt(META.n_sites) }), " GFW offshore oil sites · ",
     el("b", { text: rangeLabel(0, NN - 1) + ", " + dateOf(NIGHTS[NN - 1]).getUTCFullYear() }),
-    " · " + NN + " nights, one value per site per night",
-    META.status ? el("span", { class: "pill", title: META.status, text: META.status_label || "draft" }) : null].filter(Boolean));
+    " · " + NN + " nights, one value per site per night"]);
 
   // ---------- map ----------
   const wrap = document.getElementById("mapwrap");
@@ -669,20 +674,18 @@ details.card li b { color: var(--ink); font-weight: 500; }
     ctx.lineWidth = 0.7 / T.k; ctx.strokeStyle = "rgba(156,183,201,0.09)"; ctx.stroke(graticule());
     ctx.restore();
 
-    const pts = [], flares = [], rings = [];
+    const pts = [], flares = [], rings = [], drawnR = new Map();
     const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
     for (const s of S) {
       let st, v, alpha = 1;
       if (state.animT != null) {
-        const fv = frameValue(s, state.animT);
+        const fv = frameValue(s, state.animT), sel = s === state.selected;
         v = fv.v; alpha = fv.alpha; st = fv.st;
-        const lit = v != null && v > 0.01;
-        if (lit) {
-          if (state.thr != null && v < state.thr) continue;
-          st = "F";
-        } else {
-          if (st === "N" || state.thr != null) continue;
-          if (state.flaringOnly && st !== "D") continue;
+        if (!sel && !passesThr(s)) continue;
+        if (v != null && v > 0.01) st = "F";
+        else {
+          if (st === "N") continue;
+          if (state.flaringOnly && st !== "D" && !sel) continue;
           if (st === "F") st = "C";
         }
       } else {
@@ -692,6 +695,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
       const x = T.applyX(s.px), y = T.applyY(s.py);
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       pts.push([x, y, s]);
+      if (s === state.selected || s === state.hl || s === state.hover) drawnR.set(s, st === "F" ? radiusOf(v) : st === "D" ? dot + 2.2 : dot);
       if (st === "F") { flares.push([x, y, s, v, alpha]); continue; }
       if (st === "D") { rings.push([x, y]); continue; }
       ctx.fillStyle = st === "C" ? C.clear : C.cloud;
@@ -716,12 +720,14 @@ details.card li b { color: var(--ink); font-weight: 500; }
       ctx.beginPath(); ctx.arc(x, y, radiusOf(v), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
     }
     ctx.globalAlpha = 1;
+    // Rings follow the drawn dot; a dashed ring marks a site with no pass this night.
     for (const s of [state.selected, state.hl, state.hover]) {
       if (!s) continue;
-      const x = T.applyX(s.px), y = T.applyY(s.py), v = valueOf(s);
-      const r = (v != null ? radiusOf(v) : dot) + 4;
+      const x = T.applyX(s.px), y = T.applyY(s.py), r0 = drawnR.get(s);
       ctx.lineWidth = s === state.selected ? 2 : 1.5; ctx.strokeStyle = C.focus;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke();
+      if (r0 == null) ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(x, y, (r0 != null ? r0 : dot) + 4, 0, 2 * Math.PI); ctx.stroke();
+      ctx.setLineDash([]);
     }
     quad = d3.quadtree().x(d => d[0]).y(d => d[1]).addAll(pts);
   }
@@ -848,7 +854,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   canvas.addEventListener("click", e => {
     const r = canvas.getBoundingClientRect();
     const hit = quad && quad.find(e.clientX - r.left, e.clientY - r.top, 14);
-    select(hit ? hit[2] : null, false);
+    select(hit ? hit[2] : null, "center");
   });
 
   // ---------- timeline strip ----------
@@ -1191,9 +1197,10 @@ details.card li b { color: var(--ink); font-weight: 500; }
     state.selected = s;
     renderDetail();
     renderRank();
+    // zoomTo: true zooms in (list rows); "center" pans to the site at the current zoom (map clicks)
     if (s && zoomTo) {
-      const k = Math.max(T.k, kWorld * 60);
-      go(d3.zoomIdentity.translate(W / 2 - k * s.px, H / 2 - k * s.py).scale(k));
+      const k = zoomTo === "center" ? T.k : Math.max(T.k, kWorld * 60);
+      go(d3.zoomIdentity.translate(W / 2 - k * s.px, H / 2 - k * s.py).scale(k), zoomTo === "center" ? 450 : null);
     } else draw();
     if (s && window.matchMedia("(max-width: 900px)").matches) detail.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "nearest" });
   }
@@ -1217,15 +1224,16 @@ details.card li b { color: var(--ink); font-weight: 500; }
   function renderTiles() {
     const box = document.getElementById("tiles");
     box.replaceChildren();
-    const fl = S.filter(s => statusOf(s) === "F" && visible(s));
+    const fl = S.filter(s => statusOf(s) === "F" && inFilter(s));
     const clear = S.filter(s => { const st = statusOf(s); return st === "F" || st === "C"; });
     const mw = d3.sum(fl, valueOf);
     const tile = (lbl, num, unit, sub) => box.append(el("div", { class: "tile" },
       el("div", { class: "lbl", text: lbl }), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
       el("div", { class: "ctx", text: sub })));
-    const lit = S.filter(s => statusOf(s) === "D" && visible(s)).length;
+    const lit = S.filter(s => statusOf(s) === "D" && inFilter(s)).length;
     tile(state.thr != null ? "Flaring sites shown" : "Flaring sites", fmtInt(fl.length), null,
-      state.thr != null ? "of " + fmtInt(state.nFl) + " flaring, ≥ " + fmtMW(state.thr) + " MW"
+      state.thr != null ? (state.night < 0 ? "of " + fmtInt(state.nFl) + " that flared; mean ≥ " + fmtMW(state.thr) + " MW"
+        : "of the " + fmtInt(state.nPass) + " strongest (mean ≥ " + fmtMW(state.thr) + " MW)")
         : "of " + fmtInt(clear.length) + " seen in clear sky" + (lit ? "; " + fmtInt(lit) + " more lit under cloud" : ""));
     tile("Radiant heat", fmtMW(mw), "MW", (state.night < 0 ? "sum of site means" : "sum this night") + (state.thr != null ? ", shown sites" : ""));
     tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised, " + SLOPE + " BCM/yr per MW");
@@ -1278,7 +1286,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     sortBtns.forEach(btn => btn.setAttribute("aria-pressed", String(btn.dataset.sort === state.sort)));
     document.getElementById("rank-title").textContent = sort.title;
     document.getElementById("rank-hint").replaceChildren(...sort.hint());
-    const all = S.filter(s => statusOf(s) === "F" && visible(s)).sort(sort.cmp);
+    const all = S.filter(s => statusOf(s) === "F" && inFilter(s)).sort(sort.cmp);
     document.getElementById("rank-aside").textContent = fmtInt(all.length) + (state.night < 0 ? " sites flared" : " sites flaring");
     const fl = all.slice(0, state.rankN);
     rankBox.replaceChildren();
@@ -1303,7 +1311,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   function renderRegions() {
     const t = document.getElementById("regions");
     t.replaceChildren();
-    const groups = d3.rollups(S.filter(s => statusOf(s) === "F" && visible(s)), v => [v.length, d3.sum(v, valueOf)], s => s.region)
+    const groups = d3.rollups(S.filter(s => statusOf(s) === "F" && inFilter(s)), v => [v.length, d3.sum(v, valueOf)], s => s.region)
       .sort((a, b) => b[1][1] - a[1][1]);
     const bounds = new Map(D.regions.map(r => [r[0], r.slice(1)]));
     t.append(el("thead", null, el("tr", null, el("th", { text: "Region" }), el("th", { text: "Flaring" }), el("th", { text: "MW" }), el("th", { text: "BCM/yr" }))));
@@ -1400,6 +1408,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     li("Not yet modelled.", "M11-only and mid-infrared-only triggers, spectral response, dual-curve background fit, atmospheric correction, view-angle normalisation, cross-satellite calibration, and flagging of non-upstream flares among GFW oil sites.");
   }
   document.getElementById("foot").textContent =
+    "Pipeline " + (META.status_label || "draft") + " (status under Method and caveats). " +
     "NOAA VIIRS SDRs (NOAA Open Data Dissemination): " + fmtInt(META.granules) + " granules with site passes, " + META.gb + " GB read. " +
     "GFW fixed infrastructure. EOG MYC25Q4 (CC BY-NC 4.0). Generated " + META.generated + ".";
 
@@ -1411,12 +1420,12 @@ details.card li b { color: var(--ink); font-weight: 500; }
   modeMean.addEventListener("click", () => { pause(); state.animT = null; state.night = -1; refresh(); });
   modeNight.addEventListener("click", () => { if (state.night < 0) showNight(state.range[1]); });
   const pctIn = document.getElementById("pct"), pctOut = document.getElementById("pct-out");
-  const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
   pctIn.addEventListener("input", () => { state.pct = Number(pctIn.value); refresh(); });
   function renderPct() {
-    if (state.thr == null) { pctOut.textContent = "off · all " + fmtInt(state.nFl) + " shown"; return; }
-    const shown = S.filter(s => statusOf(s) === "F" && visible(s)).length;
-    pctOut.textContent = ordinal(state.pct) + " pct · ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(shown) + " of " + fmtInt(state.nFl);
+    pctOut.textContent = state.thr == null ? "off · all " + fmtInt(state.nFl) + " flares"
+      : "top " + (100 - state.pct) + "% · mean ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(state.nPass) + " of " + fmtInt(state.nFl);
+    document.getElementById("pct-hint").replaceChildren("Keeps flares by ", el("b", { text: "mean radiant heat" }),
+      " over " + rangeLabel(...state.range) + " only, whatever the list order. Applies to the map, this list and the totals; an opened site stays on the map.");
   }
   document.getElementById("zin").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 2));
   document.getElementById("zout").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 0.5));

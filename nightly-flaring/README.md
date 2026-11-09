@@ -62,8 +62,9 @@ The website maps every site for one night or the mean over a range of nights:
 flaring sites glow on an amber scale sized by radiant heat. A timeline shows
 the radiant heat seen each night over a band giving the share of sites in
 clear sky; click a night, drag to average a range, use Last 7 / 30 / 90 / All,
-or step with ← and →. Play animates the range; a percentile slider hides sites
-below a chosen radiant-heat percentile. The flare list orders sites by
+or step with ← and →. Play animates the range; a radiant-heat filter keeps
+the flares at or above a chosen percentile of mean radiant heat over the
+selected nights, and an opened site always stays on the map. The flare list orders sites by
 strength, consistency (share of clear nights with a flare, by the lower end of
 its 95% interval) or clear views (clear passes), each row with a
 one-column-per-night chart. Opening a site shows every night with a movable 14-night

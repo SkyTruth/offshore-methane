@@ -316,13 +316,20 @@ format and calibration and is not yet read by this pipeline.
     - *Most clear views*: the number of satellite passes that saw the site
       through clear sky in the selected nights. More clear views give a
       steadier average.
+- **The radiant-heat filter** above the list keeps only flares whose mean
+  radiant heat over the selected nights is at or above the chosen percentile.
+  It ranks by heat alone, whatever order the list uses, and the same flares
+  stay shown on single nights and during playback. A site you have opened
+  always stays on the map, with a dashed ring on nights no satellite passed
+  over it.
 - **Small charts**, beside each flare, in the map tooltip and in the site
   panel, have one column per night. A column's height is that night's clear-sky
   radiant heat, relative to the site's highest night. A strip along the bottom
   gives each night's status: light orange flaring, dark orange lit through
   cloud, blue-grey clear with no flare, dark blue cloudy, and a gap where no
   satellite passed.
-- **Site detail.** Clicking a site shows every night as an overview, with a
+- **Site detail.** Clicking a site centres the map on it and shows every
+  night as an overview, with a
   14-night window you can drag. Below it is each satellite pass in the window:
   a filled orange dot is a detection in clear sky, an orange ring a detection
   through cloud (not used for volume), a blue ring a clear pass with no

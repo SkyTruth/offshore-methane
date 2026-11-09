@@ -795,6 +795,24 @@ view-angle effects and non-upstream classification remain deferred. The
 - **Why:** user request to follow the brand guidelines.
 - **Status:** active (v5).
 
+### D54 Radiant-heat filter ranks once per range; opened site always drawn (v5)
+- **Choice:** the percentile filter ranks flares by mean clear-sky radiant
+  heat over the selected nights and keeps that set on single nights and
+  during playback; before, single nights and playback ranked by each night's
+  value, so the set changed every night. The site open in the detail panel
+  is drawn whatever the filters, with its state for the night; its ring
+  follows the drawn dot and is dashed on nights with no pass. The control is
+  labelled "Radiant-heat filter" and states that it uses mean radiant heat
+  only, not the list order. Clicking a dot on the map centres it at the
+  current zoom; choosing from the list still zooms in. The pipeline version
+  moves from the header to the citation line.
+- **Alternatives:** keep a per-night cut-off and exempt only the opened site
+  (the other shown flares would still change from night to night).
+- **Why:** user report, 2026-11-09: with the filter on, an opened site
+  vanished during playback on nights below that night's cut-off, leaving an
+  empty selection ring that changed size with the night's value.
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained
