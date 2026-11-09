@@ -1082,6 +1082,159 @@ view-angle effects and non-upstream classification remain deferred. The
   describes the image only and assigns no source.
 - **Status:** active.
 
+### D62 Single dark nights and EMIT comparison scenes (v5)
+
+- **Purpose and scope:** a second mode in Flare-outs groups qualifying clear
+  dark nights into one list row per run. Dark spells stay the default;
+  `#flare-outs/dark-nights` opens the mode, and a run id may follow that path.
+  Same-source overlapping cards are linked without changing card rules or
+  tiers. This screen identifies observations for review, never a cause.
+- **Source and night:** reuse D58 `source_units`, `prepare_passes`,
+  `prepare_copies` and `unit_history`. The discovery baseline ends 29 days
+  after the first processed night. One raw cloud-mask 0/1 pass at SZA ≥97°
+  qualifies a night. Any source-copy detection within 1.5 km, including cloudy
+  and unassigned copies, vetoes darkness. For burning rates, a detection counts
+  only within 1 km or when its nearest source unit is this one. Nights with
+  only a neighbour's detections within 1.5 km are neither rate-lit nor dark;
+  exclude them from both rate counts and show the excluded count. Heat uses
+  clear groups within 1 km. D58 card selection is unchanged.
+  **Round 4:** a clear dark night is not listed when another source unit within
+  1.5 km had detections nearest to it that night. Detections from a neighbour
+  can land just beyond 1.5 km (3780 on 1 Oct 2026: neighbour 3779-3781 at
+  1,287 m, its detections 1,517–1,658 m from 3780 at 47–71 MW), so such a
+  night cannot be attributed to either source. The count of skipped nights is
+  published (`counts.skipped_neighbour_detected`). Nights lit only by a
+  neighbour have their own strip state `N`.
+  Member sites supply one union opportunity per satellite pass.
+- **Run and row:** consecutive clear dark nights; cloud-only and unobserved
+  nights do not split a run, but any detection does. Start/end are the first
+  and last clear dark nights. A row shows dates, total clear dark nights,
+  qualifying nights listed, and its best night's rate, heat with n and k clear
+  passes. The detail shows bracket, phases, scenes, comparison scenes and card
+  link once, then each qualifying night's own rate, heat, passes and provisional
+  flag. Render 50 runs at a time with Show more. Use singular words for n=1.
+- **Burning rate:** each selected night's inclusive ±14-night window is clipped
+  to the processed record. Exclude that night and neighbour-only nights. All
+  other qualified nights, including other clear dark nights in its run, count
+  in the denominator. Lit-before evidence, brackets and comparison positives
+  use detections attributed to this source by the rule above.
+  Require ≥10 qualified nights and lit/qualified >0.5; exactly half fails.
+  Require ≥1 lit qualified night before the run's first clear dark night inside
+  that selected night's window. This removes not-yet-started sources and long
+  runs with an inflated run-excluded baseline. Every listed run has a last-lit
+  bracket. Keep lit/qualified counts inline. With fewer than 14 later processed
+  nights, flag provisional; exactly 14 is complete.
+- **Recent heat:** median nightly finite `heat_mw` over lit qualified nights in
+  the same window. n counts measured nights, not groups or passes. Null heat
+  with n=0 remains eligible. Heat filters: any (default), 0.5, 1, 3 MW; region
+  filter also available. A run matches a heat filter if any qualifying night
+  reaches it; the row still identifies its best night by review score.
+- **Review order:** match heat to D58's `(lower, upper]` same-night re-detection
+  classes. Keep the curve's p, detections/trials and the night's k clear passes.
+  `miss_all=(1-p)^k`. Score = `wilson_lower_95(lit, qualified)*(1-miss_all)`,
+  using the lower end of the two-sided Wilson 95% interval (z=1.959963984540054).
+  Most surprising sorts highest score first, then higher recent heat, night,
+  and run id. A run uses its best qualifying night's key. Unknown scores sort
+  last. Brightest uses the highest measured recent heat among its qualifying
+  nights; Most recent uses its latest qualifying night. Show both score parts
+  in plain words with their n. Passes on one night are not independent: this
+  is a review order, not a probability. It changes no selection or card tier.
+- **Passes and bracket:** retain all union exposures of each qualifying night:
+  satellite, UTC time, clear flag, view zone, detected flag. Near nadir is
+  1008–2191; swath edge <640 or ≥2560; otherwise mid-swath; missing is unknown.
+  Source-copy matches use satellite and granule or a time gap <10 seconds.
+  Copy-only positives remain private enrichment evidence. The run bracket is
+  last-lit before, first/last clear dark, next-lit after (null while still dark).
+  Use `emit.scene_phase` for D59 phases. Daytime scenes next to single dark
+  nights are usually boundary; no unobserved transition time is inferred.
+- **EMIT listing and finality:** query each selected source and both products
+  using stable full calendar-month caches covering the processed record. Reuse
+  a month only when fetched ≥30 days after month end. Combine all remaining
+  months in one query per product per source (at most two ordinary requests
+  on a rebuild; pagination can add requests). Split successful results back
+  into monthly snapshots, so months become final independently.
+  Deduplicate acquisition records and restrict scenes to the processed record's
+  noon-to-noon UTC interval. A failed monthly/product query makes the listing
+  partial, or unavailable if all fail. Preserve offline snapshots without
+  asserting complete coverage; never expose exception strings or credentials.
+- **Nearby and comparison scenes:** nearby windows span two local nights before
+  through two after the run, converted with longitude/15 and local noon bounds.
+  Reference scene id, D59 phase and signed hours to the nearest clear dark pass
+  anywhere in that run. A comparison requires the nearest passes strictly
+  before and after to be source-positive, including cloudy copies. Exclude
+  scenes in any listed run's ±2-night window at that source. Choose at most
+  three remaining comparisons, closest to the runs' clear dark passes then id.
+  Require measured EMIT coverage at the source for comparisons; unknown and
+  no-data scenes cannot be comparisons. Label lit on both sides; do not infer
+  continuous burning between passes.
+- **EMIT source coverage (both modes):** the rendered index uses the continuum
+  >0 validity mask. Store `source_pixel_mask`, `source_valid_pixels` within
+  300 m, and `source_coverage` (`covered`, `no_data`, `unknown`). The source
+  pixel must be valid and the nearby count positive to call it covered. Cache
+  no-data as final, with the browse link and a plain missing-data message.
+  Migrate legacy `ch4.png` caches offline using pixels inside the source ring;
+  record that these counts are thumbnail pixels, not native raster pixels.
+  Missing or unreadable PNGs stay unknown. Only covered scenes with both chips
+  count as with-chips. Fold same-orbit tiles within 30 seconds into one
+  acquisition, preferring source coverage and retaining adjacent-tile notes
+  and browse links. Recipe `hitl-v4` renders masked pixels grey (#808080),
+  distinct from the ≤1σ dark blue (#00131f); the shared caption explains this.
+  Recipe `hitl-v5` (round 4) also fills pixels outside the scene footprint
+  grey, in both the CH4 index and true colour, and both captions say "Grey: no
+  data". Every published scene carries `source_coverage`; unrendered scenes
+  say `unknown`. Recipe `hitl-v7` also masks EMIT fill in the
+  true-colour bands before the stretch (−9999, or exact zeros in all three
+  bands, measured at 7533); they showed as a black band along strip
+  edges (7533, 30 Aug 2026) and now render grey. This is the one departure from
+  `hitl_app._emit_truecolor`. (`hitl-v6` masked only −9999 and never shipped;
+  the cache still falls back to v6–v3 chips, labelled as older renders.)
+  Legacy covered chips remain reviewable offline and queue for the new recipe;
+  their copied data pixels change from black to grey, preserving all stamps
+  and the original cache. Legacy no-data tiles need no repeat render.
+- **Chips, queue and bound:** use `emit.fetch_chips`, D59 recipe and successful
+  cache before EE initialization, copying chips to `site_dir/img/emit/` even
+  offline. Default bound: 60 new unique attempts per build. Nearby scenes in
+  default run order precede controls. Persist attempts, last attempt, status,
+  retry time and measured collection horizon in `emit_cache/darknight_attempts.json`.
+  Reserve ceil(budget/2) for never-attempted scenes; spend the rest on due
+  retries, allowing unused slots to go to new scenes. Failed renders back off
+  1, 2, 4, 8, 16, then 32 days. Successful chips use no attempts. Scenes beyond
+  the measured collection end say pending and use no budget, including a zero
+  or negative render budget; reuse the saved horizon then, measuring if absent.
+  Without a horizon, availability is unknown. Other scenes say queued, with
+  a retry date when waiting after failure. An EE connection failure can retry
+  next build and does not spend the render budget.
+- **Compact payload:** one finite `darknights.json`, no detail files and no
+  source pass histories. Private in-memory histories are available only during
+  enrichment. Store each unit once; heat history is disjoint column blocks only
+  within ±14 nights of listed runs (`start`, `heat[]`, state string). Codes:
+  L detected/measured, H detected/unmeasured, D clear dark, U unknown. Every source scene
+  appears once; runs reference `[scene_id, phase, hours]` and sources reference
+  comparison ids. Store caption, definitions and curve once. Night pass arrays
+  use satellite/view-zone indexes and seconds from that night's UTC midnight,
+  preserving full times while reducing bytes. Target under about 1 MB on the
+  current record; regress bytes per run and absence of source `passes`.
+  Refresh through `build_viewer.main` and monthly `update.main`. Fetch only on
+  first opening, with retry on failure; filter/sort the full run list locally.
+- **Strip and phone:** chart the run plus 14 nights on either side. Dark is
+  zero; lit without measured heat is a hollow diamond; unknown is a gap. Shade
+  and label dark run. Cap at three times the best night's recent heat when
+  measured, mark clipped points with triangles and retain exact hover values.
+  Otherwise use the measured maximum. Use normal header wrapping, short UTC
+  HH:MM:SS values, dates in the qualifying-night section, and compact headers
+  for readable 390 px tables. Desktop keeps the existing two-column workspace.
+- **Overlapping apertures:** link runs at different listed units within 1.5 km
+  when they share a measured clear dark night; attach links in both directions.
+  Say a neighbouring source within 1.5 km was also dark, with an aperture note.
+- **Limits and evidence:** D61 observed 1.7% (43/2,568) over clear nights that
+  followed a detected night, at flares seen on ≥80% of clear nights in 115
+  stable 29-night blocks. This is not a rate over all clear nights. Most single
+  dark nights at steady flares are unexplained. EMIT is daytime, hours from
+  VIIRS; its CH4 index is not a concentration. Offline regressions cover these
+  rules, cache progression and finality, compact payload, and monthly rebuild.
+- **Networked build results:** pending; the main session will fill this line.
+- **Status:** active; review material only.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

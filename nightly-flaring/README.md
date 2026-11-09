@@ -32,6 +32,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with data, basemap and explainer; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
 | `flareouts.py` | Source-centred High / Mid / Watch thermal-departure evidence cards; recalibrates from combined nights and copies on each build (D58). |
 | `emit.py` | Public EMIT overpasses, browse links and optional Earth Engine CH4-index / true-colour chips cached under `outputs/emit_cache/` (D59). |
+| `darknights.py` | Clear dark runs with per-night evidence, compact EMIT scene references and a persistent render queue (D62). |
 | `update.py` | Processes new local nights, validates, rebuilds and refreshes EMIT; publishes only with `publish=True` (D60). |
 | `docs/flareout_research/` | Research brief and six memos behind the flare-out method. |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
@@ -100,6 +101,39 @@ Silently vanished inputs cannot certify completeness. Before resuming,
 at 75 days it warns about NOAA's roughly 91-day retention;
 expired input requires archive recovery. Even when no new nights are due,
 building refreshes EMIT imagery that Earth Engine may have ingested meanwhile.
+Every monthly build also refreshes the compact `outputs/site/darknights.json`,
+fetched when **Single dark nights** opens in Flare-outs (`#flare-outs/dark-nights`).
+It lists one row per dark run: dates, clear dark count, qualifying-night count,
+and the best night's rate (lit/clear), recent heat (n) and clear-pass count.
+Each night needs >half of ≥10 clear nights lit in its ±14-night window,
+excluding itself and nights with only a neighbour's detections, plus an earlier
+lit clear night before its run inside that window. Rate-lit means a detection
+within 1 km or nearest this source unit; neighbour-only nights are excluded
+from both counts and their number is shown. Darkness still requires no
+source-copy detection within 1.5 km. D58 card rules are unchanged. The default order combines the Wilson lower bound of that share
+with the heat class's clear-pass detection term; detail shows both with n.
+Passes on one night are not independent: this is a review order, not a probability.
+Shared run details appear once and each qualifying night's evidence is stacked.
+The strip marks lit nights without heat separately from unknown, caps high heat
+with marked triangles, and labels the dark run. Short UTC pass times and normal
+header wrapping fit phones; overlapping dark sources within 1.5 km are linked.
+CMR keeps final monthly caches and batches all non-final months into one query
+per product per source (two per rebuild, apart from pagination). Comparison
+scenes exclude all listed runs' two-night windows and need measured EMIT data
+at the source. Both modes check the index mask at the source and valid pixels
+within 300 m; legacy chips migrate offline, with missing files kept unknown.
+No-data tiles are final and keep browse links. Same-orbit tiles within 30 seconds
+count once, using the tile that covers the source and noting adjacent tiles.
+Only covered scenes count as with-chips. The current recipe (`hitl-v7`) shows
+missing pixels in grey in both chips, inside and outside the scene, distinct
+from the dark blue ≤1σ colour; true colour also masks EMIT edge fill (−9999 or
+all-zero bands). It refreshes older covered chips; until then an older chip is
+labelled as such. A dark night is not listed when another source within 1.5 km
+had its own detections that night. The bounded render queue reserves new-scene
+slots, backs off failures and keeps past-cutoff scenes pending even at zero
+budget. Units, trimmed column heat histories and scene records appear once;
+full pass histories stay private. See [D62](docs/decisions.md#d62-single-dark-nights-and-emit-comparison-scenes-v5)
+for thresholds, cache rules and limits.
 Publication is opt-in: `update.main(publish=True)` calls `publish_pages` only
 after the build. Do not use it for a local preview.
 

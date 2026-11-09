@@ -6,6 +6,29 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 7: single dark nights and EMIT coverage (2026-11-09)
+
+Scope: `darknights.py`, the Single dark nights mode in the Flare-outs tab,
+shared EMIT changes in `emit.py`, D61-D62, the explainer's flare-out figures and
+Single dark nights section, the How it works contents rail. Sol implemented
+rounds 1-3; the main session implemented round 4 and checked every round with a
+networked build and headless Chrome.
+
+| Round | Sol | Opus | Deciding findings |
+|---|---|---|---|
+| 1 | NO-GO | NO-GO | Excluding the whole dark run from the burning-rate window let nights deep in long runs pass (3799: 36 clear dark nights from the first night of the record, listed at 14/14); 14 MB payload, 9.9 MB of unused pass histories; one row per night repeated run-level scenes; "Most surprising" ignored the burning rate; comparison scenes repeated nearby scenes; a failing render could starve the queue; the four-cause list claimed a shutdown "releases nothing" |
+| 2 | NO-GO | NO-GO | 2/12 rendered EMIT scenes had no data at the source (between image strips) yet counted as with-chips (*checked* in Earth Engine); the burning rate borrowed a neighbour's detections (3780 27/27 shown, 12/27 within 1 km); monthly CMR queries rose to 796 |
+| 3 | GO (2 minor) | NO-GO (1 major) | 3780's dark night fell while neighbour 3779-3781 (1,287 m) burned at 47-71 MW, its detections landing 1,517-1,658 m away |
+| 4 | GO | GO | Dark nights with a neighbour's own detection within 1.5 km are not listed (9 nights in 8 runs removed); grey no-data in both chips, including EMIT edge fill measured as exact zeros |
+
+Result on 88 nights (*checked*): 904 dark runs, 1,363 qualifying nights at
+187 sources; 53 runs have an EMIT scene within two nights; 10 rendered scenes,
+all covering their source; 51 scenes after Earth Engine's 31 Aug 2026 cutoff.
+Flare-out cards unchanged (Mid 4582/4583 and 927; Watch 3644, 3662, 6011).
+Fixed after the round-4 GO: neighbour ownership now needs the detection within
+1.5 km of its nearest unit; older cached true-colour chips say black may also
+be missing data.
+
 ## Review 6: potential flare-outs, implementation (2026-11-09)
 
 Scope: `flareouts.py`, `emit.py`, `update.py`, the Flare-outs tab, the

@@ -307,11 +307,18 @@ def test_truecolor_shared_stretch_and_hitl_reflectance_fallback(bad):
     else:
         rfl.reduceRegion.return_value.getInfo.return_value = reflectance
     rad.reduceRegion.return_value.getInfo.return_value = stats("radiance")
+    # Fill values (-9999) are masked first; the masked image is what is returned.
+    rfl_raw, rad_raw = Mock(), Mock()
+    rfl_raw.updateMask.return_value = rfl
+    rad_raw.updateMask.return_value = rad
     ee.Image.side_effect = lambda asset: Mock(
-        select=Mock(return_value=rfl if "/L2A/" in asset else rad)
+        select=Mock(return_value=rfl_raw if "/L2A/" in asset else rad_raw)
     )
     image, vis, recipe = emit.emit_truecolor("acquisition", pt, ee)
     assert image is (rad if bad else rfl)
+    (rad_raw if bad else rfl_raw).updateMask.assert_called_once()
+    ee.Reducer.min.assert_called()
+    ee.Reducer.max.assert_called()
     assert vis == dict(min=0.05, max=0.8, gamma=1.8)
     assert recipe["rgb_bands"] == [
         f"{'radiance' if bad else 'reflectance'}_{band}" for band in (35, 23, 11)

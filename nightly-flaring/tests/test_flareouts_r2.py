@@ -295,10 +295,14 @@ def test_offline_listing_and_chip_cache_survive_without_ee(tmp_path, monkeypatch
     folder = emit.chip_folder(scene, candidate()["unit"], tmp_path)
     folder.mkdir(parents=True)
     (folder / "metadata.json").write_text(
-        json.dumps(dict(status="available", caption=emit.CAPTION))
+        json.dumps(
+            dict(status="available", source_coverage="covered", caption=emit.CAPTION)
+        )
     )
+    from PIL import Image
+
     for name in ("ch4.png", "rgb.png"):
-        (folder / name).write_bytes(b"cached")
+        Image.new("RGB", (512, 512), "#00131f").save(folder / name)
     client = Mock(side_effect=RuntimeError("offline"))
     monkeypatch.setattr(emit, "_ee_client", client)
     session.get.side_effect = RuntimeError("offline")
@@ -307,7 +311,9 @@ def test_offline_listing_and_chip_cache_survive_without_ee(tmp_path, monkeypatch
     assert data["candidates"][0]["emit"]["status"] == "unavailable"
     image = data["candidates"][0]["emit"]["scenes"][0]["imagery"]
     assert image["status"] == "available"
-    assert (tmp_path / "site" / image["ch4"]).read_bytes() == b"cached"
+    assert (tmp_path / "site" / image["ch4"]).read_bytes() == (
+        folder / "ch4.png"
+    ).read_bytes()
 
 
 def write_segment_stub(base, tag, summary=None, phase="done"):
@@ -491,6 +497,9 @@ def test_three_segments_through_loaders_and_real_site_build(tmp_path, monkeypatc
     monkeypatch.setattr(b.validate_myc25, "load_myc", lambda year: myc)
     monkeypatch.setattr(b, "load_basemap", lambda: '{"type":"Topology","objects":{}}')
     monkeypatch.setattr(emit, "enrich", lambda payload, **kw: payload)
+    import darknights
+
+    monkeypatch.setattr(darknights, "enrich", lambda payload, **kw: payload)
     site = b.main(segments=segments, site_dir=tmp_path / "site")
     payload = json.loads((site / "flareouts.json").read_text())
     assert payload["as_of"] == "2026-10-29"
@@ -498,6 +507,9 @@ def test_three_segments_through_loaders_and_real_site_build(tmp_path, monkeypatc
     assert "heat_state_records" not in payload
     assert (site / "passes" / "1.json").exists()
     assert "__FLAREOUTS_DATA__" not in (site / "index.html").read_text()
+    dark = json.loads((site / "darknights.json").read_text())
+    assert dark["as_of"] == "2026-10-29"
+    assert dark["counts"]["dark_nights"] > 0
 
 
 def test_empty_incomplete_pipeline_exports_unknown_nights(tmp_path, monkeypatch):

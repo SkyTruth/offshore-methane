@@ -477,6 +477,9 @@ def test_successful_ee_chips_are_cached_and_copied(tmp_path, monkeypatch):
     rad = ee.Image.return_value
     cont = rad.select.return_value.reduce.return_value
     raw = cont.subtract.return_value.divide.return_value.updateMask.return_value.rename.return_value
+    monkeypatch.setattr(
+        emit, "index_coverage", lambda *a: emit._coverage(1, 85, "rendered_index_mask")
+    )
     raw.reduceRegion.return_value.getInfo.return_value = dict(
         ch4_depth_p2=0.0,
         ch4_depth_p16=0.1,
@@ -484,7 +487,9 @@ def test_successful_ee_chips_are_cached_and_copied(tmp_path, monkeypatch):
         ch4_depth_p84=0.3,
         ch4_depth_p98=0.4,
     )
-    rad.select.return_value.reduceRegion.return_value.getInfo.return_value = {
+    # True colour masks EMIT fill values (-9999) before its stretch statistics.
+    rgb = rad.select.return_value.updateMask.return_value
+    rgb.reduceRegion.return_value.getInfo.return_value = {
         f"radiance_{band}_p{pct}": pct / 10
         for band in (35, 23, 11)
         for pct in (2, 50, 98)
@@ -496,6 +501,9 @@ def test_successful_ee_chips_are_cached_and_copied(tmp_path, monkeypatch):
         scene, candidate()["unit"], tmp_path, ee=ee, session=session
     )
     assert first["status"] == "available"
+    assert first["recipe_version"] == emit.CHIP_RECIPE
+    assert first["source_coverage"] == "covered"
+    ee.Image.constant.assert_called_once_with([128, 128, 128])
     assert first["normalization"]["robust_sigma"] == pytest.approx(0.1)
     assert first["recipe"]["rgb_bands"] == ["radiance_35", "radiance_23", "radiance_11"]
     assert first["recipe"]["rgb_percentiles"] == [2, 98]

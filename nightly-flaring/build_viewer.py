@@ -21,6 +21,7 @@ import base64
 import json
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -359,9 +360,12 @@ def explainer_html(path: Path = EXPLAINER, img_dir: Path | None = None) -> str:
             img_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, img_dir / src.name)
             url = f"{img_dir.name}/{src.name}"
+        # PNG header size, so lazy images reserve their space and section
+        # links land where they point.
+        w, h = struct.unpack(">II", src.read_bytes()[16:24])
         return (
-            f'<figure class="photo"><img alt="{m.group(1)}" loading="lazy" '
-            f'decoding="async" src="{url}"></figure>'
+            f'<figure class="photo"><img alt="{m.group(1)}" width="{w}" '
+            f'height="{h}" loading="lazy" decoding="async" src="{url}"></figure>'
         )
 
     html = re.sub(
@@ -404,12 +408,21 @@ def main(
         (site_dir / "passes" / f"{sid}.json").write_text(
             json.dumps(rows, separators=(",", ":"))
         )
+    import darknights
     import emit
     import flareouts
 
-    flareout_data = flareouts.screen(nights, over, load_copies(segments))
+    copies = load_copies(segments)
+    flareout_data = flareouts.screen(nights, over, copies)
     emit.enrich(flareout_data, site_dir=site_dir)
     (site_dir / "flareouts.json").write_text(json.dumps(flareout_data, allow_nan=False))
+    darknight_data = darknights.enrich(
+        darknights.screen(nights, over, copies, cards=flareout_data), site_dir=site_dir
+    )
+    (site_dir / "darknights.json").write_text(
+        json.dumps(darknight_data, separators=(",", ":"), allow_nan=False)
+    )
+    print(f"single dark nights: {darknight_data['counts']}")
     counts = {
         tier: sum(c["tier"] == tier for c in flareout_data["candidates"])
         for tier in ("High", "Mid", "Watch")

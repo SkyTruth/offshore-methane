@@ -297,10 +297,24 @@ format and calibration and is not yet read by this pipeline.
 
 ### Potential flare-outs
 
+When a flare that usually burns shows no flare on a clear night, there are
+four possible causes:
+
+1. **The sensor missed a burning flare.**
+2. **Thin cloud hid it**, and the cloud mask called the sky clear.
+3. **The flame was turned down** below the detection limit.
+4. **The flare was out.** Gas then either stopped flowing to it or was sent
+   elsewhere (a shutdown, maintenance or gas recovery), or kept flowing
+   unburned (venting). Gas can still escape from other equipment during a
+   shutdown; the flare record says nothing about that.
+
+The satellite record cannot tell these apart on one night. Over a run of clear
+nights, repeated sensor misses become unlikely (Figure 22); the other causes
+remain possible, and the record cannot separate the two cases in the fourth.
+
 A card in **Flare-outs** means that a source has been dark for several clear
 nights after a period when we could see its heat. It is a place to inspect,
-not evidence that gas is escaping. A planned production stop, maintenance,
-gas recovery, or a smaller flame can leave the same record.
+not evidence that gas is escaping.
 
 One missed pass tells us little. Clouds hide flares, small flames are missed,
 and the same source can be assigned to different nearby platforms. The screen
@@ -311,10 +325,16 @@ satellites. The search covers the hot clusters sampled near GFW sites; it is
 not a complete search of the surrounding sea.
 
 We compare each source with its own **29 nights immediately before the dark
-spell**. A source that becomes bright later can enter the screen. We also date
-changes in its measured heat: a flare that fell from 50 MW to 8 MW before
-becoming dark is compared with its 8 MW state. A heat reduction and later
-darkness are separate observations.
+spell**. A source that becomes bright later can enter the screen.
+
+We also date changes in a flare's heat. Take a flare that burned at 50 MW for
+weeks, was turned down to 8 MW for a few nights, and then went dark. Its card
+gives **8 MW** as the heat before darkness: the median of its clear detections
+in the last week before the spell, counting only nights at that latest level.
+That is the flame that disappeared, so 50 MW would overstate what went missing.
+It must be 3 MW or more for the flare to count as recently bright. The drop
+from 50 MW to 8 MW is listed separately, with its dates, in the card's heat
+history.
 
 ![Source 4582/4583 and comparison flare 4500/4515, night by night](explainer/fo_record.svg)
 
@@ -357,7 +377,9 @@ December 2021 while the platform vented about 40,000 t of methane
 Permian surveys over one week in 2020 more than half of the malfunctioning
 flares were unlit or partly lit on more than one day ([EDF](https://www.edf.org/media/helicopter-surveys-indicate-malfunctioning-flares-permian-basin-are-releasing-least-300000)).
 No published record gives the spread of outage durations offshore. A flare can
-also go dark because gas stopped flowing to it, which releases nothing.
+also go dark because gas stopped flowing to it or was sent elsewhere; that
+puts no gas through the flare, but says nothing about the rest of the
+platform.
 
 **VIIRS looks for about two hours a night.** Passes fall between about 00:50
 and 02:50 local time. An outage that starts and ends between passes leaves no
@@ -367,12 +389,12 @@ record, and a flare relit the next day ends the spell on the next detection.
 flares seen on at least 80% of clear nights (115 stable 29-night blocks), a
 clear night with no detection followed a detected night 1.7% of the time (43 of
 2,568). Nothing in the record says whether the flame was burning on those
-nights. A miss can be the sensor, thin cloud the cloud mask called clear, a
-flame turned down below detection, or a real outage of under a day. The misses
-do not gather where the sensor is weakest: 42 of the 56 had a clear pass near
-the centre of the swath and 46 had three or more clear passes. Of 50 misses
-with a following clear night, 37 were followed by a detection, so most are
-single nights. The screen treats every one of these misses as a missed
+nights: any of the four causes above, including an outage of under a day, can
+produce one. The misses do not gather where the sensor is weakest: of all 56
+clear nights without a detection in those blocks (the 43 after a detected night
+and 13 after another miss), 42 had a clear pass near the centre of the swath
+and 46 had three or more clear passes. Of the 50 with a following clear night,
+37 were followed by a detection, so most are single nights. The screen treats every one of these misses as a missed
 detection of a burning flare. That assumption makes darkness easier to explain
 away, so it lowers the confidence numbers below; any real short outages among
 them would raise them.
@@ -487,6 +509,99 @@ The record cannot show whether production continued, whether a stop was
 planned, whether a flame is out, or whether gas is vented. The
 [research brief](flareout_research/BRIEF.md) and six round memos preserve the
 reasoning and unresolved limits.
+
+### Single dark nights
+
+In **Flare-outs → Single dark nights**, each row is a **dark run** at a source:
+one or more clear nights when no source copy was detected within 1.5 km. Any
+detection, including one through cloud, ends the run. Cloud-only and unobserved
+nights do not split it. The row shows the run's dates, its clear dark nights,
+how many nights qualify for this list, and the best qualifying night's burning
+rate, recent heat and clear-pass count. Open it to see each qualifying night's
+own measurements and passes.
+
+A night qualifies when the flare was seen on **more than half of at least 10
+clear nights** within 14 nights before or after it. Leave out only the selected
+night and any nights with only a neighbouring source's detections; the run's
+other clear dark nights count as unlit. For this rate, a detection must be
+within 1 km or nearest this source unit. Neighbour-only nights within 1.5 km
+are neither lit nor dark for the rate, so both counts leave them out and the
+detail shows how many were excluded. The darkness rule still uses 1.5 km. A
+dark night is also left out when another source within 1.5 km was detected that
+night: its detections can land just beyond 1.5 km, and the record cannot tell
+which of the two was burning. At least one lit clear
+night must precede the run inside that window. This keeps a source that has not
+yet been seen burning from being read as one that went dark. A night with fewer
+than 14 later processed nights is **provisional**: its rate can change next
+month. Every burning rate shows lit/clear counts. Recent heat is the median
+measured heat on lit clear nights in the same window, with n nights measured.
+Unmeasured heat stays in the list.
+
+Most single dark nights at steady flares are unexplained. In the D61 sample,
+**1.7% (43/2,568)** of clear nights that followed a detected night had no
+detection, at flares seen on **at least 80% of clear nights** in **115 stable
+29-night blocks**. Those 2,568 following clear nights are the denominator;
+they are not all clear nights in the record. The observations do not tell us
+which of the four causes under Potential flare-outs explains a dark night.
+
+**Most surprising** puts nights first when a cautious estimate of how often
+the flare is seen is high and a flare of its recent heat is usually seen across
+that night's clear passes. It multiplies the 95% Wilson lower bound of the
+lit/clear share by `1 − (1 − p)^k`, where p is the heat class's same-night
+re-detection rate and k is the clear-pass count. The detail shows both parts
+with their counts. A run uses its best night's score; ties use higher recent
+heat. **Brightest** and **Most recent** are also available. Passes on one night
+are not independent, so this is a review order, not a probability.
+
+The heat strip covers the run and 14 nights on either side. Clear dark nights
+are zero, lit nights without measured heat have hollow diamonds, nights when
+only a neighbouring source was detected have a cross (they are left out of the
+burning rate), and unknown nights have gaps. The band says **dark run**. When recent heat is measured,
+the axis stops at three times that heat; triangles mark higher values, which
+remain available by hovering. A note links another listed source within 1.5 km
+when its run shares a clear dark night: the detection apertures overlap.
+
+EMIT scenes cover two local nights before the run through two nights after.
+**Before**, **during**, **boundary** and **after** follow the last lit, first
+and last clear dark, and next lit VIIRS passes. A daytime scene beside a single
+dark night is usually **boundary**. Signed hours are measured from the nearest
+clear dark pass in the run. The bracket, scenes, comparison scenes and card
+link appear once per run; each qualifying night's measurements are stacked
+below. Pass times are short UTC times, with their dates above the table.
+
+Up to three **comparison scenes · lit on both sides** show the source when the
+nearest VIIRS passes before and after both detected it. They exclude every
+listed run's two-night scene window at that source. The closest remaining
+scenes to the dark passes come first. Comparisons also need measured EMIT data
+under the source marker; missing or unknown coverage cannot be a comparison.
+CMR listings keep monthly caches; a month becomes final when fetched at least
+30 days after its end. All non-final months share one query per product per
+source, so a rebuild uses at most two ordinary requests per source (large
+results may need more pages). Builds try at most
+60 new scene renders, sharing successful cached chips. Half the budget, rounded
+up, is reserved for scenes never tried before. Failed renders retry after 1,
+2, 4, 8, 16, then 32 days, so one failure cannot hold up the list. Scenes beyond
+the measured Earth Engine collection end stay pending even with no render
+budget. Other scenes wait for a later build.
+
+An EMIT footprint can include a gap between image strips. Both modes check
+the index mask under the source marker and count valid pixels within 300 m.
+**No EMIT data at the source in this scene (it falls between image strips)**
+keeps its browse link and is not counted as with-chips. Unknown coverage is
+also left out. Old cached chips are checked offline; missing or unreadable
+files remain unknown. Same-orbit tiles taken within 30 seconds count as one
+acquisition: use the tile covering the source and note an adjacent empty tile.
+New chips use grey for missing data, inside and outside the scene, and dark
+blue for index values ≤1σ; both captions say so. The new recipe refreshes older covered chips when available,
+while a known empty source needs no repeat render. Card rules stay unchanged.
+
+A dark night does not show why a flare was unseen. EMIT scenes are daytime,
+hours from the VIIRS passes. The CH4 index is not a concentration. Scene cloud
+cover describes the whole scene, not cloud at the source. Missing listings
+leave coverage unknown. One compact file loads when the mode opens; it keeps
+source locations, nearby heat history and scene records once, with no full
+pass histories. The exact rules are in
+[D62](decisions.md#d62-single-dark-nights-and-emit-comparison-scenes-v5).
 
 ### Reading the app
 
