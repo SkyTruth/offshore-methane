@@ -827,6 +827,20 @@ view-angle effects and non-upstream classification remain deferred. The
   Thematic Cartography and Geovisualization).
 - **Status:** active (v5).
 
+### D56 Explanations move into (i) tooltips (v5)
+- **Choice:** method text that sat inline moves into (i) buttons that show
+  on hover, keyboard focus or tap (Esc or a tap elsewhere hides them): the
+  timeline (what bars and band show, click/drag/arrow keys), the flare-list
+  order (metric definitions; the caption keeps the metric and period), the
+  radiant-heat filter, the flaring-sites, radiant-heat and gas-flared tiles,
+  the site panel's pass chart (dragging the window, local solar time) and
+  the EOG comparison (matching method; results become three short rows).
+  Tip text is built when shown, so it names the current range and order.
+- **Alternatives:** native `title` attributes (no touch or keyboard access,
+  delayed, unstyled).
+- **Why:** user request, 2026-11-09.
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

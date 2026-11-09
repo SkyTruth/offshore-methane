@@ -102,8 +102,21 @@ h1 .glow { color: var(--flare-4); text-shadow: 0 0 22px rgba(253, 142, 40, 0.35)
 .pctrow { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 2px 10px; margin: 0 0 10px; font-size: 12px; color: var(--ink-2); }
 .pctrow output { text-align: right; font-family: var(--num); font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pctrow input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
-.pct-hint { grid-column: 1 / -1; margin: 2px 0 0; font-size: 11.5px; color: var(--ink-3); }
-.pct-hint b { color: var(--ink-2); font-weight: 500; }
+.info {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; padding: 0;
+  border: 1px solid var(--ink-3); border-radius: 50%; background: transparent; color: var(--ink-2); cursor: help;
+  font-family: var(--serif); font-style: italic; font-weight: 700; font-size: 11px; line-height: 1; vertical-align: 2px;
+  text-transform: none; letter-spacing: 0;
+}
+.info:hover, .info:focus-visible { border-color: var(--accent); color: var(--ink); }
+#infotip {
+  position: fixed; z-index: 50; pointer-events: none; max-width: 290px; padding: 8px 11px;
+  background: rgba(0, 25, 41, 0.98); border: 1px solid var(--coast); border-radius: 9px; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.45; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 400;
+}
+.val-stats { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 10px 0 0; font-size: 12px; }
+.val-stats dt { color: var(--ink-3); }
+.val-stats dd { margin: 0; text-align: right; font-family: var(--num); font-variant-numeric: tabular-nums; color: var(--ink); }
 .legend .seg { justify-self: start; }
 .legend-keys { display: grid; gap: 6px; }
 
@@ -188,7 +201,7 @@ h2 .aside { text-transform: none; letter-spacing: 0; font-weight: 400; color: va
 
 .sortseg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
 .sortseg button { padding: 6px 4px; text-align: center; line-height: 1.2; }
-.rank-hint { font-size: 11.5px; color: var(--ink-3); margin: 7px 0 6px; min-height: 2.4em; }
+.rank-hint { font-size: 11.5px; color: var(--ink-3); margin: 8px 0 6px; }
 .rank-hint b { color: var(--ink-2); font-weight: 500; }
 .microkey { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 10.5px; color: var(--ink-3); margin: 0 0 6px; }
 .microkey span { display: inline-flex; align-items: center; gap: 4px; }
@@ -309,7 +322,6 @@ details.card li b { color: var(--ink); font-weight: 500; }
 @media (max-width: 420px) {
   .facts { grid-template-columns: 1fr 1fr; }
   ol.rank button { grid-template-columns: 22px minmax(0, 1fr) 60px 78px; gap: 6px; }
-  .tl-hint { display: none; }
 }
 @media (max-width: 340px) {
   ol.rank button { grid-template-columns: 20px minmax(0, 1fr) 78px; }
@@ -336,7 +348,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
 
 <section class="timeline" id="timeline" aria-label="Night timeline">
   <div class="tl-head">
-    <div class="tl-title">Radiant heat seen each night <span id="tl-sub"></span></div>
+    <div class="tl-title">Radiant heat seen each night<span id="tl-info"></span> <span id="tl-sub"></span></div>
     <div class="tl-range"><span id="tl-range"></span><div class="seg sm" role="group" aria-label="Nights averaged" id="presets"></div></div>
   </div>
   <div class="tl-row">
@@ -380,17 +392,16 @@ details.card li b { color: var(--ink); font-weight: 500; }
     <section class="card">
       <h2><span id="rank-title">Strongest flares</span> <span class="aside" id="rank-aside"></span></h2>
       <div class="pctrow">
-        <label for="pct">Radiant-heat filter</label>
+        <span><label for="pct">Radiant-heat filter</label><span id="pct-info"></span></span>
         <output id="pct-out" for="pct"></output>
-        <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out pct-hint">
-        <p class="pct-hint" id="pct-hint"></p>
+        <input type="range" id="pct" min="0" max="100" step="1" value="0" aria-describedby="pct-out">
       </div>
       <div class="seg sortseg" role="group" aria-label="Order flares by">
         <button type="button" data-sort="strong" aria-pressed="true">Strongest</button>
         <button type="button" data-sort="consistent" aria-pressed="false">Most consistent</button>
         <button type="button" data-sort="clear" aria-pressed="false">Most clear views</button>
       </div>
-      <p class="rank-hint" id="rank-hint"></p>
+      <p class="rank-hint"><span id="rank-hint"></span><span id="rank-info"></span></p>
       <div class="microkey" id="microkey"></div>
       <ol class="rank" id="rank"></ol>
       <button type="button" class="more" id="rank-more" hidden></button>
@@ -400,7 +411,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
       <div class="tbl-wrap"><table id="regions"></table></div>
     </section>
     <section class="card">
-      <h2>Against EOG's 2025 catalog</h2>
+      <h2><span>Against EOG's 2025 catalog<span id="val-info"></span></span></h2>
       <div id="validation"></div>
     </section>
     <details class="card">
@@ -415,6 +426,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   <div class="doc">__EXPLAINER_HTML__</div>
 </article>
 
+<div id="infotip" role="tooltip" hidden></div>
 <script type="application/json" id="flaring-data">__FLARING_DATA__</script>
 <script type="application/json" id="basemap">__BASEMAP_TOPOJSON__</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -580,6 +592,38 @@ details.card li b { color: var(--ink); font-weight: 500; }
   const tScale = d3.scaleLog().domain([0.05, 60]).range([0, 1]).clamp(true);
   const colorOf = v => ramp(tScale(Math.max(v, 0.05)));
   const radiusOf = v => Math.min(2.4 + 2.3 * Math.sqrt(Math.max(v, 0)), 22);
+
+  // ---------- info tips: an (i) button shows its explanation on hover, focus or tap ----------
+  // tip() is called when shown, so the text can name the current range or order.
+  const infoTip = document.getElementById("infotip");
+  let infoOwner = null;
+  function showInfo(btn) {
+    infoOwner = btn;
+    infoTip.replaceChildren(...[].concat(btn._tip()));
+    infoTip.style.left = "0px"; infoTip.style.top = "0px"; // measure at full width before placing
+    infoTip.style.maxWidth = Math.min(290, window.innerWidth - 16) + "px";
+    infoTip.hidden = false;
+    const r = btn.getBoundingClientRect(), tw = infoTip.offsetWidth, th = infoTip.offsetHeight;
+    const left = Math.min(Math.max(8, r.left - 12), window.innerWidth - tw - 8);
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 8) top = Math.max(8, r.top - th - 8);
+    infoTip.style.left = left + "px"; infoTip.style.top = top + "px";
+  }
+  function hideInfo() { infoTip.hidden = true; infoOwner = null; }
+  function infoBtn(label, tip) {
+    const b = el("button", { type: "button", class: "info", "aria-label": "About " + label, "aria-describedby": "infotip", text: "i" });
+    b._tip = typeof tip === "function" ? tip : () => tip;
+    b.addEventListener("mouseenter", () => showInfo(b));
+    b.addEventListener("mouseleave", hideInfo);
+    b.addEventListener("focus", () => showInfo(b));
+    b.addEventListener("blur", hideInfo);
+    b.addEventListener("click", e => { e.stopPropagation(); showInfo(b); });
+    return b;
+  }
+  document.addEventListener("click", () => { if (!infoTip.hidden) hideInfo(); });
+  window.addEventListener("scroll", () => { if (!infoTip.hidden) hideInfo(); }, true);
+  // a re-render can remove the button under the pointer; drop its tip with it
+  const dropOrphanTip = () => { if (infoOwner && !infoOwner.isConnected) hideInfo(); };
 
   // ---------- data-points pattern (SkyTruth graphic element, decorative) ----------
   // density(i, j) in 0..1 sets how likely a dot is at column i, row j.
@@ -928,9 +972,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
       strip.append(svgText(anchor === "start" ? x + (i ? 3 : 0) : x, labelY, text, { "text-anchor": anchor }));
     });
     const sub = document.getElementById("tl-sub");
-    sub.replaceChildren("summed over flaring sites, tallest bar " + fmtMW(max) + " MW · ",
-      el("span", { class: "tl-key" }, el("i"), "band: sites in clear sky (dark few, light most)"),
-      el("span", { class: "tl-hint", text: " · click a night, drag to average a range" }));
+    sub.replaceChildren("tallest bar " + fmtMW(max) + " MW · ", el("span", { class: "tl-key" }, el("i"), "share of sites in clear sky"));
     tlHead = svg("line", { y1: tl.top - 2, y2: covY + tl.cov + 1, stroke: C.focus, "stroke-width": 1.5 });
     tlHead.style.display = "none";
     strip.append(tlHead);
@@ -938,6 +980,9 @@ details.card li b { color: var(--ink); font-weight: 500; }
     gBrush = d3.select(strip).append("g").call(brush);
     styleStrip();
   }
+  document.getElementById("tl-info").append(infoBtn("the timeline", [
+    "Each bar sums the radiant heat of every site seen flaring that night. The band beneath shows the share of all sites seen in clear sky (dark: few, light: most), so a low bar over a dark band is cloud or a partial night, not less flaring. ",
+    el("b", { text: "Click" }), " a night to show it, ", el("b", { text: "drag" }), " across bars to average a range, or step with ← →."]));
   // Range presets: the most recent 7 / 30 / 90 / 365 nights (shorter than the record), and All.
   const presetBox = document.getElementById("presets");
   const presetBtns = [7, 30, 90, 365].filter(k => k < NN).map(k => {
@@ -1129,6 +1174,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     detail.hidden = !s;
     detail.replaceChildren();
     detailParts = null;
+    dropOrphanTip();
     if (!s) return;
     if (!state.winManual || !state.win) state.win = fitWindow();
     const close = el("button", { type: "button", class: "close", "aria-label": "Close site detail", text: "Close" });
@@ -1144,8 +1190,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     fact("Flaring", s.rFlare + "/" + s.rClear, s.rClear ? Math.round(100 * s.rShare) + "% of clear nights" : "clear nights");
     fact("Clear passes", s.cp ? fmtInt(s.rPasses) : "–", "satellite views");
     detail.append(facts);
-    detail.append(el("p", { class: "note", text: (isFull() ? "Figures cover all " + NN + " nights" : "Figures cover " + rangeLabel(...state.range) + " (shaded)") +
-      ". Drag the window on the overview to see passes on other nights." }));
+    detail.append(el("p", { class: "note", text: isFull() ? "Figures cover all " + NN + " nights." : "Figures cover " + rangeLabel(...state.range) + " (shaded)." }));
     const overview = nightChart(s, 360, 64, { axis: true, minPx: 2, padX: 2, base: 4, win: state.win });
     overview.setAttribute("width", "100%");
     overview.classList.add("overview");
@@ -1162,7 +1207,9 @@ details.card li b { color: var(--ink); font-weight: 500; }
     const next = el("button", { type: "button", "aria-label": "Later nights", text: "›" });
     prev.addEventListener("click", () => moveWindow(state.win[0] - (state.win[1] - state.win[0] + 1)));
     next.addEventListener("click", () => moveWindow(state.win[0] + (state.win[1] - state.win[0] + 1)));
-    detail.append(el("div", { class: "subhead" }, label, el("span", { class: "nav" }, prev, next)));
+    detail.append(el("div", { class: "subhead" }, el("span", null, label, infoBtn("the pass chart",
+      "Every satellite pass over the site in the window. Drag the window on the overview above, or use ‹ ›, to see other nights. The axis runs on the site's local solar time, so each band is one local night.")),
+      el("span", { class: "nav" }, prev, next)));
     const passBox = el("div", { class: "passbox" });
     detail.append(passBox);
     const key = el("div", { class: "chartkey" });
@@ -1213,6 +1260,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     if (!document.getElementById("explainer").hidden || e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.target.closest && e.target.closest("input, textarea, select")) return;
     if (e.key === "Escape") {
+      if (!infoTip.hidden) { hideInfo(); return; }
       if (state.selected) select(null, false);
       else if (state.night >= 0) { pause(); state.animT = null; state.night = -1; refresh(); }
       return;
@@ -1230,16 +1278,19 @@ details.card li b { color: var(--ink); font-weight: 500; }
     const fl = S.filter(s => statusOf(s) === "F" && inFilter(s));
     const clear = S.filter(s => { const st = statusOf(s); return st === "F" || st === "C"; });
     const mw = d3.sum(fl, valueOf);
-    const tile = (lbl, num, unit, sub) => box.append(el("div", { class: "tile" },
-      el("div", { class: "lbl", text: lbl }), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
+    const tile = (lbl, num, unit, sub, info) => box.append(el("div", { class: "tile" },
+      el("div", { class: "lbl" }, lbl, info ? infoBtn(lbl.toLowerCase(), info) : null), el("div", { class: "num" }, num, unit ? el("small", { text: unit }) : null),
       el("div", { class: "ctx", text: sub })));
     const lit = S.filter(s => statusOf(s) === "D" && inFilter(s)).length;
     tile(state.thr != null ? "Flaring sites shown" : "Flaring sites", fmtInt(fl.length), null,
       state.thr != null ? (state.night < 0 ? "of " + fmtInt(state.nFl) + " that flared; mean ≥ " + fmtMW(state.thr) + " MW"
         : "of the " + fmtInt(state.nPass) + " strongest (mean ≥ " + fmtMW(state.thr) + " MW)")
-        : "of " + fmtInt(clear.length) + " seen in clear sky" + (lit ? "; " + fmtInt(lit) + " more lit under cloud" : ""));
-    tile("Radiant heat", fmtMW(mw), "MW", (state.night < 0 ? "sum of site means" : "sum this night") + (state.thr != null ? ", shown sites" : ""));
-    tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised, " + SLOPE + " BCM/yr per MW");
+        : "of " + fmtInt(clear.length) + " seen in clear sky" + (lit ? "; " + fmtInt(lit) + " more lit under cloud" : ""),
+      "A site counts as flaring when a clear pass detected a flare. Sites lit under cloud were seen burning only through cloud and carry no volume.");
+    tile("Radiant heat", fmtMW(mw), "MW", (state.night < 0 ? "sum of site means" : "sum this night") + (state.thr != null ? ", shown sites" : ""),
+      "Heat leaving the flames, summed over the flaring sites counted here. Cloudy nights and missing passes lower it.");
+    tile("Gas flared (est.)", (mw * SLOPE).toFixed(2), "BCM/yr", "annualised estimate",
+      "Radiant heat × " + SLOPE + " BCM/yr per MW, EOG's calibration (MYC25Q4). Single nights are noisy; read volumes as rough rates.");
     const seen = S.filter(s => statusOf(s) !== "N").length;
     tile(state.night < 0 ? "Sites observed" : "Clear this night", fmtInt(state.night < 0 ? seen : clear.length), null,
       "of " + fmtInt(META.n_sites) + " oil sites");
@@ -1253,27 +1304,28 @@ details.card li b { color: var(--ink); font-weight: 500; }
     strong: {
       title: "Strongest flares",
       cmp: (a, b) => valueOf(b) - valueOf(a),
-      hint: () => state.night < 0
-        ? [el("b", { text: "Mean radiant heat" }), " over clear nights, " + rangeLabel(...state.range) + "; clear nights with no flare count as 0."]
-        : [el("b", { text: "Radiant heat" }), " on " + nightName() + ", from that night's clear passes."],
+      hint: () => state.night < 0 ? [el("b", { text: "Mean radiant heat" }), ", " + rangeLabel(...state.range)]
+        : [el("b", { text: "Radiant heat" }), " on " + nightName()],
+      info: () => state.night < 0 ? "Mean clear-sky radiant heat over the selected nights. Clear nights with no flare count as 0, so a flare lit on half its clear nights scores half its lit value."
+        : "That night's radiant heat at each flaring site, from its clear passes.",
       val: s => [fmtMW(valueOf(s)), el("small", { text: fmtMcm(mcm(valueOf(s))) + " M m³/yr" })],
       sub: s => "site " + s.id + " · " + s.rFlare + "/" + s.rClear + " nights",
     },
     consistent: {
       title: "Most consistent flares",
       cmp: (a, b) => b.rLo - a.rLo || b.rShare - a.rShare || b.rClear - a.rClear || valueOf(b) - valueOf(a),
-      hint: () => [state.night < 0 ? "" : "Sites flaring on " + nightName() + ", by ",
-        el("b", { text: state.night < 0 ? "Share of clear nights with a flare" : "share of clear nights with a flare" }),
-        ", " + rangeLabel(...state.range) + ". Ranked by the low end of its 95% range, so a site seen clear on few nights ranks lower."],
+      hint: () => [state.night < 0 ? "" : "Flaring on " + nightName() + ", by ",
+        el("b", { text: state.night < 0 ? "Share of clear nights flaring" : "share of clear nights flaring" }), ", " + rangeLabel(...state.range)],
+      info: "Share of clear nights with a flare, ranked by the low end of its 95% interval, so a site seen clear on few nights ranks below one with the same share over many nights (4 of 4 ranks below 40 of 44).",
       val: s => [Math.round(100 * s.rShare) + "%", el("small", { text: s.rFlare + " of " + s.rClear + " nights" })],
       sub: s => "site " + s.id + " · mean " + fmtMW(s.rMean) + " MW",
     },
     clear: {
       title: "Flares with most clear views",
       cmp: (a, b) => b.rPasses - a.rPasses || b.rClear - a.rClear || valueOf(b) - valueOf(a),
-      hint: () => [state.night < 0 ? "" : "Sites flaring on " + nightName() + ", by ",
-        el("b", { text: state.night < 0 ? "Satellite passes with a clear view" : "satellite passes with a clear view" }),
-        " of the site, " + rangeLabel(...state.range) + ". More clear views make a steadier mean."],
+      hint: () => [state.night < 0 ? "" : "Flaring on " + nightName() + ", by ",
+        el("b", { text: state.night < 0 ? "Clear satellite passes" : "clear satellite passes" }), ", " + rangeLabel(...state.range)],
+      info: "Satellite passes that saw the site through clear sky in the selected nights. More clear views make a steadier mean.",
       val: s => [fmtInt(s.rPasses), el("small", { text: s.rClear + " nights" })],
       sub: s => "site " + s.id + " · flaring " + s.rFlare + "/" + s.rClear,
     },
@@ -1284,6 +1336,10 @@ details.card li b { color: var(--ink); font-weight: 500; }
   }));
   rankMore.addEventListener("click", () => { state.rankN += RANK_PAGE; renderRank(); });
   microKey(document.getElementById("microkey"));
+  document.getElementById("rank-info").append(infoBtn("this order", () => { const t = SORTS[state.sort].info; return typeof t === "function" ? t() : t; }));
+  document.getElementById("pct-info").append(infoBtn("the radiant-heat filter", () => [
+    "Keeps flares by ", el("b", { text: "mean radiant heat" }), " over " + rangeLabel(...state.range) +
+    " only, whatever the list order. Applies to the map, this list and the totals; an opened site stays on the map."]));
   function renderRank() {
     const sort = SORTS[state.sort];
     sortBtns.forEach(btn => btn.setAttribute("aria-pressed", String(btn.dataset.sort === state.sort)));
@@ -1354,9 +1410,12 @@ details.card li b { color: var(--ink); font-weight: 500; }
   function renderValidation() {
     const v = META.validation, box = document.getElementById("validation");
     const km = ((v.match_m || 1000) / 1000).toFixed(0);
-    box.append(el("p", { class: "note" }, el("b", { text: fmtInt(v.matched) }), " of " + fmtInt(v.observed) +
-      " oil sites seen in clear sky over the whole period match an EOG 2025 upstream flare within " + km +
-      " km (one-to-one). Share flagged flaring on at least one clear night, by EOG's 2025 persistence class:"));
+    document.getElementById("val-info").append(infoBtn("the EOG comparison", [
+      fmtInt(v.matched) + " of " + fmtInt(v.observed) + " oil sites seen in clear sky over the whole period match an EOG MYC25Q4 2025 upstream flare within " + km +
+      " km, one to one. Bars: share of matched sites flagged flaring on at least one clear night, by EOG's persistence class. " +
+      "Volume agreement: log-log correlation of pooled clear-sky radiant heat with EOG's 2025 volume. Detection rate: median share of clear passes with a detection at persistent flares. " +
+      "Regional volumes here are the pooled clear-sky mean × " + SLOPE + "."]));
+    box.append(el("p", { class: "note" }, "Detected at least once, by EOG 2025 class (", el("b", { text: fmtInt(v.matched) }), " matched sites)"));
     const grid = el("div", { class: "val-grid" });
     ["persistent", "intermittent", "sporadic", "undetected", "insufficient_observations"].forEach(k => {
       if (!v.by_regime[k]) return;
@@ -1366,18 +1425,12 @@ details.card li b { color: var(--ink); font-weight: 500; }
         el("span", { class: "pct2" }, (pct * 100).toFixed(0) + "% ", el("small", { text: hit + "/" + n }))));
     });
     box.append(grid);
-    const p = el("p", { class: "note" });
-    if (v.log_r != null) {
-      p.append("Pooled clear-sky volume vs EOG 2025: log-log r = ", el("b", { text: v.log_r.toFixed(2) }),
-        ", median ratio " + (v.median_ratio != null ? v.median_ratio.toFixed(2) : "–") + " (n = " + v.n_both + "). ");
-    }
-    if (v.det_freq && v.det_freq.n) {
-      p.append("At persistent flares, the median share of clear passes with a detection is ",
-        el("b", { text: (v.det_freq.ours * 100).toFixed(0) + "%" }), " here vs " + (v.det_freq.myc * 100).toFixed(0) +
-        "% in EOG 2025 (n = " + v.det_freq.n + "). ");
-    }
-    p.append(el("b", { text: fmtInt(v.unmatched_flaring) }), " flaring sites have no EOG 2025 flare within " + km + " km.");
-    box.append(p);
+    const dl = el("dl", { class: "val-stats" });
+    const row = (k, val) => dl.append(el("dt", { text: k }), el("dd", { text: val }));
+    if (v.log_r != null) row("Volume agreement", "r = " + v.log_r.toFixed(2) + " · ratio " + (v.median_ratio != null ? v.median_ratio.toFixed(2) : "–") + " (n = " + fmtInt(v.n_both) + ")");
+    if (v.det_freq && v.det_freq.n) row("Detection rate, persistent", (v.det_freq.ours * 100).toFixed(0) + "% vs EOG " + (v.det_freq.myc * 100).toFixed(0) + "% (n = " + v.det_freq.n + ")");
+    row("Flaring, no EOG flare ≤ " + km + " km", fmtInt(v.unmatched_flaring) + " sites");
+    box.append(dl);
     if (v.regions && v.regions.length) {
       const t = el("table");
       t.append(el("thead", null, el("tr", null, el("th", { text: "Matched sites by region" }), el("th", { text: "Here" }),
@@ -1388,7 +1441,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
           el("td", { text: myc.toFixed(2) }), el("td", { text: fmtInt(n) })));
       });
       t.append(tb);
-      box.append(el("p", { class: "note", text: "Annual gas flared, BCM/yr (here: pooled clear-sky mean × " + SLOPE + "):" }),
+      box.append(el("p", { class: "note", text: "Annual gas flared by region, BCM/yr" }),
         el("div", { class: "tbl-wrap" }, t));
     }
   }
@@ -1427,8 +1480,6 @@ details.card li b { color: var(--ink); font-weight: 500; }
   function renderPct() {
     pctOut.textContent = state.thr == null ? "off · all " + fmtInt(state.nFl) + " flares"
       : "top " + (100 - state.pct) + "% · mean ≥ " + fmtMW(state.thr) + " MW · " + fmtInt(state.nPass) + " of " + fmtInt(state.nFl);
-    document.getElementById("pct-hint").replaceChildren("Keeps flares by ", el("b", { text: "mean radiant heat" }),
-      " over " + rangeLabel(...state.range) + " only, whatever the list order. Applies to the map, this list and the totals; an opened site stays on the map.");
   }
   document.getElementById("zin").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 2));
   document.getElementById("zout").addEventListener("click", () => csel.transition().duration(reduceMotion ? 0 : 300).call(zoom.scaleBy, 0.5));
@@ -1498,7 +1549,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
       : [el("b", { text: wd(NIGHTS[state.night]) + " " + md(NIGHTS[state.night]) }), " · night " + (state.night + 1) + " of " + NN]));
     showAll.setAttribute("aria-pressed", String(!state.flaringOnly));
     showFl.setAttribute("aria-pressed", String(state.flaringOnly));
-    renderTiles(); renderRank(); renderRegions(); renderLegend();
+    renderTiles(); renderRank(); renderRegions(); renderLegend(); dropOrphanTip();
   }
   function refresh() {
     refreshPanels();
