@@ -10,6 +10,9 @@ packages = ["offshore_methane"]
 
 [tool.ruff]
 line-length = 88
+# Archived research scripts are kept byte-for-byte as run (provenance), not linted.
+extend-exclude = ["nightly-flaring/docs/flareout_research"]
+force-exclude = true
 
 [tool.pytest.ini_options]
 addopts = "-ra"

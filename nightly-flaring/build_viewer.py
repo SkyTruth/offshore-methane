@@ -101,18 +101,58 @@ def find_segments(
     return sorted(segments, key=lambda s: (s[1][:10], s[1][11:], s[0].name))
 
 
+def granule_owners(segments: list[tuple[Path, str]]) -> dict:
+    """Latest complete snapshot owns copies and passes, including empty exports.
+
+    An incomplete boundary retry must not erase a prior measured recovery.
+    Older exports without a completion column predate partial-run acceptance.
+    """
+    owners = {}
+    for i, (folder, tag) in enumerate(segments):
+        manifest = folder / f"jobs_{tag}.csv"
+        overpasses = folder / f"overpasses_{tag}.csv"
+        coverage = pd.read_csv(
+            manifest
+            if manifest.exists()
+            else overpasses
+            if overpasses.exists()
+            else folder / f"copies_{tag}.csv",
+            usecols=lambda col: col in {"satellite", "granule", "complete"},
+        )
+        if "complete" in coverage:
+            coverage = coverage[coverage.complete.eq(True)]
+        for key in (
+            coverage[["satellite", "granule"]]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        ):
+            owners[key] = i
+    return owners
+
+
 def load_segments(
     segments: list[tuple[Path, str]],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Concatenate segments; where nights overlap the later segment wins."""
     nights, over = [], []
+    owners = granule_owners(segments)
     for i, (folder, tag) in enumerate(segments):
         n = pd.read_csv(folder / f"site_nights_{tag}.csv")
         n["_segment"] = i
         nights.append(n)
         o = pd.read_csv(folder / f"overpasses_{tag}.csv", low_memory=False)
         o["_segment"] = i
-        over.append(o)
+        keep = pd.Series(
+            [
+                owners.get(key) == i
+                for key in o[["satellite", "granule"]].itertuples(
+                    index=False, name=None
+                )
+            ],
+            index=o.index,
+            dtype=bool,
+        )
+        over.append(o.loc[keep])
     nights = (
         pd.concat(nights, ignore_index=True)
         .sort_values("_segment", kind="stable")
@@ -131,15 +171,41 @@ def load_segments(
     return nights, over
 
 
+def load_copies(segments: list[tuple[Path, str]]) -> pd.DataFrame:
+    """Join source-copy exports; the latest complete granule snapshot wins.
+
+    Missing exports are an error: absence needs the source reassignment check.
+    """
+    owners = granule_owners(segments)
+    tables = [
+        pd.read_csv(folder / f"copies_{tag}.csv", low_memory=False).assign(_segment=i)
+        for i, (folder, tag) in enumerate(segments)
+    ]
+    nonempty = [table for table in tables if not table.empty]
+    copies = pd.concat(nonempty or tables[:1], ignore_index=True)
+    keep = [
+        owners.get((sat, granule)) == segment
+        for sat, granule, segment in copies[
+            ["satellite", "granule", "_segment"]
+        ].itertuples(index=False, name=None)
+    ]
+    return (
+        copies.loc[keep]
+        .drop(columns="_segment")
+        .drop_duplicates(
+            ["satellite", "granule", "group_id", "peak_row", "peak_col"], keep="last"
+        )
+        .reset_index(drop=True)
+    )
+
+
 def night_series(nights: pd.DataFrame) -> list[str]:
     """Every night from the first to the last, including nights with no data."""
     days = pd.date_range(nights["night"].min(), nights["night"].max(), freq="D")
     return [d.strftime("%Y-%m-%d") for d in days]
 
 
-def encode_site_nights(
-    g: pd.DataFrame, night_list: list[str]
-) -> tuple[str, list, str]:
+def encode_site_nights(g: pd.DataFrame, night_list: list[str]) -> tuple[str, list, str]:
     """Status string, sparse values and clear-pass digits for one site.
 
     ``st`` has one code per night (F flaring, D lit through cloud, C clear with
@@ -279,7 +345,9 @@ def explainer_html(path: Path = EXPLAINER, img_dir: Path | None = None) -> str:
     paragraphs become captions, tables get a scroll wrapper, and links to
     other repository docs point at GitHub.
     """
-    html = markdown.markdown(path.read_text(), extensions=["tables", "sane_lists"])
+    html = markdown.markdown(
+        path.read_text(), extensions=["tables", "sane_lists", "toc"]
+    )
 
     def figure(m: re.Match) -> str:
         src = path.parent / m.group(2)
@@ -324,8 +392,10 @@ def main(
         print(f"segment {folder.name}: {tag}")
     nights, over = load_segments(segments)
     data, passes = build_data(nights, over)
-    print(f"{len(data['nights'])} nights, {len(data['sites'])} sites, "
-          f"{len(passes)} with pass files")
+    print(
+        f"{len(data['nights'])} nights, {len(data['sites'])} sites, "
+        f"{len(passes)} with pass files"
+    )
 
     if site_dir.exists():
         shutil.rmtree(site_dir)
@@ -334,17 +404,36 @@ def main(
         (site_dir / "passes" / f"{sid}.json").write_text(
             json.dumps(rows, separators=(",", ":"))
         )
+    import emit
+    import flareouts
+
+    flareout_data = flareouts.screen(nights, over, load_copies(segments))
+    emit.enrich(flareout_data, site_dir=site_dir)
+    (site_dir / "flareouts.json").write_text(json.dumps(flareout_data, allow_nan=False))
+    counts = {
+        tier: sum(c["tier"] == tier for c in flareout_data["candidates"])
+        for tier in ("High", "Mid", "Watch")
+    }
+    print(f"flare-outs: {counts}")
+    flareout_blob = json.dumps(
+        flareout_data, separators=(",", ":"), allow_nan=False
+    ).replace("</", "<\\/")
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.read_text()
-    html = html.replace("__SKYTRUTH_LOGO__", LOGO.read_text().split("-->", 1)[-1].strip())
+    html = html.replace(
+        "__SKYTRUTH_LOGO__", LOGO.read_text().split("-->", 1)[-1].strip()
+    )
     html = html.replace("__EXPLAINER_HTML__", explainer_html(img_dir=site_dir / "img"))
     html = html.replace("__FLARING_DATA__", blob)
+    html = html.replace("__FLAREOUTS_DATA__", flareout_blob)
     html = html.replace("__BASEMAP_TOPOJSON__", load_basemap().replace("</", "<\\/"))
     index = site_dir / "index.html"
     index.write_text(html)
     total = sum(p.stat().st_size for p in site_dir.rglob("*") if p.is_file())
-    print(f"wrote {site_dir}: index.html {index.stat().st_size / 1e6:.1f} MB, "
-          f"{total / 1e6:.1f} MB in all")
+    print(
+        f"wrote {site_dir}: index.html {index.stat().st_size / 1e6:.1f} MB, "
+        f"{total / 1e6:.1f} MB in all"
+    )
     return site_dir
 
 

@@ -13,6 +13,7 @@ Needs ``outputs/gfw_oil_sites.csv`` from ``fetch_gfw_oil.py``.
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 import time
@@ -121,7 +122,7 @@ def write_manifest(jobs: list[dict], cache_dir: Path, path: Path) -> dict:
         dict(
             satellite=j["satellite"],
             granule=j["gid"],
-            n_sites=len(j.get("sites", [])),
+            n_sites=j.get("n_sites", len(j.get("sites", []))),
             complete=cache_complete(j, cache_dir),
         )
         for j in jobs
@@ -154,7 +155,11 @@ def run_jobs(
     ``attempts`` passes; any still missing are reported and left uncached.
     """
     for attempt in range(1, attempts + 1):
-        todo = [j for j in jobs if not cache_complete(j, cache_dir)]
+        todo = [
+            j
+            for j in jobs
+            if not cache_complete(j, cache_dir) and not j.get("unavailable")
+        ]
         print(
             f"pass {attempt}: {len(jobs)} granules, "
             f"{len(jobs) - len(todo)} cached, {len(todo)} to run"
@@ -289,11 +294,14 @@ def site_nights(
     counts = ("n_overpasses", "n_clear", "n_detected", "n_detected_cloud")
     for col in (*counts, "n_clear_detclear"):
         out[col] = out[col].fillna(0).astype(int)
-    out["rh_mw"] = (out["rh_sum"] / out["n_clear"]).where(out["n_clear"] > 0)
-    out["bcm_per_year"] = BCM_PER_MW_YEAR * out["rh_mw"]
-    out["rh_mw_detclear"] = (out["rh_sum_detclear"] / out["n_clear_detclear"]).where(
-        out["n_clear_detclear"] > 0
+    out["rh_mw"] = pd.to_numeric(out["rh_sum"]).astype(float) / out["n_clear"].where(
+        out["n_clear"] > 0
     )
+    out["bcm_per_year"] = BCM_PER_MW_YEAR * out["rh_mw"]
+    out["rh_mw_detclear"] = (
+        pd.to_numeric(out["rh_sum_detclear"]).astype(float)
+        / out["n_clear_detclear"].where(out["n_clear_detclear"] > 0)
+    ).where(out["n_clear_detclear"] > 0)
     out["bcm_per_year_detclear"] = BCM_PER_MW_YEAR * out["rh_mw_detclear"]
     out["status"] = "not_observed"
     out.loc[out["n_overpasses"] > 0, "status"] = "cloudy"
@@ -321,6 +329,99 @@ def site_nights(
     return out[cols].sort_values(["night", "site_id"]).reset_index(drop=True)
 
 
+def expected_jobs_path(out_dir: Path, tag: str) -> Path:
+    """Prefer compressed snapshots; preserve resumability of existing JSON."""
+    path = out_dir / f"expected_jobs_{tag}.json.gz"
+    legacy = path.with_suffix("")
+    return legacy if legacy.exists() and not path.exists() else path
+
+
+def read_expected_jobs(out_dir: Path, tag: str) -> list[dict]:
+    """Read the immutable job metadata, restoring processing timestamps."""
+    path = expected_jobs_path(out_dir, tag)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as stream:
+        jobs = json.load(stream)
+    for job in jobs:
+        if "start" in job:
+            job["start"] = datetime.fromisoformat(job["start"])
+    return jobs
+
+
+def persistent_jobs(jobs: list[dict], out_dir: Path, tag: str) -> list[dict]:
+    """Freeze expected jobs before processing; a fresh listing cannot shrink it.
+
+    Store public object keys and coordinates only. Legacy manifests retain their
+    original granules, including ones missing from today's NODD listing.
+    """
+    path = expected_jobs_path(out_dir, tag)
+    current = {(j["satellite"], j["gid"]): j for j in jobs}
+    if path.exists():
+        saved = read_expected_jobs(out_dir, tag)
+        original = {(j["satellite"], j["gid"]): j for j in saved}
+        # Expected scope is immutable on resume. Do not silently add/drop jobs.
+        return list(original.values())
+    manifest = out_dir / f"jobs_{tag}.csv"
+    if manifest.exists():
+        for row in pd.read_csv(manifest).itertuples():
+            key = (row.satellite, row.granule)
+            if key not in current:
+                current[key] = dict(
+                    satellite=row.satellite,
+                    gid=row.granule,
+                    start=datetime.fromisoformat(tag[:10]),
+                    sites=[],
+                    keys={},
+                    unavailable=True,
+                    n_sites=int(row.n_sites),
+                )
+    result = sorted(current.values(), key=lambda j: (j["start"], j["satellite"]))
+    tmp = path.with_suffix(".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8") as stream:
+        json.dump(result, stream, default=str, separators=(",", ":"))
+    tmp.replace(path)
+    return result
+
+
+def missing_observations(
+    jobs: list[dict], cache_dir: Path, sites: pd.DataFrame, start: date, end: date
+) -> pd.DataFrame:
+    """Unknown exposure for affected site-nights; never create a clear miss."""
+    rows = []
+    for j in jobs:
+        if cache_complete(j, cache_dir):
+            continue
+        if j.get("sites"):
+            affected = j["sites"]
+            for sid, lat, lon in affected:
+                night = (
+                    pd.Timestamp(j["start"]) + pd.Timedelta(hours=lon / 15 - 12)
+                ).date()
+                if start <= night <= end:
+                    rows.append(
+                        dict(
+                            site_id=sid,
+                            night=night.isoformat(),
+                            satellite=j["satellite"],
+                            granule=j["gid"],
+                        )
+                    )
+        else:
+            # Legacy missing jobs lack site/time metadata. Abstain across the
+            # segment rather than invent which exposures they would have supplied.
+            for day in _days(start, end):
+                for sid in sites.site_id:
+                    rows.append(
+                        dict(
+                            site_id=int(sid),
+                            night=day.isoformat(),
+                            satellite=j["satellite"],
+                            granule=j["gid"],
+                        )
+                    )
+    return pd.DataFrame(rows, columns=["site_id", "night", "satellite", "granule"])
+
+
 def main(
     start: str = "2026-10-29",
     end: str = "2026-11-04",
@@ -333,10 +434,17 @@ def main(
     d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
     out_dir.mkdir(parents=True, exist_ok=True)
     sites = pd.read_csv(sites_csv)
-    jobs = build_jobs(sites, d0, d1)
-    if max_granules:
-        jobs = jobs[:max_granules]
+    tag = f"{start}_{end}"
+    if expected_jobs_path(out_dir, tag).exists():
+        jobs = persistent_jobs([], out_dir, tag)
+    else:
+        jobs = build_jobs(sites, d0, d1)
+        if max_granules:
+            jobs = jobs[:max_granules]
+        jobs = persistent_jobs(jobs, out_dir, tag)
     over = run_jobs(jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", workers)
+    if over.empty:
+        over = pd.DataFrame(columns=granule.RECORD_COLUMNS)
     frames = [
         pd.read_csv(_copies_path(j, out_dir / f"overpasses_{PIPELINE_VERSION}"))
         for j in jobs
@@ -347,12 +455,30 @@ def main(
         if frames
         else pd.DataFrame(columns=granule.COPY_COLUMNS)
     )
-    tag = f"{start}_{end}"
     summary = write_manifest(
         jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", out_dir / f"jobs_{tag}.csv"
     )
     (out_dir / f"run_summary_{tag}.json").write_text(json.dumps(summary, indent=2))
     copies.to_csv(out_dir / f"copies_{tag}.csv", index=False)
+    missing = missing_observations(
+        jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", sites, d0, d1
+    )
+    missing.to_csv(out_dir / f"missing_observations_{tag}.csv", index=False)
+    if len(missing):
+        over_night = (
+            pd.to_datetime(over.time_utc)
+            + pd.to_timedelta(
+                over.site_id.map(sites.set_index("site_id").lon) / 15 - 12, "h"
+            )
+        ).dt.strftime("%Y-%m-%d")
+        unknown = set(zip(missing.site_id, missing.night))
+        over = over.loc[
+            pd.Series(
+                [key not in unknown for key in zip(over.site_id, over_night)],
+                index=over.index,
+                dtype=bool,
+            )
+        ]
     over.to_csv(out_dir / f"overpasses_{tag}.csv", index=False)
     nights = site_nights(over, sites, d0, d1)
     nights.to_csv(out_dir / f"site_nights_{tag}.csv", index=False)

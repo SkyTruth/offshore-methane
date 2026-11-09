@@ -6,6 +6,36 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 6: potential flare-outs, implementation (2026-11-09)
+
+Scope: `flareouts.py`, `emit.py`, `update.py`, the Flare-outs tab, the
+explainer's "Potential flare-outs" section and D58-D60, built from the research
+consensus in [flareout_research/](flareout_research/) (two models, three rounds,
+nightly data only). Sol implemented; the main session checked each round; the
+council reviewed. Four rounds:
+
+| Round | Sol | Opus | Deciding findings |
+|---|---|---|---|
+| 1 | NO-GO (5 major) | NO-GO (1 blocker, 7 major) | "isolated" with no comparison flare could make 927 High after 7 more dark nights; 4582 passed the High gate at 0.0999 vs 0.1; Mid relied on the rejected independent-night null, whose score drifted with record length; bright eligibility frozen to the first 29 nights (21 later-bright sites excluded); source spells scored on a site's baseline; duplicate cards from one complex; `update.py` blocked forever by one failed granule and could certify a shrinking job list; EMIT timing mixed calendar dates with local nights; tab one long column with method jargon |
+| 2 | NO-GO (1 major) | GO (9 minor) | An incomplete newer granule snapshot replaced an older complete one, deleting a recovery detection and creating a false ongoing Mid card with 45 clear dark nights (reproduced); High threshold drifted as the record grew |
+| 3 | NO-GO (1 major) | GO (2 minor) | A moving 30-night family could promote unchanged historical evidence: a 7-night Mid spell became High when only the calendar was extended (Mid 1.45× → High 0.029×) |
+| 4 | GO | GO (1 minor) | Per-spell windows frozen once a spell ends; the reproduction stays Mid at 1.687× with the calendar extended |
+
+Candidates were the same in every round (*checked*): Mid 4582/4583 and 927,
+Watch 3644, 3662 and 6011, no High. 4582/4583's frozen score is 1.0107× the
+High threshold (5 Oct-3 Nov window); across the record's 30-night windows the
+same evidence scores 0.81-1.01×, so the shared heat loss at 4500/4515 (6.8 km;
+10.5 MW before, 0.59 MW during) is the firmer reason it is Mid. 927 scores
+53.7× and has no comparison flare within 10 km. EMIT: three scenes over 927 on
+17, 21 and 25 Oct, all before its spell, none during any spell; Earth Engine's
+EMIT collection ends 31 Aug 2026, so no chips yet.
+
+Open (minor, Opus round 4): an ongoing spell's window ends at the latest night,
+so a fleet-wide data gap could lower its score without new observations of it;
+ending the window at the spell's last clear dark night would remove that.
+Outside this scope: two repository-root tests fail in `offshore_methane/mbsp.py`
+(missing `S2_CONSTANTS` and `mbsp_fractional_absorption`).
+
 ## Review 5: v5, 30 nights, backfill decision (2026-11-08)
 
 Code reviewed: commit `783512a`. Evidence: the 30-night v5 run in

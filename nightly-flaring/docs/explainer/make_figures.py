@@ -690,7 +690,7 @@ def fig_viewangle(edge):
 
 def fig_sizes(run):
     det = run["det"]
-    x0, x1, y0, y1 = 70, 730, 30, 230
+    x0, x1, y0, y1 = 70, 730, 56, 230
     bins = np.geomspace(0.03, 1000, 46)
     h, _ = np.histogram(det.rh_mw.clip(0.03, 999), bins)
     xs = Log(0.03, 1000, x0, x1)
@@ -706,7 +706,8 @@ def fig_sizes(run):
         body += f'<rect x="{xa:.1f}" y="{ys(c):.1f}" width="{xb - xa:.1f}" height="{y1 - ys(c):.1f}" fill="{AMBER}" rx="2"><title>{bins[i]:.2g}–{bins[i + 1]:.2g} MW: {c} detections</title></rect>'
     med = det.rh_mw.median()
     body += line(xs(med), y0, xs(med), y1, stroke=CYAN, w=1.5, dash="5 4")
-    body += text(xs(med) + 6, y0 + 14, f"median {med:.2f} MW", size=12, fill=CYAN)
+    # Reserve a label band above the plot, clear of bars and the SVG edge.
+    body += text(xs(med) + 6, y0 - 16, f"median {med:.2f} MW", size=12, fill=CYAN)
     body += text((x0 + x1) / 2, y1 + 38, "radiant heat per detection (MW, log scale)", size=12, fill=INK3, anchor="middle")
     body += text(16, (y0 + y1) / 2, "detections", size=12, fill=INK3, anchor="middle", transform=f"rotate(-90 16 {(y0 + y1) / 2})")
     body += lines(x0, y1 + 66, [

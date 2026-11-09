@@ -30,6 +30,10 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
 | `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with data, basemap and explainer; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
+| `flareouts.py` | Source-centred High / Mid / Watch thermal-departure evidence cards; recalibrates from combined nights and copies on each build (D58). |
+| `emit.py` | Public EMIT overpasses, browse links and optional Earth Engine CH4-index / true-colour chips cached under `outputs/emit_cache/` (D59). |
+| `update.py` | Processes new local nights, validates, rebuilds and refreshes EMIT; publishes only with `publish=True` (D60). |
+| `docs/flareout_research/` | Research brief and six memos behind the flare-out method. |
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
 | `docs/` | `explainer.md` and its figures (`explainer/`: charts from `make_figures.py`, real VIIRS image chips from `make_chips.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
@@ -77,6 +81,43 @@ through a local server.
 Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day bucket retention.
+
+## Monthly update and flare-out review
+
+From `nightly-flaring/`, run:
+
+```bash
+.venv/bin/python -c "import update; update.main()"
+```
+
+This processes the next unprocessed night through today minus three days,
+using `backfill.main` for CMR warming, processing and validation, then rebuilds
+`outputs/site/`. It resumes interrupted update folders and checks their
+immutable expected-job manifest. Default missing tolerance is zero; after retries,
+`update.main(accept_missing=True)` explicitly records the missing granules and
+marks affected site-nights not observed, allowing future months to proceed.
+Silently vanished inputs cannot certify completeness. Before resuming,
+at 75 days it warns about NOAA's roughly 91-day retention;
+expired input requires archive recovery. Even when no new nights are due,
+building refreshes EMIT imagery that Earth Engine may have ingested meanwhile.
+Publication is opt-in: `update.main(publish=True)` calls `publish_pages` only
+after the build. Do not use it for a local preview.
+
+The third tab, **Flare-outs** (`#flare-outs`), has a ranked list, locator map
+and selected evidence detail, ordered by tier.
+Cards include source heat, clear-dark nights, neighbours, pass lists and
+EMIT review material. `outputs/site/flareouts.json` preserves the complete
+payload and build calibration. The [Potential flare-outs method](docs/explainer.md#potential-flare-outs)
+explains the tiers and limitations; [D58](docs/decisions.md#d58-source-centred-flare-out-evidence-cards-and-tiers-v5)
+states the exact rolling rules and scan-family arithmetic; the screen cannot establish
+extinction, venting or the cause of a stop. EMIT needs no auth for CMR/browse.
+Earth Engine uses local credentials with project `cerulean-338116`; missing
+credentials/network leaves an unavailable status and does not stop the build.
+Chips follow `hitl_app._emit_truecolor`: L2A reflectance with validated L1B
+radiance fallback, a shared stretch and gamma 1.8. Recent scenes beyond Earth
+Engine's measured collection cutoff show that date and are retried; if it cannot
+be measured, availability remains unknown. A listing becomes final only 30 days after its
+window ends. Cached review chips survive offline rebuilds. No Earthdata token is needed or stored.
 
 ## Pipeline (v5)
 

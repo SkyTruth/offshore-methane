@@ -327,6 +327,59 @@ details.card li b { color: var(--ink); font-weight: 500; }
   ol.rank button { grid-template-columns: 20px minmax(0, 1fr) 78px; }
   ol.rank .spark { display: none; }
 }
+
+.fo-doc { max-width: 1480px; padding: 24px 26px 48px; }
+.fo-doc h1 { padding-bottom: 12px; border-bottom: 3px solid var(--accent); margin-top: 0; }
+.fo-overview { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 26px; align-items: center; margin-bottom: 24px; }
+.fo-counts { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.fo-badge { display: inline-block; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 8px; font-size: 12px; color: var(--flare-5); white-space: nowrap; }
+.fo-high { background: var(--accent); color: var(--ink); }
+.fo-watch { background: var(--raise); color: var(--ink-2); border-color: var(--coast); }
+.fo-locator { width: 100%; background: var(--sea); border: 1px solid var(--rule); border-radius: 8px; }
+.fo-locator circle { cursor: pointer; }
+.fo-workspace { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(0, 1.6fr); gap: 24px; align-items: start; }
+.fo-list { display: grid; gap: 9px; min-width: 0; }
+.fo-row { text-align: left; width: 100%; min-width: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; cursor: pointer; padding: 12px 14px 5px; }
+.fo-row:hover { background: var(--raise); }
+.fo-row[aria-current="true"] { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+.fo-name { display: block; font: 23px/1.15 var(--serif); margin: 6px 0; }
+.fo-status, .fo-stats { display: block; margin: 4px 0; font-size: 13px; }
+.fo-muted, .fo-key { color: var(--ink-2); font-size: 12px; }
+.fo-chip { display: inline-block; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; margin: 3px 3px 0 0; color: var(--ink-2); font-size: 12px; }
+.fo-plot { width: 100%; margin-top: 5px; }
+.fo-chart { width: 100%; height: auto; display: block; }
+.fo-detail { background: var(--panel); padding: 18px; border: 1px solid var(--rule); border-radius: 8px; min-width: 0; scroll-margin-top: 15px; }
+.fo-detail h2 { margin: 0 0 12px; font-size: 28px; }
+.fo-detail h3 { font-size: 22px; margin: 18px 0 8px; border-left: 3px solid var(--accent); padding-left: 9px; }
+.fo-detail p { margin: 8px 0; }
+.fo-detail ul { margin: 8px 0; font-size: 14px; }
+.fo-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.fo-tile { padding: 9px; background: var(--night); border-radius: 5px; }
+.fo-tile b { display: block; font-size: 19px; }
+.fo-tile span { font-size: 11px; color: var(--ink-2); }
+.fo-key { display: flex; gap: 12px; flex-wrap: wrap; }
+.fo-detail details { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.fo-detail summary { cursor: pointer; color: var(--flare-5); font-size: 14px; }
+.fo-detail .fo-table { width: 100%; table-layout: fixed; }
+.fo-detail .fo-table td, .fo-detail .fo-table th { overflow-wrap: anywhere; font-size: 12px; padding: 5px 6px 5px 0; }
+.fo-doc .tbl-wrap { max-height: 330px; overflow: auto; max-width: 100%; }
+.fo-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fo-chips figure { margin: 8px 0; min-width: 0; }
+.fo-chips img { width: 100%; min-width: 0; }
+.fo-map { margin-top: 10px; padding: 8px 14px; cursor: pointer; background: var(--accent); border: none; border-radius: 5px; }
+@media (max-width: 1000px) {
+  .fo-workspace { grid-template-columns: minmax(260px, .85fr) minmax(0, 1.2fr); gap: 14px; }
+  .fo-tiles { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 700px) {
+  .fo-doc { padding: 18px 8px 36px; }
+  .fo-overview { grid-template-columns: 1fr; gap: 12px; }
+  .fo-locator { max-width: 420px; }
+  .fo-workspace { grid-template-columns: minmax(0, 1fr); }
+  .fo-detail { padding: 12px; }
+  .fo-chips { grid-template-columns: 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -342,6 +395,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     <div class="seg" role="group">
       <button type="button" id="view-map" aria-pressed="true">Map</button>
       <button type="button" id="view-how" aria-pressed="false">How it works</button>
+      <button type="button" id="view-flareouts" aria-pressed="false">Flare-outs</button>
     </div>
   </nav>
 </header>
@@ -426,8 +480,11 @@ details.card li b { color: var(--ink); font-weight: 500; }
   <div class="doc">__EXPLAINER_HTML__</div>
 </article>
 
+<article class="explainer" id="flareouts" hidden aria-label="Potential flare-outs"><div class="doc fo-doc" id="flareout-content"></div></article>
+
 <div id="infotip" role="tooltip" hidden></div>
 <script type="application/json" id="flaring-data">__FLARING_DATA__</script>
+<script type="application/json" id="flareouts-data">__FLAREOUTS_DATA__</script>
 <script type="application/json" id="basemap">__BASEMAP_TOPOJSON__</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
@@ -1273,7 +1330,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   // Keys (map view, outside form fields): ← → step nights, Home/End jump,
   // Esc closes the site detail, then returns from a single night to the range mean.
   document.addEventListener("keydown", e => {
-    if (!document.getElementById("explainer").hidden || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!document.getElementById("explainer").hidden || !document.getElementById("flareouts").hidden || e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.target.closest && e.target.closest("input, textarea, select")) return;
     if (e.key === "Escape") {
       if (!infoTip.hidden) { hideInfo(); return; }
@@ -1575,32 +1632,192 @@ details.card li b { color: var(--ink); font-weight: 500; }
     draw();
   }
 
+  // ---------- potential flare-outs: ranked overview and selected evidence ----------
+  const FL = JSON.parse(document.getElementById("flareouts-data").textContent);
+  const foRoot = document.getElementById("flareout-content");
+  const foHeat = v => v == null ? "unmeasured" : (v < 1 ? v.toFixed(2) : v.toFixed(1)) + " MW";
+  const foName = c => c.unit.region + " · " + c.unit.site_ids.join(" / ");
+  function foBound(c) {
+    const b = c.heat_upper_bound;
+    return b.all_detected_classes_excluded ? "below detected sizes" : b.excluded_from_mw == null
+      ? "bound unresolved" : "under about " + b.excluded_from_mw + " MW";
+  }
+  function foContext(c) {
+    const n = c.context.neighbours.find(n => n.distance_km <= 10 && n.shared_heat_loss);
+    return n ? "heat also fell at " + n.unit.site_ids.join(" / ") + ", " + n.distance_km.toFixed(1) + " km" : c.context.label === "isolated"
+      ? "comparison flares kept their heat" : c.context.label;
+  }
+  function foEmitLabel(c) {
+    const e = c.emit;
+    return !e ? "EMIT: review tiers only" : e.status !== "available" ? "EMIT: listing " + e.status
+      : "EMIT: " + e.during_count + " during · " + e.scenes.filter(s => s.phase === "before").length + " before";
+  }
+  function foBadge(tier, suffix = "") {
+    return el("span", {class:"fo-badge fo-" + tier.toLowerCase(), text:tier + suffix});
+  }
+  function foChart(c, large) {
+    const w = large ? 720 : 390, h = large ? 220 : 100, pad = large ? 43 : 30;
+    const chart = svg("svg", {viewBox:`0 0 ${w} ${h}`, role:"img", "aria-label":"Nightly radiant heat in MW. Dark spell shaded; clear misses at zero; unknown nights omitted."});
+    chart.classList.add("fo-chart");
+    const series = [{name:c.unit.site_ids.join(" / "), values:c.nightly_series, color:C["flare-4"]}];
+    if (large) c.context.neighbours.filter(n => n.series && n.distance_km <= 10).slice(0, 4).forEach((n, i) => {
+      series.push({name:"comparison " + n.unit.site_ids.join(" / ") + ", " + n.distance_km.toFixed(1) + " km", values:n.series, color:[C.focus,C["ink-2"],C.coast,C["flare-6"]][i]});
+    });
+    const dates = c.nightly_series.map(r => r.night);
+    const x = d3.scalePoint().domain(dates).range([pad,w - 8]);
+    const max = d3.max(series.flatMap(s => s.values.map(r => r.heat_mw || 0))) || 1;
+    const y = d3.scaleLinear().domain([0,max]).nice().range([h - 23,25]);
+    const xa = x(c.start) ?? pad, xb = x(c.end) ?? w - 8;
+    chart.append(svg("rect", {x:xa - 2,y:16,width:Math.max(4,xb - xa + 4),height:h - 38,fill:C["flare-4"],opacity:.12}));
+    const line = d3.line().defined(r => r.heat_mw != null).x(r => x(r.night)).y(r => y(r.heat_mw));
+    y.ticks(large ? 4 : 2).forEach(v => {
+      chart.append(svg("line", {x1:pad,x2:w-8,y1:y(v),y2:y(v),stroke:C.rule}));
+      chart.append(svgText(pad-5,y(v)+3,d3.format("~g")(v),{"text-anchor":"end","font-size":11,fill:C["ink-2"]}));
+    });
+    for (const s of series) {
+      chart.append(svg("path", {d:line(s.values)||"",fill:"none",stroke:s.color,"stroke-width":1.5}));
+      for (const r of s.values) {
+        const value = r.heat_mw != null ? r.heat_mw : r.qualified && !r.lit ? 0 : null;
+        if (value == null) continue;
+        const dot = svg("circle", {cx:x(r.night),cy:y(value),r:large?2.3:1.6,fill:s.color});
+        const title = svg("title"); title.textContent = r.night + ": " + (r.heat_mw == null ? "clear night with no flare seen" : foHeat(value)) + " · " + s.name;
+        dot.append(title); chart.append(dot);
+      }
+    }
+    chart.append(svgText(pad,12,"MW",{"font-size":11,fill:C["ink-2"]}),svgText(Math.min(w-8,Math.max(80,(xa+xb)/2)),12,"dark spell",{"text-anchor":(xa+xb)/2>w-70?"end":"middle","font-size":11,fill:C["flare-5"]}),
+      svgText(pad,h-5,md(dates[0]),{"font-size":11}),svgText(w-8,h-5,md(dates[dates.length-1]),{"text-anchor":"end","font-size":11}));
+    return el("div", {class:"fo-plot"}, chart, large ? el("div", {class:"fo-key"}, ...series.map(s => el("span", {style:"color:"+s.color,text:"● "+s.name}))) : null);
+  }
+  function foTable(headers, rows) {
+    const table = el("table", {class:"fo-table"});
+    table.append(el("thead", null, el("tr", null, ...headers.map(t=>el("th", {text:t})))),
+      el("tbody", null, ...rows.map(row=>el("tr", null, ...row.map(v=>el("td", null, v == null ? "—" : typeof v === "object" ? v : String(v)))))));
+    return el("div", {class:"tbl-wrap"}, table);
+  }
+  function foEmit(c) {
+    const box = el("section", null, el("h3", {text:"EMIT overpasses"}),
+      infoBtn("EMIT review", "An ISS daytime overpass can support methane review. Scene cloud cover does not measure cloud over this source. Transition times between VIIRS passes are labelled boundary."));
+    const e = c.emit;
+    if (!e) { box.append(el("p", {class:"fo-muted",text:"EMIT review is prepared for High and Mid cards."})); return box; }
+    box.append(el("p", {class:"fo-muted",text:e.window_start+" to "+e.window_end+" · "+foEmitLabel(c)}));
+    if (!e.scenes.length) box.append(el("p", {text:e.status === "available" ? "No EMIT scene covers the source in this window." : "The listing is incomplete; coverage is unknown."}));
+    else box.append(foTable(["Time UTC","Timing","Cloud","Imagery","Browse"],e.scenes.map(s=>[
+      s.time_utc.replace("T"," ").replace("Z",""),s.phase,s.cloud_cover==null?"unreported":s.cloud_cover+"%",
+      s.imagery.status==="pending"?"not in Earth Engine yet":s.imagery.status,
+      s.browse_url?el("a",{href:s.browse_url,target:"_blank",rel:"noopener",text:"NASA ↗"}):"—"
+    ])));
+    const pendingNotes = [...new Set(e.scenes.filter(s=>s.imagery.status==="pending").map(s=>{
+      const latest = s.imagery.collection_latest_utc;
+      const date = latest ? new Date(latest) : null;
+      return date && !Number.isNaN(date.getTime()) ? "Not in Earth Engine yet (its EMIT collection ends "+new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(date)+"). Retried on each build." : "Earth Engine collection cutoff is unknown; scene availability is unknown. Retried on each build.";
+    }))];
+    for (const text of pendingNotes) box.append(el("p",{class:"fo-muted",text}));
+    if (e.scenes.some(s=>s.imagery.status==="unavailable" && s.imagery.message?.includes("availability is unknown"))) box.append(el("p",{class:"fo-muted",text:"Earth Engine scene availability is unknown; imagery is retried on each build."}));
+    for (const s of e.scenes.filter(s=>s.imagery.ch4||s.imagery.rgb)) box.append(el("div",{class:"fo-chips"},
+      ...[[s.imagery.ch4,"CH4 index"],[s.imagery.rgb,"True colour"]].filter(r=>r[0]).map(r=>el("figure",null,el("img",{src:r[0],alt:r[1]+" at "+s.time_utc,loading:"lazy"}),el("figcaption",{class:"fo-muted",text:r[1]+" · "+s.time_utc})))));
+    box.append(el("p",{class:"fo-muted",text:e.caption}));
+    return box;
+  }
+  function foDetail(c) {
+    const box = el("section",{class:"fo-detail",id:"fo-selected","aria-label":"Selected candidate"});
+    const title = el("h2",null,foName(c)," ",foBadge(c.tier));
+    const tiles = el("div",{class:"fo-tiles"});
+    [[foHeat(c.pre_gap_heat_mw),"heat before"],[foBound(c),c.status==="ended"?"heat bound during the spell":"conditional heat bound now"],[String(c.dark_qualified_nights),"clear nights with no flare seen"],[String(c.satellites.length),"satellites"]].forEach(([v,l])=>tiles.append(el("div",{class:"fo-tile"},el("b",{text:v}),el("span",{text:l}))));
+    box.append(title,tiles,foChart(c,true),el("p",{class:"fo-muted",text:"Points show nightly median heat in MW. Clear nights with no flare seen are plotted at zero; cloud-only nights are gaps. The shaded band marks the dark spell."}));
+    box.append(el("h3",{text:"What we see"}),el("ul",null,
+      el("li",{text:c.dark_qualified_nights+" clear nights with no flare seen, "+md(c.start)+"–"+md(c.end)+"; "+c.clear_passes+" clear passes across "+c.satellites.join(", ")+"."}),
+      el("li",{text:"Heat before darkness was "+foHeat(c.pre_gap_heat_mw)+"; the recent baseline had detections on "+c.baseline.lit_qualified_nights+" of "+c.baseline.qualified_nights+" clear nights."}),
+      el("li",{text:foContext(c).replace(/^./,s=>s.toUpperCase())+"."}),
+      ...(c.recovery?[el("li",{text:"Heat was seen again on "+md(c.recovery)+". This ended the spell without establishing a return to earlier heat."})]:[])));
+    box.append(el("h3",{text:"What else could explain it"}),el("ul",null,
+      el("li",{text:c.context.label==="shared heat loss"?"Nearby heat loss could reflect a shared operating change; geography cannot establish the cause.":"Comparison coverage cannot rule out a shared operating change or a planned stop."}),
+      el("li",{text:"Maintenance, production stops, gas diversion, or a flame below detection can all leave this record."}),
+      el("li",{text:"Darkness cannot show that a flare is out, that gas is vented, or that the stop was unplanned."})),foEmit(c));
+    box.append(el("details",null,el("summary",{text:"Dark-spell passes ("+c.pass_list.length+")"}),foTable(["Time UTC","Local night","Satellite","Observation"],c.pass_list.map(p=>[p.time_utc,p.night,p.satellite,p.status]))));
+    const tech = el("details",null,el("summary",{text:"Technical details"}),
+      c.tier==="Watch"?null:el("p",{text:c.score.budget_multiple.toPrecision(3)+"× the High threshold (≤1× passes). "+FL.calibration.family_definition}),
+      infoBtn("score and heat bound",FL.calibration.score_limit+" "+c.heat_upper_bound.assumption),
+      el("p",{text:"First-miss rate "+c.score.first_miss.toFixed(3)+"; miss persistence "+FL.calibration.miss_persistence_used.toFixed(3)+"; spell window "+c.score.scan_window_start+"–"+c.score.scan_window_end+"; family "+c.score.family_unit_nights+" unit-nights (eligible sum "+c.score.eligible_unit_nights+", floor "+c.score.family_floor+"); budget "+FL.calibration.fleet_budget+"."}),
+      el("p",{text:"Source baseline frozen at "+c.baseline.start+"–"+c.baseline.end+". "+FL.tier_rules[c.tier]}),
+      el("p",{text:c.context.limit}),
+      foTable(["Radius","Comparison flares","Shared losses"],Object.entries(c.context.scales_km).map(([r,v])=>[r+" km",v.donors,v.shared])),
+      foTable(["Heat state","From","Through","Median MW","Nights with heat measured"],c.heat_state_history.map(s=>[s.state,s.start,s.end,foHeat(s.median_mw),s.measured_nights])),
+      el("p",{text:"Absence check: no detections within 3 km among sampled clusters within ±2 pixels of GFW sites. This is not a complete 3 km image search. Vetoed eligible spells in this build: "+FL.source_veto_count+"."}));
+    box.append(tech);
+    const map = el("button",{type:"button",class:"fo-map",text:"Show on map"});
+    map.addEventListener("click",()=>{
+      setView("map",true);
+      requestAnimationFrame(()=>{ resize(); requestAnimationFrame(()=>{ const s=S.find(s=>c.unit.site_ids.includes(s.id)); if(s) select(s,true); }); });
+    });
+    box.append(map); return box;
+  }
+  function renderFlareouts() {
+    const counts=el("div",{class:"fo-counts"});
+    for(const tier of ["High","Mid","Watch"]) counts.append(foBadge(tier," "+FL.candidates.filter(c=>c.tier===tier).length),infoBtn(tier+" tier",FL.tier_rules[tier]));
+    const overview=el("div",{class:"fo-overview"},el("div",null,
+      el("h1",{text:"Potential flare-outs"}),el("p",{class:"fo-muted",text:"As of local night "+FL.as_of}),counts,
+      el("p",{text:"Each card is a change in observed flare heat for human review; darkness alone cannot establish venting."}),
+      el("a",{href:"#how-it-works/potential-flare-outs",text:"How this screen works →"})));
+    const locator=svg("svg",{class:"fo-locator",viewBox:"0 0 400 210",role:"group","aria-label":"Candidate locator map; select a dot to open its evidence"});
+    const projection=d3.geoEqualEarth().fitExtent([[8,8],[392,200]],countries), path=d3.geoPath(projection);
+    locator.append(svg("path",{d:path(countries),fill:C.land,stroke:C.coast,"stroke-width":.5}));
+    overview.append(locator); foRoot.append(overview);
+    if(!FL.candidates.length){foRoot.append(el("p",{text:"No candidates meet the screen on the available nights."}));return;}
+    const list=el("div",{class:"fo-list",role:"group","aria-label":"Ranked candidates"}), detail=el("div",{id:"fo-detail-host"}), workspace=el("div",{class:"fo-workspace"},list,detail);
+    function choose(c, scroll=false){
+      list.querySelectorAll(".fo-row").forEach(row=>row.setAttribute("aria-current",String(row.dataset.id===c.id)));
+      locator.querySelectorAll("circle").forEach(dot=>{dot.setAttribute("stroke",dot.dataset.id===c.id?C.ink:C.sea);dot.setAttribute("stroke-width",dot.dataset.id===c.id?2:1);});
+      detail.replaceChildren(foDetail(c));
+      if(scroll && matchMedia("(max-width:700px)").matches) detail.scrollIntoView({block:"start"});
+    }
+    for(const c of FL.candidates){
+      const row=el("button",{type:"button",class:"fo-row","aria-current":"false"}); row.dataset.id=c.id;
+      row.append(foBadge(c.tier),el("strong",{class:"fo-name",text:foName(c)}),
+        el("span",{class:"fo-status",text:(c.status==="ongoing"?"dark since ":"dark ")+md(c.start)+(c.status==="ended"?"–"+md(c.end)+" · ended":"")+" · "+c.dark_qualified_nights+" clear nights"}),
+        el("span",{class:"fo-stats",text:foHeat(c.pre_gap_heat_mw)+" → "+foBound(c)}),
+        el("span",{class:"fo-chip",text:foContext(c)}),el("span",{class:"fo-chip",text:foEmitLabel(c)}),foChart(c,false));
+      row.addEventListener("click",()=>choose(c,true));list.append(row);
+      const [x,y]=projection([c.unit.lon,c.unit.lat]);
+      const dot=svg("circle",{cx:x,cy:y,r:5,fill:c.tier==="Watch"?C["ink-3"]:c.tier==="High"?C["flare-3"]:C["flare-5"],tabindex:0,role:"button","aria-label":foName(c)+", "+c.tier});dot.dataset.id=c.id;
+      const title=svg("title");title.textContent=foName(c);dot.append(title);
+      dot.addEventListener("click",()=>choose(c,true));dot.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(c,true);}});locator.append(dot);
+    }
+    foRoot.append(workspace);choose(FL.candidates[0]);
+  }
+
   // ---------- views: map / how it works (#how-it-works) ----------
   const views = {
     map: [document.getElementById("timeline"), document.querySelector("main.app")],
     how: [document.getElementById("explainer")],
+    flareouts: [document.getElementById("flareouts")],
   };
-  const viewBtn = { map: document.getElementById("view-map"), how: document.getElementById("view-how") };
+  const viewBtn = { map: document.getElementById("view-map"), how: document.getElementById("view-how"), flareouts: document.getElementById("view-flareouts") };
   function setView(name, push) {
     for (const [k, els] of Object.entries(views)) {
       els.forEach(e => { e.hidden = k !== name; });
       viewBtn[k].setAttribute("aria-pressed", String(k === name));
     }
-    if (name === "how") pause();
+    if (name !== "map") pause();
     if (push) {
-      const h = name === "how" ? "#how-it-works" : "#map";
+      const h = name === "how" ? "#how-it-works" : name === "flareouts" ? "#flare-outs" : "#map";
       if (location.hash !== h) history.replaceState(null, "", h);
     }
   }
-  const viewFromHash = () => (location.hash === "#how-it-works" ? "how" : "map");
+  const viewFromHash = () => location.hash.startsWith("#how-it-works") ? "how" : location.hash === "#flare-outs" ? "flareouts" : "map";
   viewBtn.map.addEventListener("click", () => setView("map", true));
   viewBtn.how.addEventListener("click", () => { setView("how", true); document.getElementById("explainer").scrollTop = 0; });
-  window.addEventListener("hashchange", () => setView(viewFromHash(), false));
+  viewBtn.flareouts.addEventListener("click", () => setView("flareouts", true));
+  window.addEventListener("hashchange", () => {
+    setView(viewFromHash(), false);
+    if (location.hash.includes("/potential-flare-outs")) document.getElementById("potential-flare-outs").scrollIntoView();
+  });
 
+  renderFlareouts();
   computeRange();
   renderValidation();
   renderMethod();
   setView(viewFromHash(), false);
+  if (location.hash.includes("/potential-flare-outs")) requestAnimationFrame(() => document.getElementById("potential-flare-outs").scrollIntoView());
   new ResizeObserver(() => { renderStrip(); }).observe(tlBox);
   new ResizeObserver(resize).observe(wrap);
   renderStrip();

@@ -216,12 +216,23 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
     sites.to_csv(source, index=False)
     output = tmp_path / "new" / "dev"
     seen = []
-    monkeypatch.setattr(
-        p, "build_jobs", lambda *a: [dict(satellite="SNPP", gid="synthetic")]
+    job = dict(
+        satellite="SNPP",
+        gid="synthetic",
+        start=pd.Timestamp("2026-10-30T01:00:00").to_pydatetime(),
+        sites=[(1, 0, 0)],
+        keys={},
     )
+    monkeypatch.setattr(p, "build_jobs", lambda *a: [job])
 
     def run_jobs(jobs, cache_dir, workers):
         seen.append((jobs, cache_dir, workers))
+        path = p._cache_path(jobs[0], cache_dir)
+        path.parent.mkdir(parents=True)
+        observations().to_csv(path, index=False)
+        pd.DataFrame(columns=p.granule.COPY_COLUMNS).to_csv(
+            p._copies_path(jobs[0], cache_dir), index=False
+        )
         return observations()
 
     monkeypatch.setattr(p, "run_jobs", run_jobs)
@@ -232,9 +243,7 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
         sites_csv=source,
         out_dir=output,
     )
-    assert seen == [
-        ([dict(satellite="SNPP", gid="synthetic")], output / "overpasses_v5", 12)
-    ]
+    assert seen == [([job], output / "overpasses_v5", 12)]
     assert (output / "overpasses_2026-10-29_2026-10-29.csv").exists()
     assert (output / "site_nights_2026-10-29_2026-10-29.csv").exists()
     assert result.iloc[0].rh_mw == 3

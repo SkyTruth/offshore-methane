@@ -858,6 +858,183 @@ view-angle effects and non-upstream classification remain deferred. The
   (3/9: sites 4531, 4469, 4546).
 - **Status:** active (v5).
 
+### D58 Source-centred flare-out evidence cards and tiers (v5)
+- **Choice:** source histories use raw cloud-0/1 night passes (SZA ≥97°), with
+  one clear pass qualifying a night. Any copy-group detection within 1.5 km
+  resets darkness, including unassigned/cloudy detections. Heat is the median
+  clear copy-group heat within 1 km. Assignment centres within 750 m merge
+  subject to a simultaneous resolved-source guard. Overlapping candidate
+  spells within 1.5 km yield one card, preferring the complex with more
+  initial/discovery-baseline detections; suppressed IDs are retained on it.
+- **Prospective baseline:** for every scanned source-night and each spell,
+  freeze the source unit's own preceding 29 nights, ending the night before.
+  Eligibility is ≥12 clear nights, ≥80% with source detections, and median
+  measured heat ≥3 MW. The partial first record night is excluded; evaluation
+  begins after 29 full nights. Later bright sources can enter and requalify.
+  Assigned-site detections never substitute for the scored source's baseline.
+- **Dated heat:** log-normal/censored Viterbi states date normal/reduced heat;
+  scoring uses states fitted only through the pre-spell night. Pre-spell heat
+  uses ≥3 clear detections in the intersection of the prior week and the last
+  dated heat state. Thus a 50→8 MW change is scored from 8 MW. A later dark
+  spell is not suppressed solely for following reduced heat. Gaps with <3 clear
+  nights merge into the surrounding state; ≥3 clear misses form a darkness
+  row. Every detection ends that row, including a weak recovery. Table counts
+  say "nights with heat measured"; darkness never includes a recovery's heat.
+- **Arithmetic:** use transitions on the same source's frozen baseline clear
+  opportunities, with cloudy positives resetting the previous state without
+  becoming extra trials. First-miss rate a=(HM+1)/(HH+HM+2). Refit pooled
+  MM/MH across eligible nonoverlapping 29-night source blocks on each build;
+  r=max(0.59, Beta(MM+1,MH+1) 97.5th percentile). Tail=a×r^(k−1).
+  Each scored spell has its own defined 30-night fleet window containing its
+  tested start. For an ended spell of ≤30 nights, end the window at its last
+  dark night; that window does not move on later builds. For an ongoing spell
+  of ≤30 nights, end it at as-of. For either spell longer than 30 nights, use
+  its first 30 nights and keep that window as the spell continues or ends.
+  The scan family F is the sum of prospectively eligible source units on each
+  available evaluation night in that window, floored at the number of those
+  nights (one tested unit per available night, at most 30). This conservative
+  floor includes at least the scored unit's own eligible nights, even when
+  no source meets the bright rule on some nights; an unrelated empty later
+  scan is never substituted. During startup, only evaluation nights after
+  the initial baseline count. Archived months do not grow the penalty merely
+  through record length; new thermal evidence can change eligibility and
+  recalibration. Score=F×tail; budget=0.1 per spell's fleet scan. This is not
+  a cumulative lifetime budget.
+  Display score/0.1 as a multiple of the High threshold for High/Mid, not Watch,
+  which cannot satisfy the bright rule.
+  On 9 November, as-of night 4 November: MM/MH=13/37; r=0.59.
+  The ended 4582/4583 spell uses the frozen 5 October–3 November window,
+  F=1,348 unit-nights. Its first-miss rate is 2/28; score=0.10107
+  (1.01074× budget, about 1.011×) at 14 clear dark nights. This is a near-tie
+  with the score gate: at unchanged calibration and family, 15 dark nights
+  would give 0.59633× (about 0.60×). Across this record's 29 full 30-night
+  windows, F ranges from 1,084 to 1,353, giving 0.81–1.01× for the same
+  14-night evidence. The measured shared heat loss at 4500/4515 is the rule
+  that keeps this card at Mid even under window choices that pass the score
+  gate; its frozen score also narrowly fails today. No extra safety factor
+  is tuned to preserve that tier. For first-miss rate 0.07 the score gate
+  also needs 15 nights. Ongoing 927 uses 6 October–4 November, F=1,353:
+  53.73848× at six clear dark nights and first-miss rate 1/18; it needs 14
+  at unchanged calibration/family and has no comparison flare to establish
+  isolation.
+  These remain model sensitivities, not validated false-alarm probabilities.
+- **Tiers:** High requires the recent bright rule, dated pre-spell heat ≥3 MW
+  from ≥3 clear detections, ≥6 clear dark nights from ≥2 satellites, a sampled
+  3 km absence check, resolved isolation and score≤0.1. Mid requires the same
+  source/heat/satellite/absence checks and ≥6 clear dark nights, with shared
+  loss or score above budget; missing/unresolved comparison coverage caps a
+  passing score at Mid. Mid uses no independent-night score and does not drift
+  with record length. Watch requires an ongoing ≥28-clear-night spell, ≥12
+  earlier detected nights, ≥3 pre-spell clear detections and ≥2 satellites,
+  while failing the recent bright rule. No current card qualifies as High.
+- **Comparison heat:** complexes >3 km away, target excluded, at 10/50/100 km.
+  A comparison flare needs ≥3 nights with measured clear heat within 1 km in
+  the preceding 14 nights, median ≥3 MW. Only measured heat or qualified
+  nondetections enter the spell denominator. ≥3 low nights and ≥half of those
+  measured nights below one fifth of baseline establish shared loss. Overlapping
+  comparison apertures count once, keeping the better-supported complex.
+  Isolation requires ≥1 comparison flare within 10 km, every such flare measured
+  on ≥3 nights, no shared loss, and enough non-losing coverage that even all
+  unknown nights losing heat could not meet the ≥3/≥half-spell loss rule. Otherwise
+  say "no comparison flare within 10 km" or "comparison heat unresolved".
+- **Heat bound and search limits:** use same-night re-detection by heat class;
+  tail=(1−p)^k. Exclude a class only when it and every brighter class have
+  tail≤0.05. Independence and detectable-once conditioning make this a
+  conditional bound, never extinction. The 3 km veto sees only clusters
+  within ±2 pixels of GFW sites, not a complete 3 km search. Export the count
+  of otherwise eligible vetoed spells in `source_veto_count`.
+- **Presentation:** dark SkyTruth overview, tier counts, clickable SVG locator,
+  ranked compact list and one detail pane; charts use a labelled spell band,
+  MW linear axes, misses at zero, named comparisons with distances. Scores,
+  calibration and heat history are collapsed. Passes are collapsed separately.
+  Phone stacks list then detail. Payload excludes unused global heat-state
+  histories and comparison series beyond 10 km.
+- **Provenance:** `flareout_research/{sol,opus}_r3.md` and checked-in `.py`
+  scripts in `flareout_research/scripts_{sol,opus}/`; no research caches copied.
+- **Status:** active; evidence cards for review, never a venting accusation.
+
+### D59 Public EMIT overpasses and optional review imagery (v5)
+- **Choice:** public CMR EMITL2BCH4ENH and EMITL1BRAD, acquisition deduplication,
+  public PNG browse links, ±14-night windows capped at as-of. Convert local
+  noon-to-noon night bounds to UTC using longitude/15 hours. Before/after are
+  bracketed by last-lit/recovery VIIRS observations; during lies between first
+  and last clear dark passes. Between these observations label "boundary".
+- **Caching:** a listing becomes final only when fetched ≥30 days after the
+  window ends. Earlier snapshots refresh online; offline snapshots preserve
+  scene/chip review with an incomplete listing status. Successful chip caches
+  are consulted before initializing Earth Engine, and copied into the build
+  even if a fresh EE connection fails. Failed imagery is retried each build.
+- **Recipe:** HITL `(mean radiance_231..244 − mean radiance_256..268) /
+  mean radiance_231..244`; median and robust sigma within 15 km; display
+  strength=clip((index_sigma−1)/5,0,1)^0.65. True colour matches
+  `notebooks/hitl_app.py::_emit_truecolor` exactly: prefer L2A reflectance
+  bands 35/23/11; fall back to L1B radiance bands 35/23/11. Compute per-band
+  2/50/98 percentiles within 20 km at scale 120 m (`bestEffort=True`), then
+  use one shared minimum (smallest p2) and maximum (largest p98), gamma 1.8.
+  Reject missing percentiles; reject L2A if any p98>1.5; reject either source
+  if max(medians)/max(min(medians),1e−9)>5 or shared range<1e−6. If neither is
+  usable, imagery is unavailable and retried. These are the source's actual
+  guards, resolving the reviewers' disagreement about per-band stretching.
+  Both chips mark the source and show a 5 km scale. Recipe `hitl-v3`
+  invalidates earlier chip renders while retaining their cache artifacts.
+  Match CMR v2/v3 acquisition times to EE v1 assets rather than invent suffixes.
+- **Wording:** "not in Earth Engine yet (its EMIT collection ends <date>)"
+  uses the measured `collection_latest_utc` for recent unavailable assets,
+  without assuming future ingestion. A missing horizon leaves availability
+  explicitly unknown/unavailable, with no invented date. One compact
+  scene table and one absorption-index caption; no calibrated concentration,
+  emission rate or confirmed plume is claimed.
+- **Evidence:** offline timing/cache/recipe tests; 927's three October scenes
+  precede its spell. Optional Earthdata GeoTIFF downloads remain unimplemented.
+- **Status:** active; imagery availability depends on the EE collection.
+
+### D60 Monthly update runner (v5)
+- **Choice:** `update.main(publish=False)` resumes pending segments before
+  extending actual local nights through today−3 with `backfill.main`, then
+  rebuilds and refreshes EMIT. Publication requires `publish=True`.
+- **Immutable inputs:** `pipeline.persistent_jobs` writes compact gzip JSON
+  (`expected_jobs_<tag>.json.gz`) with full expected job metadata atomically
+  before processing. Compression preserves the exact original site lists,
+  timestamps and public object keys. Existing uncompressed persisted snapshots
+  remain readable. Resumes reuse the immutable set, preserving cached
+  jobs even when NOAA stops listing them. Legacy granule manifests are unioned
+  with the current listing; vanished legacy jobs remain expected/uncached.
+  The runner also freezes `update_scope.json` before invoking a resumer, so
+  rejection of a shrinking legacy manifest persists across later invocations.
+  It rejects shrinking/changing expected sets or an empty expected
+  listing before rebuilding or publication. Granule ownership in both pass and
+  copy loaders goes to the latest **complete** manifest snapshot. An incomplete
+  adjacent segment cannot erase an earlier complete recovery, including a pass
+  on the previous local night outside its requested segment. Complete zero-copy
+  and zero-pass replacements still supersede older positives/exposures. Older
+  exports without completion flags predate partial-run acceptance and are
+  treated as completed snapshots; explicit incomplete snapshots supply no rows.
+- **Retention:** before any resume, inspect the oldest uncached job; legacy
+  manifests use the segment start conservatively. Warn at 75 days, refuse at
+  91 days until archives recover missing inputs. Fully cached jobs can be
+  rebuilt after retention expires. `accept_missing` cannot bypass retention.
+- **Missing inputs:** default tolerance is zero. Explicit `accept_missing=True`
+  can acknowledge the exact recorded missing list after retries. Store it in
+  `accepted_missing.json`; do not resume that unchanged accepted deficit every
+  month. `missing_observations_<tag>.csv` records affected site-nights, which
+  are exported as not observed (no negative exposure); available source
+  detections remain positive evidence. Legacy jobs lacking site metadata make
+  the whole segment unknown. Silent input disappearance is never accepted.
+- **Boundary deficits:** acceptance verifies each missing granule separately.
+  A saved job with known sites/time and no in-range local night is accepted
+  with an empty exposure export (e.g. far-east UTC end+1), so it cannot block
+  every subsequent month. A different missing job's exposure rows cannot cover
+  up an unrecorded in-range deficit; legacy unknown scope gets no exception.
+- **Conservative missing-night policy retained:** one missing granule still
+  removes every exported pass for the affected site-night, including completed
+  passes from other satellites. It can discard real observing opportunities,
+  but cannot manufacture a clear miss. Source-copy detections remain positive
+  evidence and can end a spell. The map may say "not observed" for that night;
+  this deliberate abstention is broader than the missing granule alone.
+- **Evidence:** shrinking-manifest, expired-resume, permanent-failure/next-month,
+  empty-copy replacement, and three-segment full-build offline regressions.
+- **Status:** active; no new VIIRS acquisition or publication in this change.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

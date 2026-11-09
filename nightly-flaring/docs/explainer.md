@@ -295,7 +295,90 @@ lists.
 days. Earlier years exist in NASA's archive, which uses a different file
 format and calibration and is not yet read by this pipeline.
 
+### Potential flare-outs
+
+A card in **Flare-outs** means that a source has been dark for several clear
+nights after a period when we could see its heat. It is a place to inspect,
+not evidence that gas is escaping. A planned production stop, maintenance,
+gas recovery, or a smaller flame can leave the same record.
+
+One missed pass tells us little. Clouds hide flares, small flames are missed,
+and the same source can be assigned to different nearby platforms. The screen
+therefore follows the location of the heat, joins overlapping platform records,
+and counts a dark night only when there was a clear view. A detection through
+cloud still ends the spell. A card needs clear misses from at least two
+satellites. The search covers the hot clusters sampled near GFW sites; it is
+not a complete search of the surrounding sea.
+
+We compare each source with its own **29 nights immediately before the dark
+spell**. A source that becomes bright later can enter the screen. We also date
+changes in its measured heat: a flare that fell from 50 MW to 8 MW before
+becoming dark is compared with its 8 MW state. A heat reduction and later
+darkness are separate observations.
+
+| Tier | What the card means |
+| --- | --- |
+| **High** | A recently bright flare has an unusually long clear dark spell under the conservative model, and measured nearby comparison flares show no sustained heat loss. |
+| **Mid** | A recently bright flare has at least six clear nights with no flare seen, but the spell is shorter, nearby heat also fell, or comparison coverage cannot resolve isolation. |
+| **Watch** | A smaller or less reliable source has a long clear dark spell, with enough earlier detections to make review useful. |
+
+The conservative model allows missed detections to cluster. Its High threshold
+counts eligible sources in **each spell's own 30-night fleet window**, which
+always contains the spell's start. For an ended spell, the window ends at its
+last dark night and stays fixed on later builds. For an ongoing spell, it ends
+at the as-of night. Once either spell exceeds 30 nights, its window stays on
+its **first 30 nights**. During startup only available evaluation nights count;
+the family has a conservative floor of one tested unit per available night
+(at most 30). Adding older months or moving the calendar forward cannot move
+an ended spell's window; new thermal evidence can change eligibility or model
+calibration. Mid is a direct evidence rule and does not rely on treating
+successive nights as independent. These scores have not been validated as
+real-world false-alarm rates. The exact rules and arithmetic are in
+[D58](decisions.md#d58-source-centred-flare-out-evidence-cards-and-tiers-v5).
+
+**We also compare heat at nearby flares.** A comparison flare must
+have measured clear heat on at least three of the **14 nights before the
+spell**, with median heat **at least 3 MW**. We compare
+only nights when their heat was measured or when a clear view found no flare;
+cloud-only detections leave heat unknown. For example, 4500 continued to be
+detected while its heat fell sharply during the 4582/4583 spell. That makes a
+shared operating change a plausible explanation, without proving a shared
+cause. No comparison flare within 10 km means that isolation is unknown, and
+caps the card at Mid.
+
+Each card shows the earlier heat in megawatts (MW) and a **conditional heat
+bound** during darkness. This asks whether a flame like those we have detected
+in a particular heat range would plausibly have escaped every clear night.
+It depends on that observed sample and on independent nights; it is not a
+physical upper limit. A flame smaller than any detected remains untested.
+
+**EMIT adds daytime review opportunities.** For High and Mid cards, a table
+lists scenes covering the source before, during, between the bracketing VIIRS
+passes ("boundary"), or after the spell. Scene cloud cover does not tell us
+whether the source itself was clear. A covering scene is not a methane finding.
+
+When imagery is available, the card pairs true colour with a quick-look CH4
+absorption index. The index highlights relative absorption in two spectral
+ranges; it is **not a calibrated methane concentration or emission rate**.
+Water, clouds and surface spectra can produce signal. For scenes newer than
+Earth Engine's measured EMIT collection cutoff, the card shows that date and
+"not in Earth Engine yet". If the cutoff cannot be measured, availability
+remains unknown. The pipeline retries
+each build and retains cached images during offline rebuilds. No plume has
+been confirmed by this screen.
+
+The record cannot show whether production continued, whether a stop was
+planned, whether a flame is out, or whether gas is vented. The
+[research brief](flareout_research/BRIEF.md) and six round memos preserve the
+reasoning and unresolved limits.
+
 ### Reading the app
+
+Use **Map** for nightly flaring, **How it works** for the method, and
+**Flare-outs** for ranked High, Mid and Watch evidence cards. Select a row or locator-map dot for
+its heat chart, comparison flares, satellite passes and EMIT review material;
+**Show on map** selects its site. The shaded chart interval is the dark spell.
+
 
 - **Map colour** is the site's mean radiant heat over the selected nights.
   Gas volume in the side panel uses the 0.0116 conversion.
