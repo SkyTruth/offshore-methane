@@ -815,8 +815,8 @@ view-angle effects and non-upstream classification remain deferred. The
 
 ### D55 Larger flare circles drawn beneath smaller ones (v5)
 - **Choice:** map flare circles are drawn largest first, so smaller flares sit
-  on top, each with a dark outline. Hover and click pick the nearest site
-  centre, so the order does not change what they select. The pass chart in
+  on top. Hover and click select the circle under the pointer (D57). The
+  pass chart in
   the site panel gets a y-axis title, "Radiant heat (MW)".
 - **Alternatives:** largest on top (the previous order: small flares beside a
   large one were hidden, understating how many sources share an area);
@@ -839,6 +839,23 @@ view-angle effects and non-upstream classification remain deferred. The
 - **Alternatives:** native `title` attributes (no touch or keyboard access,
   delayed, unstyled).
 - **Why:** user request, 2026-11-09.
+- **Status:** active (v5).
+
+### D57 Circle edges and pointer hits (v5)
+- **Choice:** each flare circle's edge is a thin line (0.75 px under 6 px
+  radius, else 1 px) in a darker shade of its own fill at 85% opacity,
+  replacing a 1.5 px near-black outline. Hover and click select the topmost
+  drawn circle that contains the pointer (1.5 px tolerance); only when none
+  does, the nearest centre within 6 px, for dots too small to hit.
+- **Alternatives:** keep the outline but lower its opacity (dark rings still
+  stack in dense fields); no outline (overlapping circles of similar colour
+  merge); the nearest centre within 14 px (the previous rule: a click inside
+  a large circle could select a neighbour whose centre was closer).
+- **Why:** user reports, 2026-11-09: outlines dominated dense fields after
+  D55 put small circles on top, and clicks selected a site other than the
+  circle clicked. In the Abu Dhabi field, points inside site 4452's 13.5 px
+  circle now report 4452 (6/9 probes) or a smaller flare drawn over it
+  (3/9: sites 4531, 4469, 4546).
 - **Status:** active (v5).
 
 ## V5 development evidence (2026-11-08)

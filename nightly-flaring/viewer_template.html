@@ -662,7 +662,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
   const coastP = new Path2D(gpath(topojson.mesh(TOPO, TOPO.objects.countries, (a, b) => a === b)));
   S.forEach(s => { const p = proj([s.lon, s.lat]); s.px = p[0]; s.py = p[1]; });
 
-  let W = 0, H = 0, dpr = 1, T = d3.zoomIdentity, quad = null, kWorld = 1;
+  let W = 0, H = 0, dpr = 1, T = d3.zoomIdentity, hitList = [], kWorld = 1;
   const zoom = d3.zoom().scaleExtent([1, 4000]).on("zoom", e => { T = e.transform; draw(); hideTip(); })
     .on("start", () => canvas.classList.add("dragging")).on("end", () => canvas.classList.remove("dragging"));
   const csel = d3.select(canvas).call(zoom).on("dblclick.zoom", null);
@@ -718,7 +718,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
     ctx.lineWidth = 0.7 / T.k; ctx.strokeStyle = "rgba(156,183,201,0.09)"; ctx.stroke(graticule());
     ctx.restore();
 
-    const pts = [], flares = [], rings = [], drawnR = new Map();
+    const hits = [], flares = [], rings = [], drawnR = new Map(); // hits: [x, y, r, site] in paint order
     const dot = Math.min(1.3 + 0.25 * Math.log2(Math.max(T.k / kWorld, 1)), 3.2);
     for (const s of S) {
       let st, v, alpha = 1;
@@ -738,15 +738,15 @@ details.card li b { color: var(--ink); font-weight: 500; }
       }
       const x = T.applyX(s.px), y = T.applyY(s.py);
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
-      pts.push([x, y, s]);
       if (s === state.selected || s === state.hl || s === state.hover) drawnR.set(s, st === "F" ? radiusOf(v) : st === "D" ? dot + 2.2 : dot);
       if (st === "F") { flares.push([x, y, s, v, alpha]); continue; }
-      if (st === "D") { rings.push([x, y]); continue; }
+      if (st === "D") { rings.push([x, y, s]); continue; }
       ctx.fillStyle = st === "C" ? C.clear : C.cloud;
       ctx.beginPath(); ctx.arc(x, y, dot, 0, 2 * Math.PI); ctx.fill();
+      hits.push([x, y, dot, s]);
     }
     ctx.lineWidth = 1.3; ctx.strokeStyle = C["flare-4"];
-    for (const [x, y] of rings) { ctx.beginPath(); ctx.arc(x, y, dot + 2.2, 0, 2 * Math.PI); ctx.stroke(); }
+    for (const [x, y, s] of rings) { ctx.beginPath(); ctx.arc(x, y, dot + 2.2, 0, 2 * Math.PI); ctx.stroke(); hits.push([x, y, dot + 2.2, s]); }
     flares.sort((a, b) => b[3] - a[3]); // largest first: smaller flares stay visible on top
     ctx.globalCompositeOperation = "lighter";
     for (const [x, y, , v, alpha] of flares) {
@@ -757,11 +757,15 @@ details.card li b { color: var(--ink); font-weight: 500; }
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill();
     }
     ctx.globalCompositeOperation = "source-over";
-    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,13,22,0.9)";
-    for (const [x, y, , v, alpha] of flares) {
+    // Edge: a thin, darker shade of the circle's own colour, so overlapping
+    // circles stay distinct without dark rings dominating dense fields.
+    for (const [x, y, s, v, alpha] of flares) {
+      const r = radiusOf(v), fill = colorOf(v), edge = d3.color(fill).darker(1.4);
+      edge.opacity = 0.85;
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = colorOf(v);
-      ctx.beginPath(); ctx.arc(x, y, radiusOf(v), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = fill; ctx.strokeStyle = edge.formatRgb(); ctx.lineWidth = r < 6 ? 0.75 : 1;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      hits.push([x, y, r, s]);
     }
     ctx.globalAlpha = 1;
     // Rings follow the drawn dot; a dashed ring marks a site with no pass this night.
@@ -773,7 +777,7 @@ details.card li b { color: var(--ink); font-weight: 500; }
       ctx.beginPath(); ctx.arc(x, y, (r0 != null ? r0 : dot) + 4, 0, 2 * Math.PI); ctx.stroke();
       ctx.setLineDash([]);
     }
-    quad = d3.quadtree().x(d => d[0]).y(d => d[1]).addAll(pts);
+    hitList = hits;
   }
 
   // ---------- night chart (whole period, one column per night) ----------
@@ -886,19 +890,31 @@ details.card li b { color: var(--ink); font-weight: 500; }
     if (topY + th > H - 6) topY = Math.max(6, my - th - 14);
     tip.style.left = Math.max(6, left) + "px"; tip.style.top = topY + "px";
   }
+  // The site under the pointer: the topmost drawn circle that contains it; for
+  // dots too small to hit, the nearest centre within 6 px.
+  function hitAt(mx, my) {
+    for (let i = hitList.length - 1; i >= 0; i--) {
+      const [x, y, r, s] = hitList[i], dx = mx - x, dy = my - y;
+      if (dx * dx + dy * dy <= (r + 1.5) * (r + 1.5)) return s;
+    }
+    let best = null, bd = 36;
+    for (const [x, y, , s] of hitList) {
+      const d = (mx - x) * (mx - x) + (my - y) * (my - y);
+      if (d < bd) { bd = d; best = s; }
+    }
+    return best;
+  }
   canvas.addEventListener("pointermove", e => {
     if (e.buttons) return;
     const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-    const hit = quad && quad.find(mx, my, 14);
-    const s = hit ? hit[2] : null;
+    const s = hitAt(mx, my);
     if (s !== state.hover) { state.hover = s; draw(); }
     if (s) showTip(s, mx, my); else tip.hidden = true;
   });
   canvas.addEventListener("pointerleave", hideTip);
   canvas.addEventListener("click", e => {
     const r = canvas.getBoundingClientRect();
-    const hit = quad && quad.find(e.clientX - r.left, e.clientY - r.top, 14);
-    select(hit ? hit[2] : null, "center");
+    select(hitAt(e.clientX - r.left, e.clientY - r.top), "center");
   });
 
   // ---------- timeline strip ----------
