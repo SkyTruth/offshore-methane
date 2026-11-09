@@ -39,26 +39,26 @@ import pipeline as p  # noqa: E402
 
 CACHE = p.OUT_DIR / "chips_cache"
 BG, PANEL, RULE, INK, INK2, INK3 = (
-    "#0b141c",
-    "#0e1821",
-    "#1e2c39",
-    "#e3e9ee",
-    "#9aa8b4",
-    "#66747f",
+    "#00131F",
+    "#001929",
+    "#043352",
+    "#F9F6F3",
+    "#9CB7C9",
+    "#60869F",
 )
-GOLD, CYAN = "#ffbc5f", "#7ad5e9"
+GOLD, CYAN = "#FEBD81", "#9FC6BA"
 CMAP = LinearSegmentedColormap.from_list(
     "m10",
     [
-        (0.00, "#0d1822"),
-        (0.30, "#1a2a38"),
-        (0.42, "#2c4256"),
-        (0.50, "#5e2b10"),
-        (0.60, "#923f13"),
-        (0.70, "#c95d18"),
-        (0.80, "#f28d27"),
-        (0.90, "#ffbc5f"),
-        (1.00, "#ffe4b0"),
+        (0.00, "#000D16"),
+        (0.30, "#002640"),
+        (0.42, "#1D5072"),
+        (0.50, "#4C2501"),
+        (0.60, "#7E3D01"),
+        (0.70, "#CA6202"),
+        (0.80, "#FD8E28"),
+        (0.90, "#FEBD81"),
+        (1.00, "#F7E5D4"),
     ],
 )
 NORM = LogNorm(0.004, 20, clip=True)
@@ -163,7 +163,7 @@ def footprints(w: dict, lat0: float, lon0: float):
 
 def draw_chip(ax, w, lat0, lon0, half_km, site_ids=(), labels=None, mark=None):
     polys, vals, cloudy = footprints(w, lat0, lon0)
-    pc = PolyCollection(polys, array=vals, cmap=CMAP, norm=NORM, edgecolors="#0b141c", linewidths=0.35)
+    pc = PolyCollection(polys, array=vals, cmap=CMAP, norm=NORM, edgecolors="#00131F", linewidths=0.35)
     ax.add_collection(pc)
     if cloudy.any():
         cl = PolyCollection(
@@ -317,7 +317,7 @@ def fig_bowtie(dd):
         extent=(cc0 - 0.5, cc0 + img.shape[1] - 0.5, rr0 + img.shape[0] - 0.5, rr0 - 0.5),
         aspect="auto",
     )
-    a1.set_facecolor("#16222d")
+    a1.set_facecolor("#001929")
     a1.set_ylim(rr0 + img.shape[0] - 0.5, rr0 - 0.5)
     for k in range((rr0 // 16) * 16, rr0 + img.shape[0] + 16, 16):
         a1.axhline(k - 0.5, color=INK3, lw=0.8, ls=(0, (3, 3)))

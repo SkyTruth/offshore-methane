@@ -1,0 +1,2 @@
+# Explainer image chips are source figures (make_chips.py); keep them despite the repo-wide *.png rule.
+!*.png

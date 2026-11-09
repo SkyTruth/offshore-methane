@@ -319,12 +319,12 @@ format and calibration and is not yet read by this pipeline.
 - **Small charts**, beside each flare, in the map tooltip and in the site
   panel, have one column per night. A column's height is that night's clear-sky
   radiant heat, relative to the site's highest night. A strip along the bottom
-  gives each night's status: amber flaring, dark amber lit through cloud,
-  blue-grey clear with no flare, grey cloudy, and a gap where no satellite
-  passed.
+  gives each night's status: light orange flaring, dark orange lit through
+  cloud, blue-grey clear with no flare, dark blue cloudy, and a gap where no
+  satellite passed.
 - **Site detail.** Clicking a site shows every night as an overview, with a
   14-night window you can drag. Below it is each satellite pass in the window:
-  a filled amber dot is a detection in clear sky, an amber ring a detection
+  a filled orange dot is a detection in clear sky, an orange ring a detection
   through cloud (not used for volume), a blue ring a clear pass with no
   detection, and a cross a cloudy pass.
 - **A single night** is a sample of one to three passes. Use ranges of a week

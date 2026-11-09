@@ -4,7 +4,7 @@
 Charts are computed from every v5 run segment (``outputs/v5_*``, joined by
 ``build_viewer.load_segments``): 88 nights, 9 August to 4 November 2026. The
 v3-to-v5 waterfall uses the 30 nights run with both versions (6 October to
-4 November). Diagrams are drawn to scale where a scale is stated. Every figure uses the viewer's night palette on its own dark panel,
+4 November). Diagrams are drawn to scale where a scale is stated. Every figure uses the viewer's SkyTruth palette on its own dark panel,
 so it reads on light and dark pages alike. Run from ``nightly-flaring/``:
 ``.venv/bin/python docs/explainer/make_figures.py``.
 """
@@ -38,22 +38,22 @@ N_NIGHTS = (_T1 - _T0).days + 1
 PERIOD = f"{_T0:%-d %b}–{_T1:%-d %b %Y}"
 
 # Night palette (viewer_template.html tokens).
-BG = "#0b141c"
-PANEL = "#0e1821"
-RAISE = "#132130"
-RULE = "#1e2c39"
-COAST = "#2a3744"
-INK = "#e3e9ee"
-INK2 = "#9aa8b4"
-INK3 = "#66747f"
-FL = ["#5e2b10", "#923f13", "#c95d18", "#f28d27", "#ffbc5f", "#ffe4b0"]
+BG = "#00131F"
+PANEL = "#001929"
+RAISE = "#002640"
+RULE = "#043352"
+COAST = "#1D5072"
+INK = "#F9F6F3"
+INK2 = "#9CB7C9"
+INK3 = "#60869F"
+FL = ["#4C2501", "#7E3D01", "#CA6202", "#FD8E28", "#FEBD81", "#F7E5D4"]
 AMBER = FL[3]
 GOLD = FL[4]
-CLEAR = "#4a6a80"
-CLOUD = "#3a4753"
-CYAN = "#7ad5e9"
-SANS = "Archivo, 'Helvetica Neue', Arial, sans-serif"
-MONO = "'IBM Plex Mono', Menlo, Consolas, monospace"
+CLEAR = "#60869F"
+CLOUD = "#1D5072"
+CYAN = "#9FC6BA"
+SANS = "'PP Neue Montreal', Roboto, Arial, sans-serif"
+MONO = "Roboto, Arial, sans-serif"
 W = 760
 
 

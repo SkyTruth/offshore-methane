@@ -771,6 +771,30 @@ view-angle effects and non-upstream classification remain deferred. The
   undetected 5.9% (7/118); log-RH r = 0.59.
 - **Status:** active (v5).
 
+### D53 Website restyled to the SkyTruth brand, in dark mode (v5)
+- **Choice:** the page follows the SkyTruth Brand Style Guide (2026) and keeps
+  a dark theme (user request, 2026-11-09). Surfaces use the Blue family
+  (Blue8 page, the guide's dark background; Blue7 panels; Blue5 rules);
+  flares use the Orange family (Orange8 to Orange1, the guide's flaring
+  palette); Orange6 is the highlight for buttons, tags and the short rule
+  under each heading; links are off-white with an Orange6 underline, as the
+  guide sets for dark backgrounds. Selection uses Forest2. Headings use
+  Tiempos Fine and body text PP Neue Montreal where installed, falling back
+  to the guide's general-use pair, EB Garamond and Roboto (Google Fonts).
+  The header carries the SkyTruth logo in the dark-blue colourway (white
+  wordmark, Blue5 ring) prescribed for Blue8 backgrounds, at the 8rem web
+  minimum, linked to skytruth.org; the vector comes from skytruth.org's
+  header (`assets/skytruth-logo-dark.svg`). Two of the guide's graphic
+  elements appear: the data-points dot pattern (header and explainer, both
+  hidden on narrow screens) and the grid overlay, drawn as a faint map
+  graticule whose spacing follows the zoom. The explainer figures and image
+  chips use the same palette. Controls, data and interactions are unchanged.
+- **Alternatives:** the guide's light tool-page style (white background);
+  the user asked to keep dark mode. Loading the licensed web fonts from
+  skytruth.org (their licence scope for this domain is unknown).
+- **Why:** user request to follow the brand guidelines.
+- **Status:** active (v5).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

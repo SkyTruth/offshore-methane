@@ -43,6 +43,7 @@ OUT_DIR = HERE / "outputs"
 SITE_DIR = OUT_DIR / "site"
 SEGMENT_GLOB = "v5_*"
 TEMPLATE = HERE / "viewer_template.html"
+LOGO = HERE / "assets" / "skytruth-logo-dark.svg"
 EXPLAINER = HERE / "docs" / "explainer.md"
 REPO_BLOB = "https://github.com/SkyTruth/offshore-methane/blob/nightly-flaring/nightly-flaring/docs/"
 PAGES_URL = "https://skytruth.github.io/offshore-methane/"
@@ -335,6 +336,7 @@ def main(
         )
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.read_text()
+    html = html.replace("__SKYTRUTH_LOGO__", LOGO.read_text().split("-->", 1)[-1].strip())
     html = html.replace("__EXPLAINER_HTML__", explainer_html(img_dir=site_dir / "img"))
     html = html.replace("__FLARING_DATA__", blob)
     html = html.replace("__BASEMAP_TOPOJSON__", load_basemap().replace("</", "<\\/"))
