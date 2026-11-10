@@ -30,7 +30,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
-| `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with data, basemap and explainer; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
+| `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with static data, aggregates, basemap and explainer; hashed yearly night chunks; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
 | `flareouts.py` | Source-centred High / Mid / Watch thermal-departure evidence cards; recalibrates from combined nights and copies on each build (D58). |
 | `emit.py` | Public EMIT overpasses, browse links and optional Earth Engine CH4-index / true-colour chips cached under `outputs/emit_cache/` (D59). |
 | `darknights.py` | Clear dark runs with per-night evidence, compact EMIT scene references and a persistent render queue (D62). |
@@ -64,21 +64,29 @@ Manager as `production-gfw-infra-api-key`) in the shell or the repo-root `.env`.
 .venv/bin/python -m pytest -q tests
 ```
 
-The website maps every site for one night or the mean over a range of nights:
-flaring sites glow on an amber scale sized by radiant heat. A timeline shows
-the radiant heat seen each night over a band giving the share of sites in
-clear sky; click a night, drag to average a range, use Last 7 / 30 / 90 / All,
-or step with ← and →. Play animates the range; a radiant-heat filter keeps
-the flares at or above a chosen percentile of mean radiant heat over the
-selected nights, and an opened site always stays on the map. The flare list orders sites by
-strength, consistency (share of clear nights with a flare, by the lower end of
-its 95% interval) or clear views (clear passes), each row with a
-one-column-per-night chart. Opening a site shows every night with a movable 14-night
-window over its satellite passes, the matched EOG MYC25Q4 2025 flare, GFW
-structure IDs and a satellite-view link. The side panel also totals by region
-and compares the record with MYC25Q4. `build_viewer.py` takes every
-`outputs/v5_*` segment (D52); pass files load over HTTP, so preview the folder
-through a local server.
+The website maps each site for a range mean or a calendar step (Night, Week,
+Month, with Quarter and Year for longer ranges). A whole-record overview and a focus timeline keep long records
+selectable; presets, year controls and arrow keys move through them. Play
+uses nights, weeks or months to keep a complete cycle near 25 seconds. Every
+bar uses the site's mean over nights with clear-sky values, including clear
+zeros; network bars sum site means. Wider bins include more sites with clear
+views, so their totals can exceed the mean of the nightly sums. Sparklines cover the selected range,
+while map tooltips and site panels retain the full record. A site's calendar
+opens individual nights and its pass window. The radiant-heat filter holds
+its range-ranked site set during stepping and playback. Regions have
+unfiltered record trends. Flare-outs has a spell timeline and charts
+windowed around evidence; Single dark nights adds a date histogram. Map URLs
+retain the range, step and open site. `build_viewer.py` joins `outputs/v5_*`
+segments and writes static metadata and plain JSON aggregates to `index.html`,
+content-hashed yearly nights and deferred yearly clear-pass digits to `data/`,
+and unchanged per-site pass files
+(D66). The map becomes usable before the clear-pass files load; Most clear
+views and the Clear passes fact show loading states in the meantime. A publish retains the preceding page's referenced year files for cached
+pages; failed loads name the file and status and offer Retry. Serve the build
+over HTTP. `dev_long_record.main(nights=1500)` and
+`main(nights=5000)` read the current real `outputs/site/` build and create explicitly labelled synthetic sites for acceptance
+checks; `tests/ui/check_time_axes.mjs` checks interactions and budgets in
+local Chrome and saves screenshots under `outputs/ui_checks/`.
 
 Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which

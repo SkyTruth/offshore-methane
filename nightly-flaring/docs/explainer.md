@@ -605,55 +605,98 @@ pass histories. The exact rules are in
 
 ### Reading the app
 
-Use **Map** for nightly flaring, **How it works** for the method, and
-**Flare-outs** for ranked High, Mid and Watch evidence cards. Select a row or locator-map dot for
-its heat chart, comparison flares, satellite passes and EMIT review material;
-**Show on map** selects its site. The shaded chart interval is the dark spell.
+Use **Map** to compare flaring through time, **How it works** for the method,
+and **Flare-outs** for High, Mid and Watch evidence cards and Single dark
+nights. Range and tooltip dates include the year; the first tick in each
+calendar year names that year. Ticks keep a uniform stride of months or
+years, at least 6 px apart, with the bin caption on a separate line.
 
-
-- **Map colour** is the site's mean radiant heat over the selected nights.
-  Gas volume in the side panel uses the 0.0116 conversion.
-- **The timeline.** Each bar is the radiant heat summed over every site seen
-  flaring that night. The band beneath it shows the share of all sites seen in
-  clear sky that night, lighter where clearer: a low bar over a dark band
-  means cloud, not less flaring. The tooltip flags partial nights, when
-  satellite files are missing at either end of the record. Click a night,
-  drag across bars to average a range, or pick Last 7, Last 30 or All; Last 90
-  appears once the record passes 90 nights. The ← and → keys step one night.
-- **Ordering the flare list.**
-    - *Strongest*: mean clear-sky radiant heat over the selected nights, with
-      clear nights showing no flare counted as zero. In single-night mode,
-      that night's value.
-    - *Most consistent*: the share of clear nights with a flare. Sites are
-      ranked by the low end of that share's 95% range, so a site flaring on 4
-      of 4 clear nights ranks below one flaring on 40 of 44.
-    - *Most clear views*: the number of satellite passes that saw the site
-      through clear sky in the selected nights. More clear views give a
-      steadier average.
-- **The radiant-heat filter** above the list keeps only flares whose mean
-  radiant heat over the selected nights is at or above the chosen percentile.
-  It ranks by heat alone, whatever order the list uses, and the same flares
-  stay shown on single nights and during playback. A site you have opened
-  always stays on the map, with a dashed ring on nights no satellite passed
-  over it.
-- **Small charts**, beside each flare, in the map tooltip and in the site
-  panel, have one column per night. A column's height is that night's clear-sky
-  radiant heat, relative to the site's highest night. A strip along the bottom
-  gives each night's status: light orange flaring, dark orange lit through
-  cloud, blue-grey clear with no flare, dark blue cloudy, and a gap where no
-  satellite passed.
-- **Site detail.** Clicking a site centres the map on it and shows every
-  night as an overview, with a
-  14-night window you can drag. Below it is each satellite pass in the window:
-  a filled orange dot is a detection in clear sky, an orange ring a detection
-  through cloud (not used for volume), a blue ring a clear pass with no
-  detection, and a cross a cloudy pass.
-- **A single night** is a sample of one to three passes. Use ranges of a week
-  or more to compare sites.
-- **"Lit under cloud"** means the flare was seen through cloud. It shows the
-  flare was burning but carries no volume.
-- **Regional totals** are steadier than the split between neighbouring
+- **The timeline** has a whole-record overview once there are more than 92
+  nights. Drag across it to select a range, drag the selection to pan, or
+  click a year. The larger focus track shows the selected range using the
+  finest calendar bins that fit: nights, Monday-start weeks, months,
+  quarters or years. Every chart names its bin. Partial edge bins name their
+  actual and full night counts. Presets select Last 7, Last 30, Last 90,
+  12 months (365 nights, when shorter than the record) or All; the Year menu
+  selects any calendar year. Partial bins are narrower on the same time scale.
+  **‹ ›** and **Shift+← / Shift+→** shift a whole calendar year, quarter,
+  month or week by that unit; other ranges, including units cut off by the
+  record's first or last night, move by their night count.
+- **One rule for heat.** A site bin is its mean over nights with a clear-sky
+  value; clear nights with no flare count zero. Network and region bars sum
+  those site means. A nightly sum omits sites without a clear pass that night;
+  a wider bin includes every site with a clear night in that bin. Monthly
+  totals can therefore exceed the mean of their nightly totals, even for the
+  same dates. The band below the focus bars shows the mean share of
+  all sites in clear sky each night. Cloud and missing passes can lower the
+  bars; a short bar alone does not establish less flaring.
+  The Clear this night/week/month/quarter/year tile and bin tooltip both
+  count sites with an F or C night in that period. Cloudy-lit nights with a
+  finite heat value still contribute to the heat mean.
+- **Mean (range) / Night / Week / Month** choose what the map and totals show.
+  Click a focus bar to select that bin; **← →** move a step, **Home / End**
+  jump to the ends. **Esc** closes a tooltip, then site detail, then the step,
+  one per press. Play chooses
+  nights for up to 92 nights, weeks up to 730, and months beyond that, or
+  plays the selected unit. Pause leaves the current step selected. Coarse
+  units Quarter and Year appear beside Month when the range spans two or more
+  of them. Clicking a focus bar selects its unit button.
+- **Map colour and size** show radiant heat. Gas volume uses the 0.0116
+  conversion. A single night samples one to three passes; use ranges of a
+  week or more to compare sites.
+- **The flare list** orders the current values by Strongest (mean clear-sky
+  heat), Most consistent (share of clear nights flaring, ranked by its 95%
+  Wilson lower bound), or Most clear views (clear satellite passes). In step
+  mode the list holds sites flaring in that step. Strongest uses the step
+  mean; consistency and clear views use the selected range, named in the hint. The
+  radiant-heat filter always ranks the selected range's mean heat, keeping
+  the same eligible sites while stepping or playing. An opened site stays
+  on the map, with a dashed ring when unobserved. Clear-pass digits load after
+  the first map render; until then Most clear views is disabled and Clear
+  passes shows “…” in site detail.
+- **Small charts** beside list rows cover the selected range; tooltip and
+  site record charts cover the whole record with the range shaded and step
+  marked. Bar height is mean heat, scaled to the highest bin in that chart.
+  The strip runs continuously from clear/no flare (0% of clear nights lit)
+  to light orange (100%). Cloud blue means observations without a clear
+  value; an empty strip means no pass. A single lit night cannot colour an
+  entire month as fully flaring.
+- **Site detail** keeps the range figures above whole-record bars and a
+  clickable calendar, newest years first. The newest four years and the years
+  containing the range end, step and pass window show together; reveal other
+  earlier years with the button. Click a record bar or night cell to move
+  the pass window; **‹ ›** move it by its own length. In step mode it follows
+  the selected night with a centred 14-night window. Longer units show their own
+  nights up to 21, then their last 14. The calendar keeps one roving cell tab
+  stop on a rendered night, initially the last pass-window night: ← → move
+  a week (one column), ↑ ↓ a day (one row), PageUp/PageDown a month, and Enter/Space moves the pass
+  window. Escape reaches the page to close the current layer; the earlier-years
+  button keeps its native Enter/Space action. Colours show heat, lit through cloud, clear without a flare, cloudy,
+  or no observation. A filled pass dot is a clear detection, an
+  orange ring a cloudy detection, a blue ring a clear nondetection, and a
+  cross a cloudy pass. Pass axes use local solar time.
+- **Regional trends** cover the whole record and all sites in each region,
+  independently of list filters. The selection is shaded. Click a row to
+  zoom the map. Regional totals are steadier than the split between nearby
   platforms.
+- **Flare-outs** has one compact timeline lane per card, from 60 nights
+  before the earliest spell to the as-of date, with arrows for ongoing spells.
+  Its caption states the record start. Select a lane, row or locator dot for evidence; **Show on map**
+  opens its site. Evidence charts use true elapsed time around the spell:
+  60 nights before and 14 after in detail, 30 before and seven after in the
+  list, clipped to the record. A monthly whole-record strip marks the detail
+  window. Screening rules, tiers and evidence on disk are unchanged.
+- **Single dark nights** has a date histogram: weeks under a year, months
+  otherwise. Brush it or enter From/To dates to filter by run start date;
+  All dates resets it. The count scale and hover values show runs per bin.
+  EMIT, heat and region filters combine with the date filter. Neighbour and
+  card links still open their evidence.
+- **Share a view** by copying its URL: Map links retain the range, selected
+  step and open site. The page loads yearly night chunks over HTTP; a failed
+  load names its file and HTTP status and offers Retry. A missing year file
+  reloads the page once to recover a stale index; the previous build's
+  referenced year files are retained when publishing. A Synthetic test data banner marks development builds.
+
 
 ---
 

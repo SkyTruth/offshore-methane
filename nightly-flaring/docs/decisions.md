@@ -898,15 +898,15 @@ view-angle effects and non-upstream classification remain deferred. The
   scan is never substituted. During startup, only evaluation nights after
   the initial baseline count. Archived months do not grow the penalty merely
   through record length; new thermal evidence can change eligibility and
-  recalibration. Score=F×tail; budget=0.1 per spell's fleet scan. This is not
+  recalibration. Score=F×tail; budget=0.1 per spell's fleet scan rather than
   a cumulative lifetime budget.
   Display score/0.1 as a multiple of the High threshold for High/Mid, not Watch,
   which cannot satisfy the bright rule.
   On 9 November, as-of night 4 November: MM/MH=13/37; r=0.59.
   The ended 4582/4583 spell uses the frozen 5 October–3 November window,
   F=1,348 unit-nights. Its first-miss rate is 2/28; score=0.10107
-  (1.01074× budget, about 1.011×) at 14 clear dark nights. This is a near-tie
-  with the score gate: at unchanged calibration and family, 15 dark nights
+  (1.01074× budget, about 1.011×) at 14 clear dark nights. The score nearly ties
+  the gate: at unchanged calibration and family, 15 dark nights
   would give 0.59633× (about 0.60×). Across this record's 29 full 30-night
   windows, F ranges from 1,084 to 1,353, giving 0.81–1.01× for the same
   14-night evidence. The measured shared heat loss at 4500/4515 is the rule
@@ -1185,7 +1185,7 @@ view-angle effects and non-upstream classification remain deferred. The
   say `unknown`. Recipe `hitl-v7` also masks EMIT fill in the
   true-colour bands before the stretch (−9999, or exact zeros in all three
   bands, measured at 7533); they showed as a black band along strip
-  edges (7533, 30 Aug 2026) and now render grey. This is the one departure from
+  edges (7533, 30 Aug 2026) and now render grey. The fill mask is the one departure from
   `hitl_app._emit_truecolor`. (`hitl-v6` masked only −9999 and never shipped;
   the cache still falls back to v6–v3 chips, labelled as older renders.)
   Legacy covered chips remain reviewable offline and queue for the new recipe;
@@ -1228,7 +1228,7 @@ view-angle effects and non-upstream classification remain deferred. The
   Say a neighbouring source within 1.5 km was also dark, with an aperture note.
 - **Limits and evidence:** D61 observed 1.7% (43/2,568) over clear nights that
   followed a detected night, at flares seen on ≥80% of clear nights in 115
-  stable 29-night blocks. This is not a rate over all clear nights. Most single
+  stable 29-night blocks. The rate covers those eligible nights only. Most single
   dark nights at steady flares are unexplained. EMIT is daytime, hours from
   VIIRS; its CH4 index is not a concentration. Offline regressions cover these
   rules, cache progression and finality, compact payload, and monthly rebuild.
@@ -1474,6 +1474,184 @@ view-angle effects and non-upstream classification remain deferred. The
   `build_viewer.find_segments` joins it with `v5_backfill` and `v5_30n` into
   2026-01-01..11-04 (308 nights); the website is not rebuilt or published.
 
+### D66 Long-record time axes and content-addressed yearly nights (v5)
+
+- **Choice:** follow [the design](long_record_ux.md) with the round-3
+  corrections. All bars, brushes and pointer inversion use elapsed nights;
+  partial bins span only their nights. Step, range and pass-window markers
+  stay centred on their time extent and have a 2 px minimum width. Weekly
+  and monthly focus axes use `d3.utcMonth.every(k)`, the smallest fitting
+  stride in 1, 2, 3, 6 or 12 months, or 2, 5 or 10 years, with at least
+  6 px between labels (focus strip, site record, dark-run histogram and spell
+  timeline). The first kept tick in each calendar year names the year. The bin caption has a separate line.
+- **Controls and periods:** one Mean (range) / Night / Week / Month control,
+  with conditional Quarter and Year, fits one deliberate row in the 400 px
+  panel. Year buttons retain focus when activated. Whole calendar year,
+  quarter, month and week ranges shift by their unit, preserving leap-year
+  and month boundaries; other ranges, including units clipped by the record's
+  first or last night, shift by their night count. Play picks
+  Night through 92 nights, Week through 730, otherwise Month, and retains the
+  chosen unit. Strongest rows show step figures; consistency and clear-view
+  orders show range figures. Partial steps name the night count once.
+- **Aggregation:** retain each site's mean over finite clear-sky values,
+  including clear zeros and existing finite cloudy-lit values. Network and
+  regional bars sum site means. Raw-export pandas reductions give monthly
+  totals **1.196371–1.886898×** the mean of their nightly totals (**n=11**,
+  January–November 2026 including partial November). The excess comes from
+  sites with a value in the month but none on a given night. The timeline
+  information, tooltip and Reading the app explain this width effect.
+  For the Clear this unit tile and bin tooltip, a clear night has status F
+  or C. Both count sites with at least one such night, matching the previous
+  single-night display. Oct 19–25 counts **7,254**; Q1 2026 counts **7,619**.
+  Two additional sites in that week have only cloudy-lit finite zeros; those
+  values remain in the heat mean. The Flaring sites context retains its
+  disjoint clear-sky/cloudy-lit denominator.
+- **Data delivery:** plain JSON network totals for all five units and regional
+  totals for week/month/quarter/year remain embedded. Sparse status/heat years
+  use `data/nights-YYYY.<hash8>.json` in `meta.chunks`; clear-pass digits for
+  every site use independent `data/clearpasses-YYYY.<hash8>.json` files in
+  `meta.clearpasses`. Each kind depends only on that year's nights. Empty
+  site-years are omitted and restored empty. The map renders after status and
+  heat load; the clear-pass fetch starts after two animation frames. Until
+  then Most clear views is disabled with a short loading label and the site
+  fact shows “…”; other controls remain usable. The real 2026 files are
+  identical across all three builds.
+  Publication retains both kinds of files named by the preceding index for
+  one build. A 404 refreshes the index without cache once under a guard for that file kind;
+  successful loading clears the guard. Retry after a guarded 404 refreshes
+  the index and reads its current file names. File/HTTP failures name the
+  file and status; serve-over-HTTP advice appears only for `file:`.
+- **Computation and accessibility:** only ever-lit sites allocate Float64
+  heat arrays, preserving single-night display precision. Seven cumulative
+  statistics at 32-night boundaries cover heat sum, finite-value nights,
+  lit, observed, cloudy-lit, passes and F/C nights. Deferred passes fill only
+  their own prefix column. Cached site panels keep calendar/record/pass nodes
+  stable, including one empty-state paragraph for never-flaring sites.
+  Calendar years include the newest four plus the range end, current step
+  and pass window. Grid cells have row parents and one roving stop on a
+  rendered night, initially the last pass-window night. Only consumed cell
+  keys stop propagation; expansion buttons keep native Enter/Space and Esc
+  reaches the page. Dark-run dates clamp to the record and inputs, brush and
+  count reset together on neighbour navigation. Spell lanes lead with site
+  IDs on phones. Spell charts permit touch scrolling; histogram touch drags
+  filter horizontally while vertical swipes scroll the page.
+- **Other choices:** all small charts use the calendar bin ladder and name
+  their units. Sparklines cover the selected range; record and region charts
+  cover the whole record. Night steps show 14 centred pass nights; longer
+  units show their own nights through 21, otherwise their last 14. Playback
+  writes the URL only on Pause. Incoming hashes restore before serialization,
+  close omitted sites and clamp dates. Twelve months is hidden when equal to
+  All. Debug arrays exist only under `?debug` and have capped samples.
+  Synthetic builds read the current real build, retain real 2026 and seed
+  per-site/year factors and start/stop changes in older years. Evidence,
+  screening and pass files remain unchanged. EMIT listing is not rerun.
+- **Alternatives:** a scroll-only nightly strip loses context; a pooled strip
+  loses night access; strongest-status bins overstate persistence; fully
+  embedded site nights invalidate the whole payload. Progressive loading of
+  heat/status, change maps and small multiples remain deferred.
+- **Why:** preserve individual-night evidence and responsive comparison across
+  308, 1,500 and 5,000 nights, while keeping the initial transfer below round 1.
+- **Evidence correction:** round 1 checked headline tiles without their
+  contexts, accepted an inert overview drag and timed playback without an
+  open site. Round 2 established parity for range means (All and Last 7/30/90)
+  and the listed views; its blanket parity/calendar claims were too broad.
+  Council found hidden older-year tab stops, swallowed Escape, irregular ticks,
+  duplicate pass messages and 726 single-night rounding mismatches. The
+  round-3 checks below exercise those failing paths directly. No claim here
+  establishes long-record screening-method readiness, Safari or screen-reader
+  behavior.
+
+- **Evidence, round 3:** system Chrome at 1440/1024/390 px on all three
+  builds, 2026-11-10. **286 pytest tests** and the pinned Ruff/pre-commit hook
+  pass. All **43 browser checks per build** pass with zero runtime errors;
+  **81 screenshots** are saved under `outputs/ui_checks/`. The tick matrix
+  covers **87** combinations of build, width and All/12 months/Last 90/every
+  Year. **40,817 single-night values: 0 displayed mismatches**; six complete
+  nightly views match tiles/contexts, top-25 names/values and regional figures.
+  Range-mean parity covers All and Last 7/30/90; step row counts follow their
+  chosen period. All **7,637** raw histories, **40** file hashes and **8,109**
+  network bins validate; maximum independent network/regional error is
+  **0.000000499915 MW**. Real Oct 19–25/Q1 clear counts are 7,254/7,619.
+  Older-range calendars, native expansion keys/Escape, site-0 empty states,
+  date synchronization, touch swipes, focus retention, calendar shifts and
+  both file-kind 404/Retry guards are asserted. The real Git retention test
+  uses three local fixture publications and expires both kinds after one build.
+
+| 5,000-night measure | Measured | Budget |
+| --- | --- | --- |
+| HTML growth / 1,000 nights | 82.48 KB | ≤150 KB |
+| Header + overview first paint | 260.4 ms | ≤1,000 ms |
+| Interactive after night files | 934.9 ms | ≤4,000 ms |
+| All range statistics, median | 4.5 ms | ≤30 ms |
+| Range refresh through paint, median, site closed | 62.4 ms | ≤150 ms |
+| Range through paint, max, site closed | 66.7 ms | ≤150 ms |
+| Range through paint, max, site open / all years | 66.9 ms | ≤150 ms |
+| Playback median / p95, site closed | 33.3 / 33.4 ms | ≤42 / ≤67 ms |
+| Playback median / p95, site open / all years | 33.3 / 33.4 ms | ≤42 / ≤67 ms |
+| JS heap + backing storage after GC | 208.9 MB | ≤350 MB |
+
+  The 1,500-night interactive time is **467.6 ms** (≤2,000 ms).
+  Open-site timing asserts all **5,000** calendar cells. Range-through-paint
+  includes two animation frames; playback samples 2.5 seconds per case.
+  Heap includes backing stores after deferred loading. URL writes are zero
+  during playback and one on Pause.
+
+| Build | Nights / sites | Final index bytes | Night files: count / raw bytes | Deferred clear-pass files: count / raw bytes | Full build time / peak RSS |
+| --- | --- | --- | --- | --- | --- |
+| site | 308 / 7,637 | 3,302,196 | 1 / 2,763,845 | 1 / 2,427,501 | 3.05 s / 690.8 MB |
+| site_long_1500 | 1,500 / 7,637 | 3,399,277 | 5 / 13,121,009 | 5 / 11,832,024 | 9.64 s / 290.7 MB |
+| site_long_5000 | 5,000 / 7,637 | 3,687,949 | 14 / 43,410,904 | 14 / 39,239,270 | 32.83 s / 408.0 MB |
+
+  Real index before: **6,443,540 bytes**. Data-build timings/RSS precede the
+  final template/explainer-only refresh; sizes reflect the final artifacts.
+
+| Build | Index gzip bytes | Night gzip bytes | Critical gzip bytes | Deferred clear-pass gzip bytes | 10 Mbps data-ready | 50 Mbps data-ready |
+| --- | --- | --- | --- | --- | --- | --- |
+| site_before | 1,147,137 | 0 | 1,147,137 | 0 | 1.259 s | 0.513 s |
+| site | 635,406 | 409,765 | 1,045,171 | 534,672 | 1.205 s | 0.540 s |
+| site_long_1500 | 663,210 | 1,674,457 | 2,337,667 | 2,267,238 | 2.375 s | 0.940 s |
+| site_long_5000 | 742,467 | 5,509,108 | 6,251,575 | 7,546,766 | 5.920 s | 1.913 s |
+
+  Transfer bytes above are exact served Node gzip level-6 bodies; cold
+  data-ready times are medians of **n=3** fresh Chrome contexts at each speed,
+  with **40 ms** latency. Critical transfer is index plus status/heat years;
+  the separate column shows the later clear-pass transfer. System/Python
+  gzip-6 critical bytes are 1,166,336 before, 1,062,388 real,
+  2,387,053 at 1,500 nights and 6,401,823 at 5,000. The real
+  initial payload is below the original 1.17 MB baseline and round-1 target.
+  Deferral reduces time to a usable map; eventual bandwidth includes both kinds.
+  Source data/evidence remain read-only; no screening or network listing changed.
+  Full evidence: `outputs/review/round3_implementation_report.md`,
+  `outputs/ui_checks/time_axes_report.json`,
+  `outputs/review/round3_data_checks.json`, and
+  `outputs/review/round3_transfer.json`.
+
+- **Post-review fixes (main session, after Review 8 round 3):**
+  - Session storage is read through a guard that treats a denied store as
+    "no guard" and reloads only when the guard can be stored. Before, a
+    browser blocking site data never finished loading (O3-1).
+  - Calendar arrows follow the layout: ←/→ move a week (one column), ↑/↓ a
+    day (one row). The year's SVG has `role="none"`, so the rows sit directly
+    under their row group (O3-2).
+  - Time-axis labels keep at least 6 px between them and may step by 2, 5
+    or 10 years; before, labels touched or overlapped by up to 0.6 px at
+    390 px (O3-3).
+  - Overview year labels use a stride counted back from the newest year,
+    widened until no two collide. Before, 2026 displaced 2025 at 390 px on
+    5,000 nights (O3-7, M3-1).
+  - Year files load with the browser's default cache: their names change
+    with their content (O3-10).
+  - After "Show earlier years", focus returns to the calendar cell (O3-5).
+  - The flaring tile's (i) explains why its clear-sky count can be lower
+    than the count of sites with any clear night (O3-6).
+- **Open:** ‹ › over a unit clipped by the record's edge shift by night
+  count, so the step is not reversible there (O3-4); the calendar does not
+  mark hidden years between the newest four and an older selected year
+  (O3-5); a failed clear-pass fetch leaves "…" in place (O3-8); at 5,000
+  nights the deferred clear-pass files are 7.67 MB gzip (O3-12).
+- **Status:** Review 8 GO from both reviewers in round 3; published with the
+  post-review fixes above.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained
@@ -1506,12 +1684,10 @@ pixel changes do not alter the final local-night totals. n_band_rule_changed
 is a granule-wide count repeated on site rows; aggregate its maximum per
 satellite/granule, not its sum over sites.
 
-There are five unique split components represented by ten local-night detection
-records. Their non-isolated-cloud share is 80% (8/10); v4 had nine components.
+Ten local-night detection records represent five unique split components. Their non-isolated-cloud share is 80% (8/10); v4 had nine components.
 Four local-night records at four sites have multiple sources; their swath-edge
 share is 0% (0/4), against 29.8% (111/372) of all detections. Edge means peak
-column <640 or ≥2560. There are 32 merged copies represented in local-night
-records. Across all processed granules, 1,046 copies form 954 groups, with
+column <640 or ≥2560. Local-night records represent 32 merged copies. Across all processed granules, 1,046 copies form 954 groups, with
 92 merged groups and 92 accepted pair edges. Accepted Δrow spans 1–9; 13/92
 accepted pairs lie outside 4–10 lines. This further supports D36's diagnostic-
 only Δrow choice. Component IDs and group IDs are scoped by satellite/granule.

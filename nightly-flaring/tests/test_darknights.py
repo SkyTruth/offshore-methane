@@ -566,7 +566,9 @@ def test_build_writes_lazy_json_and_monthly_update_rebuilds_it(monkeypatch, tmp_
     monkeypatch.setattr(b, "load_segments", lambda *a: (n, p))
     monkeypatch.setattr(b, "load_copies", lambda *a: c)
     monkeypatch.setattr(
-        b, "build_data", lambda *a: ({"nights": sorted(n.night), "sites": []}, {})
+        b,
+        "build_data",
+        lambda *a: ({"meta": {}, "nights": sorted(n.night), "sites": []}, {}),
     )
     monkeypatch.setattr(b, "load_basemap", lambda: "{}")
     monkeypatch.setattr(b, "explainer_html", lambda **k: "<h3>fixture</h3>")

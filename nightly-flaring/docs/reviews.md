@@ -6,6 +6,60 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 8: long-record time axes (2026-11-10)
+
+Scope: D66, [long_record_ux.md](long_record_ux.md): the website's timeline,
+step modes and playback, per-site charts and calendar, regional trends,
+Flare-outs spell timeline and windowed charts, dark-run date filter, yearly
+data files, synthetic 1,500- and 5,000-night builds. Sol implemented; the main
+session checked each round with pytest, headless Chrome on all three builds
+and `outputs/site_before/` (the unchanged code on the same 308 nights).
+
+| Round | Sol | Opus | Deciding findings |
+|---|---|---|---|
+| 1 | NO-GO (1 blocker, 4 should-fix) | NO-GO (1 blocker, 12 should-fix) | Flaring-sites tile counted lit-under-cloud sites twice ("of 7,637 seen in clear sky; 156 more" vs 7,481 before, *checked* in `site_before`); step outlines, range shading and brush used a night-index scale over equal-width calendar bars (Mar 2013 outline at x=0.8 over the Feb 2013 bar at 5,000 nights); overview drag inert at the default All range; step-mode rows mixed step and range figures; calendar made every night a tab stop (308 real, 1,404–5,000 long); site panel rebuilt on every playback frame (78 ms median per step at 5,000 nights); any first-lit site renamed every year file; one missing year file blanked the page; URL rewritten on every playback frame; 4 px labels at 390 px |
+| 2 | NO-GO (2 should-fix, 1 minor) | GO for the 308-night build (5 should-fix, 1 test should-fix, 12 minor) | Opening a site with the range in an older year left the calendar with no tab stop and its range year hidden (1,500 and 5,000 nights); the cached site panel added one "passes are not stored" paragraph per update (2 → 8 after five steps); weekly focus axes dropped every January on 28 of 126 sampled long-record axes, so some years were never named; the spell timeline blocked touch scrolling; clear-pass digits for all 7,637 sites made 58% of the year file's gzip size (real build 1.64 MB vs 1.17 MB before; 5,000 nights 14.6 MB, 13.1 s at 10 Mbps); the "Clear this week" tile counted a different set from the bin tooltip (7,218 vs 7,256) |
+| 3 | GO (no findings) | GO (3 should-fix, 9 minor) | Blocked site storage stopped the page from loading (the round-3 reload guard read `sessionStorage` on every load; `site_before` loads); calendar arrows moved at right angles to the layout; year labels overlapped by up to 0.6 px on 4 of 98 sampled 5,000-night focus ranges at 390 px and in the dark-run histogram (−0.13 px). The main session fixed all three and four minor items before publishing (D66, post-review fixes) |
+
+Round 1 checks with no error: 7,637/7,637 site histories round-trip; 20/20
+chunk hashes; 8,011 network bins and 16 regional series within 5e-7 MW of
+independent recomputation; 715/715 weeks and 166/166 months match between
+page and Python at 5,000 nights, in two time zones; 2,000 block-statistic
+queries; Last 7/30/90 and All give the same top 25, tiles and regions as
+`site_before` apart from the tile above.
+
+Main-session findings (round 1): irregular axis ticks ("Jan 2014, Dec, Apr
+2015"); two unit controls (mode buttons and a Step menu) offering different
+units; the spell timeline spans the whole record, so 19 spells from 2026 fill
+the right 7% of the width at 5,000 nights; overlapping year labels at 390 px.
+
+Round 2 checks with no error: 20/20 chunk hashes, 7,637/7,637 histories and
+8,109 network bins (Sol); night to year totals and 18 regional series within
+5.0e-7 MW of recomputation from the year files (Opus); 90 geometry probes over
+64,766 bar samples and 21 rendered marker/bar pairs within 0.6 px; tiles and
+context lines equal to `site_before` for All, Last 7/30/90 and 6 single
+nights; each perturbation of the 1,500-night data renamed only its own year
+file. Monthly network totals are 1.196–1.887× the mean of their nightly
+totals (n=11 months; D66 records this and the timeline explains it).
+
+Main-session findings (round 2): the mode buttons wrap with Quarter and Year
+shown; at 390 px the focus caption displaces the 2022–2026 ticks.
+
+Round 3 checks with no error: 40/40 file hashes, 7,637/7,637 histories, 8,109
+network bins (Sol); five network columns × 5 units and 18 regional series on
+all three builds within 5.0e-7 MW (Opus); 1,100 focus axes over 3 builds × 5
+widths with 0 unnamed years and 0 irregular strides; 40,817/40,817
+single-night values display as in `site_before`; 10/10 nights and 6 tile
+states equal `site_before`; 4 time zones with 0 differences. Critical first
+load on the real build is 1,062,388 bytes gzip against 1,166,336 for
+`site_before`; with every calendar cell rendered at 5,000 nights, range
+changes take 36.6 ms median (n=24) and playback frames 16.7 ms (n=184).
+
+Main-session findings (round 3): at 390 px on 5,000 nights the overview's
+newest-year label displaced 2025 (fixed with O3-1, O3-2, O3-3, O3-5, O3-6 and
+O3-10 before publishing). Open after Review 8: O3-4, O3-8, O3-12 and the
+hidden-years mark in O3-5 (D66).
+
 ## Review 7: single dark nights and EMIT coverage (2026-11-09)
 
 Scope: `darknights.py`, the Single dark nights mode in the Flare-outs tab,

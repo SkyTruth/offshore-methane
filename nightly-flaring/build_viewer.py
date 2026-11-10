@@ -6,8 +6,10 @@ A segment is a run folder holding ``site_nights_<start>_<end>.csv`` and
 under ``outputs/v5_*``; ``main`` joins them into one night series and writes a
 static site to ``outputs/site/``:
 
-- ``index.html``: the map, ranking and timeline, with the per-night data, a
+- ``index.html``: the map, ranking and timeline, with static fields, totals, a
   1:50m country basemap and the "How it works" explainer inlined;
+- ``data/nights-<year>.<hash>.json``: status and heat, fetched in parallel;
+- ``data/clearpasses-<year>.<hash>.json``: digits fetched after first render;
 - ``passes/<site_id>.json``: every satellite pass at a site that flared,
   fetched when the site is opened, so the page stays small as nights accrue;
 - ``img/``: the explainer's image chips.
@@ -18,6 +20,8 @@ static site to ``outputs/site/``:
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import json
 import re
 import shutil
@@ -25,6 +29,7 @@ import struct
 import subprocess
 import sys
 from datetime import datetime, timezone
+from itertools import pairwise
 from pathlib import Path
 
 import markdown
@@ -226,6 +231,165 @@ def encode_site_nights(g: pd.DataFrame, night_list: list[str]) -> tuple[str, lis
     return st, rv, cp
 
 
+def calendar_bins(night_list: list[str], unit: str) -> list[tuple[int, int]]:
+    """Inclusive, calendar-aligned bins, clipped to the supplied record."""
+    dates = pd.DatetimeIndex(night_list)
+    if unit == "night":
+        return [(i, i) for i in range(len(dates))]
+    periods = dates.to_period(
+        {"week": "W-SUN", "month": "M", "quarter": "Q", "year": "Y"}[unit]
+    )
+    edges = np.flatnonzero(np.r_[True, periods[1:] != periods[:-1], True])
+    return [(int(a), int(b - 1)) for a, b in pairwise(edges)]
+
+
+def decode_nights(row: list) -> tuple[np.ndarray, np.ndarray]:
+    """Decode the public sparse representation without changing its rounding."""
+    st, values = row[4], iter(row[5])
+    heat = np.array(
+        [0 if c == "C" else next(values) if c in "FD" else np.nan for c in st],
+        dtype=float,
+    )
+    return heat, np.frombuffer(st.encode(), dtype="S1")
+
+
+def bin_totals(data: dict) -> dict:
+    """Network and unfiltered regional sums of site means, never pooled heat.
+
+    Network columns are MW, flaring sites, mean clear sites/night, mean
+    observed sites/night, sites with a clear night. Regions omit nightly totals.
+    """
+    result = {}
+    plans = {
+        u: calendar_bins(data["nights"], u)
+        for u in ("night", "week", "month", "quarter", "year")
+    }
+    for unit, bins in plans.items():
+        result[unit] = {
+            "network": np.zeros((len(bins), 5)),
+            "regions": (
+                {r[8]: np.zeros(len(bins)) for r in data["sites"]}
+                if unit != "night"
+                else {}
+            ),
+        }
+    for row in data["sites"]:
+        heat, st = decode_nights(row)
+        clear = np.isfinite(heat)
+        lit, obs = st == b"F", st != b"N"
+        clear_night = (st == b"F") | (st == b"C")
+        prefixes = [
+            np.r_[0, np.cumsum(x)]
+            for x in (np.nan_to_num(heat), clear, lit, obs, clear_night)
+        ]
+        for unit, bins in plans.items():
+            a, b = np.array(bins).T
+            sums, counts, flaring, observed, clear_nights = [
+                p[b + 1] - p[a] for p in prefixes
+            ]
+            means = np.divide(sums, counts, out=np.zeros(len(bins)), where=counts > 0)
+            target = result[unit]
+            target["network"] += np.column_stack(
+                (
+                    means,
+                    flaring > 0,
+                    counts / (b - a + 1),
+                    observed / (b - a + 1),
+                    clear_nights > 0,
+                )
+            )
+            if unit != "night":
+                target["regions"][row[8]] += means
+    # Six decimal places retain far more than the displayed precision.
+    for target in result.values():
+        target["network"] = target["network"].round(6).tolist()
+        target["regions"] = {
+            r: values.round(6).tolist() for r, values in target["regions"].items()
+        }
+    return result
+
+
+def write_night_chunks(data: dict, site_dir: Path) -> dict:
+    """Return static page data and write deterministic, content-addressed years."""
+    page = copy.deepcopy(data)
+    page["meta"]["chunks"] = []
+    page["meta"]["clearpasses"] = []
+    target = site_dir / "data"
+    target.mkdir(parents=True, exist_ok=True)
+    for year in sorted({d[:4] for d in data["nights"]}):
+        indices = [i for i, d in enumerate(data["nights"]) if d.startswith(year)]
+        a, b = indices[0], indices[-1] + 1
+        rows, pass_rows = [], []
+        for row in sorted(data["sites"], key=lambda row: row[0]):
+            st = row[4]
+            # An archive-only site has no rows in other calendar years.
+            if set(st[a:b]) == {"N"}:
+                continue
+            before = sum(c in "FD" for c in st[:a])
+            count = sum(c in "FD" for c in st[a:b])
+            lit = count > 0
+            rows.append(
+                [
+                    row[0],
+                    st[a:b],
+                    row[5][before : before + count] if lit else [],
+                ]
+            )
+            if row[14]:
+                pass_rows.append([row[0], row[14][a:b]])
+        # A date, rather than a global offset, keeps this year's hash stable
+        # when older years are added ahead of it during an archive backfill.
+        chunk = {"start": data["nights"][a], "nights": b - a, "sites": rows}
+        blob = json.dumps(chunk, separators=(",", ":"), allow_nan=False).encode()
+        name = f"nights-{year}.{hashlib.sha256(blob).hexdigest()[:8]}.json"
+        (target / name).write_bytes(blob)
+        page["meta"]["chunks"].append(f"data/{name}")
+        passes = {"start": data["nights"][a], "nights": b - a, "sites": pass_rows}
+        blob = json.dumps(passes, separators=(",", ":"), allow_nan=False).encode()
+        name = f"clearpasses-{year}.{hashlib.sha256(blob).hexdigest()[:8]}.json"
+        (target / name).write_bytes(blob)
+        page["meta"]["clearpasses"].append(f"data/{name}")
+    for row in page["sites"]:
+        row[4], row[5], row[14] = None, None, any(c in "FD" for c in row[4])
+    page["totals"] = bin_totals(data)
+    return page
+
+
+def window_flareouts(data: dict) -> dict:
+    """Window the page copy only; retain full evidence on disk."""
+    result = copy.deepcopy(data)
+    for card in result["candidates"]:
+        full = card["nightly_series"]
+        groups: dict[str, list] = {}
+        for row in full:
+            groups.setdefault(row["night"][:7], []).append(row)
+        monthly = []
+        for month, rows in sorted(groups.items()):
+            values = [
+                r["heat_mw"] if r["heat_mw"] is not None else 0
+                for r in rows
+                if r["heat_mw"] is not None or (r["qualified"] and not r["lit"])
+            ]
+            monthly.append(
+                [
+                    month,
+                    _r(np.mean(values)) if values else None,
+                    sum(r["qualified"] and r["lit"] for r in rows),
+                    sum(r["qualified"] for r in rows),
+                ]
+            )
+        card["record_monthly"] = monthly
+        lo = (pd.Timestamp(card["start"]) - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+        hi = (pd.Timestamp(card["end"]) + pd.Timedelta(days=30)).strftime("%Y-%m-%d")
+        card["nightly_series"] = [r for r in full if lo <= r["night"] <= hi]
+        for neighbour in card["context"]["neighbours"]:
+            if neighbour.get("series"):
+                neighbour["series"] = [
+                    r for r in neighbour["series"] if lo <= r["night"] <= hi
+                ]
+    return result
+
+
 # ---------------------------------------------------------------- data
 def build_data(
     nights: pd.DataFrame, over: pd.DataFrame, out_dir: Path = OUT_DIR
@@ -294,7 +458,7 @@ def build_data(
                 m["myc_country_iso"] if has_myc else None,
                 m["myc_upstream_class"] if has_myc else None,
                 str(s.structure_ids).split()[:12],
-                cp if int(sid) in flaring_ids else None,
+                cp,
             ]
         )
 
@@ -308,9 +472,9 @@ def build_data(
             notes.append(f"{sat} returned no passes in this period.")
             continue
         if ts.max() < period_end - pd.Timedelta(days=1):
-            notes.append(f"{sat} has no passes after {ts.max():%-d %b %H:%M} UTC.")
+            notes.append(f"{sat} has no passes after {ts.max():%-d %b %Y %H:%M} UTC.")
         if ts.min() > period_start + pd.Timedelta(days=1):
-            notes.append(f"{sat} has no passes before {ts.min():%-d %b %H:%M} UTC.")
+            notes.append(f"{sat} has no passes before {ts.min():%-d %b %Y %H:%M} UTC.")
 
     data = {
         "meta": {
@@ -389,18 +553,28 @@ def explainer_html(path: Path = EXPLAINER, img_dir: Path | None = None) -> str:
 def main(
     segments: list[tuple[Path, str]] | None = None,
     site_dir: Path = SITE_DIR,
+    data: dict | None = None,
+    passes: dict | None = None,
+    evidence_dir: Path | None = None,
+    skip_emit: bool = False,
 ) -> Path:
     """Build the website from ``segments`` (default: every ``outputs/v5_*`` run)."""
-    segments = segments or find_segments()
-    for folder, tag in segments:
-        print(f"segment {folder.name}: {tag}")
-    nights, over = load_segments(segments)
-    data, passes = build_data(nights, over)
+    if data is None:
+        segments = segments or find_segments()
+        for folder, tag in segments:
+            print(f"segment {folder.name}: {tag}")
+        nights, over = load_segments(segments)
+        data, passes = build_data(nights, over)
+    elif evidence_dir is None:
+        raise ValueError("prebuilt data requires evidence_dir")
+    passes = passes or {}
     print(
         f"{len(data['nights'])} nights, {len(data['sites'])} sites, "
         f"{len(passes)} with pass files"
     )
 
+    if site_dir.is_symlink():
+        raise ValueError("build destination must not be a symlink")
     if site_dir.exists():
         shutil.rmtree(site_dir)
     (site_dir / "passes").mkdir(parents=True)
@@ -412,13 +586,22 @@ def main(
     import emit
     import flareouts
 
-    copies = load_copies(segments)
-    flareout_data = flareouts.screen(nights, over, copies)
-    emit.enrich(flareout_data, site_dir=site_dir)
+    if evidence_dir is not None:
+        flareout_data = json.loads((evidence_dir / "flareouts.json").read_text())
+        darknight_data = json.loads((evidence_dir / "darknights.json").read_text())
+        for folder in ("passes", "img/emit"):
+            source = evidence_dir / folder
+            if source.exists():
+                shutil.copytree(source, site_dir / folder, dirs_exist_ok=True)
+    else:
+        copies = load_copies(segments)
+        flareout_data = flareouts.screen(nights, over, copies)
+        if not skip_emit:
+            emit.enrich(flareout_data, site_dir=site_dir)
+        darknight_data = darknights.screen(nights, over, copies, cards=flareout_data)
+        if not skip_emit:
+            darknight_data = darknights.enrich(darknight_data, site_dir=site_dir)
     (site_dir / "flareouts.json").write_text(json.dumps(flareout_data, allow_nan=False))
-    darknight_data = darknights.enrich(
-        darknights.screen(nights, over, copies, cards=flareout_data), site_dir=site_dir
-    )
     (site_dir / "darknights.json").write_text(
         json.dumps(darknight_data, separators=(",", ":"), allow_nan=False)
     )
@@ -429,9 +612,10 @@ def main(
     }
     print(f"flare-outs: {counts}")
     flareout_blob = json.dumps(
-        flareout_data, separators=(",", ":"), allow_nan=False
+        window_flareouts(flareout_data), separators=(",", ":"), allow_nan=False
     ).replace("</", "<\\/")
-    blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    page = write_night_chunks(data, site_dir)
+    blob = json.dumps(page, separators=(",", ":")).replace("</", "<\\/")
     html = TEMPLATE.read_text()
     html = html.replace(
         "__SKYTRUTH_LOGO__", LOGO.read_text().split("-->", 1)[-1].strip()
@@ -461,14 +645,36 @@ def _git(*args: str, stdin: str | None = None) -> str:
     ).stdout.strip()
 
 
-def _write_tree(site_dir: Path) -> str:
+def _previous_chunk_blobs(previous_ref: str) -> dict[Path, str]:
+    """Keep exactly the chunks named by the preceding published page."""
+    html = _git("show", f"{previous_ref}:index.html")
+    match = re.search(
+        r'<script type="application/json" id="flaring-data">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    page = json.loads(match[1].replace("<\\/", "</")) if match else {}
+    meta = page.get("meta", {})
+    chunks = meta.get("chunks", []) + meta.get("clearpasses", [])
+    result = {}
+    for name in chunks:
+        if not re.fullmatch(
+            r"data/(?:nights|clearpasses)-\d{4}\.[0-9a-f]{8}\.json", name
+        ):
+            raise ValueError(f"invalid published chunk path: {name}")
+        result[Path(name)] = _git("rev-parse", f"{previous_ref}:{name}")
+    return result
+
+
+def _write_tree(site_dir: Path, retained: dict[Path, str] | None = None) -> str:
     """Write ``site_dir`` (plus ``.nojekyll``) into the object store as a tree."""
     files = sorted(p for p in site_dir.rglob("*") if p.is_file())
     paths = "\n".join(map(str, files))
     blobs = _git("hash-object", "-w", "--stdin-paths", stdin=paths).split()
     entries: dict[Path, list[str]] = {Path("."): []}
-    for path, blob in zip(files, blobs):
-        rel = path.relative_to(site_dir)
+    combined = dict(retained or {})
+    combined.update((p.relative_to(site_dir), b) for p, b in zip(files, blobs))
+    for rel, blob in sorted(combined.items()):
         entries.setdefault(rel.parent, []).append(f"100644 blob {blob}\t{rel.name}")
         for parent in rel.parents:
             entries.setdefault(parent, [])
@@ -490,11 +696,16 @@ def publish_pages(
 ) -> str:
     """Push ``site_dir`` to ``branch`` for GitHub Pages.
 
-    Each publish is a single parentless commit holding the site and
-    ``.nojekyll``, force-pushed, so the branch never accumulates copies of
-    the data. The working tree and current branch are untouched.
+    Each parentless publish retains the preceding index's referenced chunks
+    for cached pages. Older unreferenced data expires after one build.
+    The working tree and current branch are untouched.
     """
-    tree = _write_tree(site_dir)
+    refs = _git("ls-remote", "--heads", remote, branch)
+    retained = {}
+    if refs:
+        _git("fetch", "--no-tags", remote, f"refs/heads/{branch}")
+        retained = _previous_chunk_blobs("FETCH_HEAD")
+    tree = _write_tree(site_dir, retained)
     source = _git("rev-parse", "--short", "HEAD")
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     message = f"Publish flaring viewer from {source} ({stamp})"
