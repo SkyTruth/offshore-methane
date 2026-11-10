@@ -1468,9 +1468,11 @@ view-angle effects and non-upstream classification remain deferred. The
     gap. SNPP is low in March and July, matching its missing Azure days
     (25/31, 22/31); NASA CMR lists no SNPP night footprints on 07-14..16 and
     08-04..05. The cause of the Gulf drop is not established.
-- **Status:** results in this worktree, not yet joined to the production
-  outputs or the website; code uncommitted (D63/D64/D65 changes on branch
-  `t3/azure-archive-test`).
+- **Status:** code in `26424c8` on `nightly-flaring`. Results copied to the
+  production `outputs/v5_backlog_2026/` (403,103 files; run folder with TLEs in
+  `outputs/backlog_2026/`, test evidence in `outputs/speedup/`).
+  `build_viewer.find_segments` joins it with `v5_backfill` and `v5_30n` into
+  2026-01-01..11-04 (308 nights); the website is not rebuilt or published.
 
 ## V5 development evidence (2026-11-08)
 
