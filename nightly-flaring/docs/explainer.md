@@ -686,6 +686,21 @@ years, at least 6 px apart, with the bin caption on a separate line.
   60 nights before and 14 after in detail, 30 before and seven after in the
   list, clipped to the record. A monthly whole-record strip marks the detail
   window. Screening rules, tiers and evidence on disk are unchanged.
+- **EMIT scenes** in both Flare-outs modes show one scene at a time: the CH4
+  index beside true colour, with the scene's timing, cloud and coverage. A
+  strip of scene dates, each with its timing (filled dot: images available),
+  and ‹ › move between scenes. Dark spells opens on the first scene during the
+  spell with images; Single dark nights opens on the first scene near the run
+  with images and marks where its comparison scenes from nights lit on both
+  sides begin. **↑ ↓** choose the previous or next card or dark run and
+  **← →** move between its EMIT scenes, except while a text, date or menu
+  field has focus. With a mouse or trackpad on screens wider than 900 px, the
+  list and the detail scroll separately, and when the EMIT scenes are in view
+  ↑ ↓ keep them at the same height, so you can flip from site to site on the
+  imagery. Where the page scrolls as one (900 px and below, or a touch
+  screen), ↑ ↓ hold the imagery when it is on screen and the list when only
+  the list is; with both on screen (side by side), the selected row stays in
+  view first. Near the end of a short page the imagery can sit lower.
 - **Single dark nights** has a date histogram: weeks under a year, months
   otherwise. Brush it or enter From/To dates to filter by run start date;
   All dates resets it. The count scale and hover values show runs per bin.

@@ -6,6 +6,38 @@ report independently. Counts below are the reviewers' measurements unless
 marked *checked*, which means the main session re-derived them from the
 outputs. Choices made in response are recorded in [decisions.md](decisions.md).
 
+## Review 9: EMIT carousel, keyboard review and separate panes (2026-11-10)
+
+Scope: D67, the EMIT carousel in both Flare-outs modes, ↑ ↓ / ← → keys, the
+separate list and detail panes, `tests/ui/check_emit_carousel.mjs`. The main
+session implemented and checked it on the real 308-night build.
+
+| Round | Sol | Opus | Deciding findings |
+|---|---|---|---|
+| 1 | NO-GO (2 should-fix) | GO (5 should-fix, 9 minor) | On phones ↓ scrolled the page back to the list row, 2,378 px (Dark spells) and 10,449 px (Single dark nights) away from the imagery; a focused carousel control was destroyed on ↓ or ← →, leaving focus on the page; after a card with no scenes the EMIT section sat about 255 px lower on all 17 later cards; at 701–900 px each ↓ moved the imagery about 106 px down the window as charts redrew; Dark spells hid which scenes fall in the spell, and 4080 opened on a scene before it; one upward trackpad gesture ran through the list into the overview; touch screens above 900 px could reach the overview only through a 24 px gap |
+| 2 | NO-GO (1 should-fix, 2 minor) | NO-GO (1 blocker, 6 minor) | A list-focused ↓ at 701–900 px lost its row to the deferred imagery placement (Sol); the fix for it made any list-focused ↓ follow the list, so after a click on a row (focus stays there) and a scroll to the imagery, ↓ jumped the page 2,445 and 10,479 px back to the list at 390 px (Opus). Fixed by deciding from what is on screen (D67); also fixed: Single dark nights opening on a comparison scene, timing in the spoken counter, direction changes within a wheel gesture, the hold on touch screens above 900 px, the 1,280 × 720 fit (carousel 637 → 501 px in a 510 px pane), focus falling to an off-screen heading |
+| 3 | GO (1 minor) | NO-GO (1 blocker, 3 minor); GO on recheck (4 minor) | The image cap had no floor: each image of the pair shrank with window height and zoom (MacBook Air default at 150% zoom: 352 → 113 device px; 1,440 × 420: 0 px) while the strip still marked the scene as having images. Fixed with a 255 px floor per image (520 px for the pair), so short or zoomed windows scroll the pane. Also fixed: ↑ at 701–900 px left the new row half above the window after the deferred imagery placement (1 of 14 presses); a zero-deltaY wheel event split an upward gesture into the overview; ↑ ↓ now step from the focused row; the explainer states the side-by-side rule |
+
+Round 1 checks with no error: all 17 slides across 7 cards and all 8 image
+pairs (Sol); wheel steps 200 / 0 / 400 / 0 px and 100 rows after 60 presses
+reproduce (Opus); 7 of 19 cards have scenes (17 scenes, 8 with an image
+pair); 225 of 3,054 dark runs have a near scene, 125 of them (56%) with no
+image pair. Fixed after round 1 (D67): focus restoration; the EMIT hold in the
+window and its remembered offset; placement after chart redraw; opening on a
+scene during the spell or near the run; strip dates with timing and a group
+label; gesture-based upward hand-off; panes only with a fine pointer; list
+rows scrolled into their pane on any selection; status words and single full
+stops on slides; checkboxes no longer block the keys; the pair side by side
+at every width.
+
+Round 3 recheck (Opus) with no error: no image narrower than 211 px in 22
+window and zoom cases (MacBook Air at 150%: 326 device px, was 113); 0 cut
+rows over 112 ↑ presses; stepping from the focused row kept the click,
+phone, paging, address, touch and focus flows unchanged. Fixed after the GO:
+a one-frame scroll bounce on ↑, ↑ ↓ at list ends with an unselected focused
+row, re-selecting the current site resetting its carousel, locator dots not
+updating the address (older than D67).
+
 ## Review 8: long-record time axes (2026-11-10)
 
 Scope: D66, [long_record_ux.md](long_record_ux.md): the website's timeline,

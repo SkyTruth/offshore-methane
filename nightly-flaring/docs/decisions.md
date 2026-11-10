@@ -1652,6 +1652,93 @@ view-angle effects and non-upstream classification remain deferred. The
 - **Status:** Review 8 GO from both reviewers in round 3; published with the
   post-review fixes above.
 
+### D67 EMIT carousel, keyboard review and separate panes in Flare-outs (v5)
+- **Choice:** both Flare-outs modes draw a card's or dark run's EMIT scenes as
+  one carousel: one scene at a time, CH4 index beside true colour at every width
+  (the Single dark nights layout), with timing, scene cloud, coverage, adjacent
+  tiles, the NASA browse link and a strip of scene dates. Each strip date
+  carries its timing ("2026-08-24 · during"); a filled dot marks an image pair.
+  Scenes without a pair keep their slide, with the reason in place of the images
+  (between image strips, not yet in Earth Engine, queued for a later build,
+  coverage unknown). Dark spells opens on the first scene during the spell with
+  images, else the first with images; Single dark nights opens on the first
+  scene near the run with images, else the first scene near the run (a
+  comparison scene opens only when no scene is near the run), and labels where
+  its comparison scenes begin in the strip. Dark spells loses the scene table,
+  whose columns now sit on each slide and in the strip.
+- **Keys:** ↑ ↓ select the previous or next row in list order, counted from the
+  focused row when the list has focus, else from the selected row (dark runs
+  load the next 50 rows when needed), and update the address; ← → move the open
+  carousel. Text inputs, date inputs, selects and text areas keep their own
+  keys; checkboxes do not. Inside an open pass table ↑ ↓ still change the site;
+  the wheel scrolls the table. A focused carousel control is restored in the new
+  detail (the same ‹ ›, the current strip date, else the carousel); other
+  focused detail elements fall back to the carousel when the imagery was held,
+  else to the heading. A ‹ › that becomes disabled hands focus to the other. The
+  live counter's spoken text names the scene's date, group and timing. The Map
+  view's keys are unchanged.
+- **Panes:** above 900 px with a mouse or trackpad (`(hover: hover) and
+  (pointer: fine)`), the list and the detail scroll separately
+  (`overscroll-behavior-y: contain`). The workspace ends the tab and is sized to
+  fill it at the tab's last scroll position. A wheel over a pane scrolls the tab
+  until the workspace fills it. Scrolling up returns to the overview only in a
+  wheel gesture (events under 250 ms apart, one direction) that began with the
+  pane at its top. Touch screens above 900 px scroll the tab; at 900 px and
+  below the window scrolls; at 701–900 px the list and detail sit side by side
+  and scroll together. In the panes, each image of the pair is at most the pane
+  height less 270 px and at least 255 px wide (half the 512 px source) where the
+  pane's width allows (211 px at 960 px), so the pair, captions and browse link
+  fit at 1,280 × 720 and shorter or zoomed windows scroll the pane instead of
+  shrinking the images.
+- **Holding the imagery:** with panes, when the EMIT carousel (else the EMIT
+  section) is in view, a site change keeps the new one at the same height in the
+  detail pane. Without panes, what is on screen decides a keyed move: the row
+  the move starts from (focused, else selected) in view and the imagery not →
+  follow the list (the row scrolls into view); the imagery in view → hold it in
+  the window (or the tab), and when the row was in view too (side by side) also
+  keep the new row on screen, which then takes the scroll. Focus alone cannot
+  decide: a click leaves focus on the row while the reader scrolls to the
+  imagery. The wanted height is remembered while the reader does not scroll, so
+  a short detail (a card with no scenes) does not lower it for later sites; the
+  placement repeats after two frames because charts redraw at their measured
+  width. Any selection (address, timeline bar, link) scrolls the list pane to
+  its row without moving the tab. Slides do not repeat what the strip shows: the
+  group chip appears only for a lone scene, and a slide without images states
+  its reason once.
+- **Alternatives:** swipe gestures on the carousel (not asked; buttons work on
+  touch); a fixed overview header above the panes (the spell timeline and
+  dark-run histogram need the height); a carousel of image pairs only (drops the
+  scenes that explain a missing pair); separate panes on touch screens (touch
+  sends no wheel events, so the overview became unreachable).
+- **Why:** the user asked for the Single dark nights EMIT layout in Dark spells,
+  a carousel for multiple pairs, arrow-key review (↑ ↓ site, ← → scene) and
+  independent scrolling of list and detail. Review 9 set the opening scene,
+  strip timing, focus, anchor and touch rules.
+- **Evidence (real 308-night build, headless Chrome, 2026-11-10;
+  `tests/ui/check_emit_carousel.mjs` passes):** card 4080 opens on its
+  during-the-spell scene (2026-08-24, scene 3 of 3) with both images loaded. ↓
+  from 4080 to 919 keeps the EMIT section within 1 px of its place (40 → 41 px).
+  After 4102 (no scenes), ↓ back to 4080 returns the carousel to its wanted
+  offset (±3 px). Click a row, scroll the imagery to 60 px and press ↓ three
+  times: the imagery holds at 390 px (on screen; a short detail near the page
+  end can clamp it) and at 800 px (60 ± 4 px), in both modes; before the
+  on-screen rule, the page jumped 2,445 and 10,479 px to the list. With focus
+  blurred the imagery holds at 60 ± 4 px over 4 presses at 800 px. A
+  list-focused walk at 800 px, down and back up, keeps the focused row on screen
+  (the row is shown again after the imagery's deferred placement). In Single
+  dark nights, 60 presses of ↓ load 100 rows with focus on the selected row.
+  With the workspace 450 px down, a wheel over the list scrolls the tab 200 px
+  and the list 0; once the workspace fills the tab (13 px from its top), the
+  list takes 400 px and the detail 0; an upward gesture from mid-list stops at
+  the list's top, a new one returns the tab to 0, and a quick down-then-up at
+  the list's top leaves the tab in place (737 px). Touch emulation at 1,180 px:
+  panes off, the imagery holds at 60 px in the tab over 4 presses in both modes.
+  1,280 × 720: the 501 px carousel fits the 510 px pane. 0 browser errors.
+- **Status:** implemented, reviewed (Review 9: round 3 GO from both after the
+  Opus recheck) and published. Applied after the GO: the row re-reveal runs
+  two frames on, before the paint; ↑ ↓ at a list end or onto the selected row
+  move focus without rebuilding the detail; locator dots update the address.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

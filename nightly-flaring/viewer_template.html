@@ -422,6 +422,41 @@ details.card li b { color: var(--ink); font-weight: 500; }
 .dn-night .fo-table td:nth-child(2) { white-space: nowrap; }
 .dn-night { border-top: 1px solid var(--rule); margin-top: 18px; }
 .dn-detail .fo-chips { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* EMIT carousel (Dark spells and Single dark nights): one scene at a time, the
+   CH4 index beside true colour; ‹ ›, the scene strip or ← → move between scenes. */
+.emit-carousel { position: relative; margin: 10px 0 6px; padding: 10px 12px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--night); overflow-wrap: anywhere; }
+.emit-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.emit-head h4 { margin: 0; font: 500 14px/1.4 var(--num); }
+.emit-nav { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.emit-nav button { min-width: 34px; height: 28px; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); color: var(--ink); cursor: pointer; font-size: 15px; line-height: 1; }
+.emit-nav button:hover:not(:disabled) { border-color: var(--accent); }
+.emit-nav button:disabled { opacity: 0.35; cursor: default; }
+.emit-strip { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 4px; }
+.emit-strip button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--rule); border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font: 11.5px/1.3 var(--num); font-variant-numeric: tabular-nums; }
+.emit-strip button i { width: 7px; height: 7px; border-radius: 50%; border: 1.3px solid var(--ink-3); }
+.emit-strip button.has-chips i { border-color: var(--flare-4); background: var(--flare-4); }
+.emit-strip button[aria-current="true"] { border-color: var(--accent); background: var(--raise); color: var(--ink); }
+.emit-strip .emit-group { flex-basis: 100%; margin-top: 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.emit-carousel .fo-chips { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.emit-meta { margin: 6px 0 2px; font-size: 13px; }
+.emit-meta .fo-chip { margin: 0 6px 0 0; }
+.emit-empty { display: grid; place-items: center; aspect-ratio: 2 / 1; margin: 8px 0; padding: 16px; border: 1px dashed var(--rule); border-radius: 8px; color: var(--ink-2); font-size: 13px; text-align: center; }
+.emit-carousel .fo-chips img { aspect-ratio: 1; height: auto; background: var(--sea); }
+.fo-hint { margin: 0 0 8px; font-size: 11.5px; color: var(--ink-3); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.fo-hint kbd { padding: 0 4px; border: 1px solid var(--rule); border-radius: 3px; font: 11px var(--num); color: var(--ink-2); }
+/* Wide screens: the list and the detail scroll on their own. The workspace
+   ends the tab, sized so that at the tab's last scroll position it fills the
+   view with 12 px above it and the doc's 48 px padding below (see paneWheel). */
+@media (min-width: 901px) and (hover: hover) and (pointer: fine) {
+  .fo-workspace { height: calc(var(--fo-pane-h, 80vh) - 60px); align-items: stretch; }
+  .fo-workspace > * { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding: 2px 6px 16px 2px; scrollbar-width: thin; }
+  /* Square images no taller than the pane less the carousel's text (~270 px),
+     but never under 255 px each (half the 512 px source): short windows and
+     zoom then scroll the pane instead of shrinking the evidence. */
+  .emit-carousel .fo-chips { max-width: max(520px, calc(2 * (var(--fo-pane-h, 100vh) - 330px) + 10px)); }
+}
+@media (max-width: 900px), (hover: none) { .fo-hint { display: none; } }
 @media (max-width: 1000px) {
   .fo-workspace { grid-template-columns: minmax(260px, .85fr) minmax(0, 1.2fr); gap: 14px; }
   .fo-tiles { grid-template-columns: 1fr 1fr; }
@@ -1981,6 +2016,139 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
   const nightMode = el("button",{type:"button",text:"Single dark nights","aria-pressed":"false"});
   foShell.append(el("div",{class:"fo-modes",role:"group","aria-label":"Flare-out mode"},spellMode,nightMode),foRoot,dnRoot);
   let foChoose = null,redrawSpells=()=>{},redrawDarkHistogram=()=>{};
+
+  // Workspace (list | detail) shared by both modes. On wide screens each pane
+  // scrolls on its own: the tab scrolls first until the workspace fills it,
+  // and scrolling up from a pane's top returns to the overview. ↑ ↓ choose the
+  // previous or next row, ← → move the open EMIT carousel.
+  const foArticle = document.getElementById("flareouts");
+  // Separate panes need a mouse or trackpad: touch sends no wheel events, so a
+  // touch screen keeps the single scroll (and its 900 px-and-below behaviour).
+  const twoPane = () => matchMedia("(min-width: 901px) and (hover: hover) and (pointer: fine)").matches;
+  new ResizeObserver(() => { if (foArticle.clientHeight) foArticle.style.setProperty("--fo-pane-h", foArticle.clientHeight + "px"); }).observe(foArticle);
+  function paneWheel(workspace) {
+    workspace.addEventListener("wheel", e => {
+      if (!twoPane() || e.ctrlKey) return;
+      const pane = [...workspace.children].find(p => p.contains(e.target));
+      if (!pane) return;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? foArticle.clientHeight : 1);
+      if (!dy) return;  // a sideways event must not split a vertical gesture
+      const stuck = workspace.getBoundingClientRect().top <= foArticle.getBoundingClientRect().top + 16;
+      const room = foArticle.scrollTop + foArticle.clientHeight < foArticle.scrollHeight - 1;
+      // A gesture is a run of wheel events less than 250 ms apart. Scrolling up
+      // returns to the overview only in a gesture that began with the pane at
+      // its top, so a swipe that scrolls the list stops at the list's top.
+      const now = performance.now(), g = pane._gesture;
+      if (!g || now - g.last > 250 || Math.sign(dy) !== g.dir) pane._gesture = { atTop: pane.scrollTop <= 0, last: now, dir: Math.sign(dy) };
+      else g.last = now;
+      if ((dy > 0 && !stuck && room) || (dy < 0 && pane._gesture.atTop && pane.scrollTop <= 0 && foArticle.scrollTop > 0)) {
+        if (e.cancelable) e.preventDefault();
+        foArticle.scrollTop += dy;
+      }
+    }, { passive: false });
+  }
+  // Where focus was inside the detail, so the rebuilt detail can take it back:
+  // the same carousel button, the current scene date, else the carousel, else
+  // the heading. Without this, focus falls to the page when its control goes.
+  function focusSlot(pane) {
+    const a = document.activeElement;
+    if (!a || a === pane || !pane.contains(a)) return null;
+    if (a.closest(".emit-nav")) return { nav: a.getAttribute("aria-label") };
+    if (a.closest(".emit-strip")) return { strip: true };
+    return { inCarousel: !!a.closest(".emit-carousel") };
+  }
+  function restoreFocus(pane, slot, held) {
+    if (!slot) return;
+    const car = pane.querySelector(".emit-carousel");
+    const target = (slot.nav && car?.querySelector(`.emit-nav button[aria-label="${slot.nav}"]:not(:disabled)`))
+      || (slot.strip && car?.querySelector('.emit-strip button[aria-current="true"]'))
+      || ((slot.nav || slot.strip || slot.inCarousel || held) && car) || pane.querySelector("h2");
+    if (!target) return;
+    if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }
+  // Replace the detail. When its EMIT section was in view, keep the new one at
+  // the same place: in the detail pane on wide screens, in the window when the
+  // page scrolls as one. So ↑ ↓ flip from site to site on the imagery.
+  // Otherwise the new detail opens at its top (wide screens).
+  // The anchor is the carousel, else the EMIT section. `pane._emit` remembers
+  // the offset wanted and the offset reached: a short detail can stop the
+  // anchor lower, and the next site should return to the wanted offset if the
+  // reader has not scrolled since. Charts redraw at their measured width one
+  // frame later, so the anchor is placed again after two frames.
+  const emitAnchor = pane => pane.querySelector(".emit-carousel") || pane.querySelector(".emit-section");
+  // hold=false: a list-focused keyed move where the page scrolls as one; the
+  // list row owns the window scroll, so the imagery is not re-placed.
+  function swapDetail(pane, node, hold = true) {
+    const slot = focusSlot(pane), two = twoPane(), r = hold || two ? emitAnchor(pane)?.getBoundingClientRect() : null;
+    // Without panes the tab scrolls when it overflows (touch screens above
+    // 900 px); at 900 px and below the window scrolls.
+    const tab = !two && getComputedStyle(foArticle).overflowY !== "visible" && foArticle.scrollHeight > foArticle.clientHeight;
+    const frame = two ? pane : tab ? foArticle : null;
+    const top = frame ? frame.getBoundingClientRect().top : 0, height = frame ? frame.clientHeight : innerHeight;
+    let want = r && r.bottom > top && r.top < top + height && (!two || pane.scrollTop > 0) ? r.top - top : null;
+    if (want != null && pane._emit && Math.abs(want - pane._emit.got) < 2) want = pane._emit.want;
+    pane.replaceChildren(node);
+    const place = () => {
+      const fresh = emitAnchor(pane);
+      if (want == null || !fresh) { if (two) pane.scrollTop = 0; pane._emit = null; return; }
+      const delta = fresh.getBoundingClientRect().top - top - want;
+      if (frame) frame.scrollTop += delta; else window.scrollBy(0, delta);
+      pane._emit = { want, got: Math.round(emitAnchor(pane).getBoundingClientRect().top - top) };
+    };
+    place();
+    if (want != null) requestAnimationFrame(() => requestAnimationFrame(() => { if (pane._emit) place(); }));
+    restoreFocus(pane, slot, want != null);
+  }
+  // Where the page scrolls as one, what is on screen decides a keyed move (a
+  // click leaves focus on the row while the reader looks at the detail, so
+  // focus alone cannot tell): the selected row in view and the imagery not →
+  // follow the list; the imagery in view → hold it, and when the row was in
+  // view too (side by side at 701–900 px) also keep the new row on screen.
+  const inView = node => { const r = node?.getBoundingClientRect(); return !!r && r.bottom > 0 && r.top < innerHeight; };
+  // The row a keyed move starts from: the focused row when the list has focus
+  // (as in any list), else the selected row.
+  const fromRow = list => { const f = document.activeElement?.closest?.(".fo-row"); return f && list.contains(f) ? f : list.querySelector('.fo-row[aria-current="true"]'); };
+  function keyedMove(list, detail, id, select) {
+    const focus = !!document.activeElement?.closest?.(".fo-list"), page = !twoPane();
+    const rowSeen = page && inView(fromRow(list));
+    const emitSeen = page && inView(emitAnchor(detail));
+    select(!(rowSeen && !emitSeen));
+    const y = scrollY + foArticle.scrollTop;
+    revealRow(list, id, focus, rowSeen);
+    if (page && scrollY + foArticle.scrollTop !== y) detail._emit = null;  // the row took the scroll; skip the re-placement
+    // The re-placement two frames on can still move the window; the row comes first.
+    else if (rowSeen) requestAnimationFrame(() => requestAnimationFrame(() => revealRow(list, id, false, true)));
+  }
+  // After a keyed move, show the new row: focus follows when it was on a row;
+  // `scroll` brings the row into view where the page scrolls as one.
+  function revealRow(list, id, focus = !!document.activeElement?.closest?.(".fo-list"), scroll = false) {
+    const row = [...list.querySelectorAll(".fo-row")].find(r => r.dataset.id === id);
+    if (!row) return;
+    if (focus) row.focus({ preventScroll: true });
+    if (twoPane()) {  // scroll the list pane only, never the tab
+      const pane = row.closest(".fo-workspace > *"), pr = pane.getBoundingClientRect(), rr = row.getBoundingClientRect();
+      if (rr.top < pr.top) pane.scrollTop += rr.top - pr.top - 4;
+      else if (rr.bottom > pr.bottom) pane.scrollTop += rr.bottom - pr.bottom + 4;
+    } else if (scroll) row.scrollIntoView({ block: "nearest" });
+  }
+  const keyHint = what => el("p", { class: "fo-hint" }, el("kbd", { text: "↑" }), " ", el("kbd", { text: "↓" }), " " + what + " · ",
+    el("kbd", { text: "←" }), " ", el("kbd", { text: "→" }), " EMIT scenes");
+  let foStep = null, dnStep = null;
+  document.addEventListener("keydown", e => {
+    if (foArticle.hidden || e.altKey || e.ctrlKey || e.metaKey || !e.key.startsWith("Arrow")) return;
+    if (e.target.closest?.("input:not([type=checkbox]):not([type=radio]):not([type=button]), select, textarea, [contenteditable='true']")) return;
+    const dark = !dnRoot.hidden;
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const step = dark ? dnStep : foStep;
+      if (!step) return;
+      e.preventDefault(); step(e.key === "ArrowDown" ? 1 : -1);
+    } else {
+      const carousel = (dark ? dnRoot : foRoot).querySelector(".emit-carousel");
+      if (!carousel) return;
+      e.preventDefault(); carousel.step(e.key === "ArrowRight" ? 1 : -1);
+    }
+  });
   const foHeat = v => v == null ? "unmeasured" : (v < 1 ? v.toFixed(2) : v.toFixed(1)) + " MW";
   const foName = c => c.unit.region + " · " + c.unit.site_ids.join(" / ");
   function foBound(c) {
@@ -1995,10 +2163,12 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
   }
   const emitTime = value => value.replace("T"," ").replace(/\.0+(?=Z|[+-]00:00|$)/, "").replace(/Z|\+00:00$/, "");
   const emitUsable = s => s.imagery?.status === "available" && s.imagery?.source_coverage === "covered" && s.imagery?.ch4 && s.imagery?.rgb;
-  function emitCoverageNote(s) {
+  // tilesOnly: the slide already explains missing coverage; list adjacent tiles.
+  function emitCoverageNote(s, tilesOnly=false) {
     const coverage=s.imagery?.source_coverage;
     const note=el("div",{class:"fo-muted"});
-    if(coverage==="no_data") note.append(el("p",{text:"No EMIT data at the source in this scene (it falls between image strips)"}));
+    if(tilesOnly);
+    else if(coverage==="no_data") note.append(el("p",{text:"No EMIT data at the source in this scene (it falls between image strips)"}));
     else if(coverage!=="covered") note.append(el("p",{text:"EMIT data coverage at the source is unknown."}));
     for(const tile of s.adjacent_tiles||[]){
       const text="Adjacent tile "+tile.scene_id+": "+(tile.source_coverage==="no_data"?"no EMIT data at the source (it falls between image strips)":tile.source_coverage==="covered"?"also covers the source":"source coverage unknown")+". This is the same acquisition.";
@@ -2077,28 +2247,81 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
       el("tbody", null, ...rows.map(row=>el("tr", null, ...row.map(v=>el("td", null, v == null ? "—" : typeof v === "object" ? v : String(v)))))));
     return el("div", {class:"tbl-wrap"}, table);
   }
+  // Why a scene has no image pair, in the words the old scene tables used.
+  function emitMissing(s) {
+    const im=s.imagery||{};
+    if(im.source_coverage==="no_data")return "No EMIT data at the source in this scene (it falls between image strips).";
+    if(im.status==="pending"){
+      const date=im.collection_latest_utc?new Date(im.collection_latest_utc):null;
+      return date&&!Number.isNaN(date.getTime())?"Not in Earth Engine yet (its EMIT collection ends "+new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(date)+"). Retried on each build.":"Earth Engine collection cutoff is unknown; scene availability is unknown. Retried on each build.";
+    }
+    if(im.status==="available"&&im.source_coverage!=="covered")return "EMIT data coverage at the source is unknown, so no image pair is shown.";
+    if(im.message)return im.message.replace(/\.?$/,".");
+    return "No image pair ("+emitStatusWords(im.status)+").";
+  }
+  const emitStatusWords=status=>({available:"image pair",no_data:"no data at the source",pending:"not in Earth Engine yet",queued:"queued for a later build",unavailable:"unavailable"})[status]||status||"unavailable";
+  // EMIT scenes one at a time: the CH4 index beside true colour, with the
+  // scene's timing, cloud and coverage. `pick` chooses the opening scene
+  // (default: the first with an image pair, else the first). Each scene's
+  // `tag` (its timing) labels its date in the strip; a change of `group`
+  // starts a new labelled run of dates. step(±1) backs the ← → keys.
+  const firstWith = (scenes, test) => scenes.findIndex(test);
+  function emitCarousel(scenes, label, pick=s=>Math.max(0,firstWith(s,emitUsable))) {
+    const box=el("div",{class:"emit-carousel",role:"region","aria-roledescription":"carousel","aria-label":label,tabindex:"-1"});
+    let index=pick(scenes);
+    const shown=el("span",{"aria-hidden":"true"}),spoken=el("span",{class:"sr-only"});
+    const title=el("h4"),counter=el("span",{"aria-live":"polite"},shown,spoken);
+    const prev=el("button",{type:"button","aria-label":"Previous EMIT scene",text:"‹"}),next=el("button",{type:"button","aria-label":"Next EMIT scene",text:"›"});
+    const slide=el("div",{class:"emit-slide"}),strip=el("div",{class:"emit-strip",role:"group","aria-label":"EMIT scenes"});
+    const day=s=>emitTime(s.time_utc).slice(0,10),dup=new Set(scenes.map(day).filter((d,i,a)=>a.indexOf(d)!==i));
+    const groups=new Set(scenes.map(s=>s.group)).size>1;
+    const tabs=scenes.map((s,i)=>{
+      if(groups&&s.group!==scenes[i-1]?.group)strip.append(el("span",{class:"emit-group",text:s.group}));
+      const when=day(s)+(dup.has(day(s))?" "+emitTime(s.time_utc).slice(11,16):"");
+      const tab=el("button",{type:"button",class:emitUsable(s)?"has-chips":"","aria-label":"Scene "+(i+1)+", "+emitTime(s.time_utc)+" UTC"+(s.tag?", "+s.tag:"")+(emitUsable(s)?", with images":", no images")},el("i"),when+(s.tag?" · "+s.tag:""));
+      tab.addEventListener("click",()=>go(i));strip.append(tab);return tab;
+    });
+    const pair=(s,eager)=>el("div",{class:"fo-chips"},...[[s.imagery.ch4,"CH4 index"],[s.imagery.rgb,"True colour"]].map(([src,name])=>el("figure",null,
+      el("img",{src,alt:name+" at "+s.time_utc,width:512,height:512,decoding:"async",loading:eager?"eager":"lazy"}),
+      el("figcaption",{class:"fo-muted",text:name+(name==="CH4 index"?" · Grey: no data; dark blue: ≤1σ.":" · Grey: no data."+(s.imagery.legacy_render?" Older render: black may also be missing data.":""))}))));
+    const preload=i=>{const s=scenes[i];if(s&&emitUsable(s))for(const src of [s.imagery.ch4,s.imagery.rgb])new Image().src=src;};
+    function render() {
+      const s=scenes[index],hours=s.hours_from_dark_pass,a=document.activeElement,inSlide=slide.contains(a);
+      title.textContent=emitTime(s.time_utc)+" UTC";
+      shown.textContent=scenes.length>1?"Scene "+(index+1)+" of "+scenes.length:"1 scene";
+      spoken.textContent=shown.textContent+" · "+emitTime(s.time_utc)+" UTC"+(s.group?" · "+s.group:"")+(s.tag&&!(s.group||"").includes(s.tag)?" · "+s.tag:"")+(emitUsable(s)?"":" · no image pair");
+      prev.disabled=index===0;next.disabled=index===scenes.length-1;
+      tabs.forEach((tab,i)=>tab.setAttribute("aria-current",String(i===index)));
+      slide.replaceChildren(
+        // The strip already names each scene's timing and group; a lone scene shows its group here.
+        el("p",{class:"emit-meta"},s.group&&scenes.length===1?el("span",{class:"fo-chip",text:s.group}):null," ",[s.phase,hours==null?null:(hours>=0?"+":"")+hours.toFixed(1)+" hours from the nearest clear dark pass in the run"].filter(Boolean).join(" · ")),
+        el("p",{class:"fo-muted",text:"Scene cloud: "+(s.cloud_cover==null?"unreported":s.cloud_cover+"% of scene area")+(emitUsable(s)?"":" · no image pair")}),
+        emitUsable(s)?pair(s,true):el("div",{class:"emit-empty",text:emitMissing(s)}),
+        emitCoverageNote(s,true),
+        s.browse_url?el("a",{href:s.browse_url,target:"_blank",rel:"noopener",text:"NASA browse ↗"}):null);
+      // The slide was rebuilt, or the focused ‹ › just became disabled: keep focus in the carousel.
+      if(inSlide)(slide.querySelector("a")||box).focus({preventScroll:true});
+      else if((a===prev||a===next)&&a.disabled)(a===prev?next:prev).focus({preventScroll:true});
+      preload(index+1);preload(index-1);
+    }
+    function go(i) {
+      if(i<0||i>=scenes.length||i===index)return false;
+      index=i;render();return true;
+    }
+    prev.addEventListener("click",()=>go(index-1));next.addEventListener("click",()=>go(index+1));
+    box.append(el("div",{class:"emit-head"},title,el("span",{class:"emit-nav"},...(scenes.length>1?[prev,counter,next]:[counter]))),...(scenes.length>1?[strip]:[]),slide);
+    box.step=d=>go(index+d);
+    render();
+    return box;
+  }
   function foEmit(c) {
-    const box = el("section", null, el("h3", {text:"EMIT overpasses"}),
+    const box = el("section", {class:"emit-section"}, el("h3", {text:"EMIT overpasses"}),
       infoBtn("EMIT review", "An ISS daytime overpass can support methane review. Scene cloud cover does not measure cloud over this source. Transition times between VIIRS passes are labelled boundary."));
     const e = c.emit;
     if (!e) { box.append(el("p", {class:"fo-muted",text:"EMIT overpasses were not listed in this build."})); return box; }
     box.append(el("p", {class:"fo-muted",text:e.window_start+" to "+e.window_end+" · "+foEmitLabel(c)+" · "+(e.with_chips||0)+" with chips"}));
     if (!e.scenes.length) box.append(el("p", {text:e.status === "available" ? "No EMIT scene covers the source in this window." : "The listing is incomplete; coverage is unknown."}));
-    else box.append(foTable(["Time UTC","Timing","Cloud","Imagery","Browse"],e.scenes.map(s=>[
-      emitTime(s.time_utc),s.phase,s.cloud_cover==null?"unreported":s.cloud_cover+"%",
-      s.imagery.source_coverage==="no_data"?"No EMIT data at the source in this scene (it falls between image strips)":s.imagery.status==="pending"?"not in Earth Engine yet":s.imagery.status,
-      s.browse_url?el("a",{href:s.browse_url,target:"_blank",rel:"noopener",text:"NASA ↗"}):"—"
-    ])));
-    const pendingNotes = [...new Set(e.scenes.filter(s=>s.imagery.status==="pending").map(s=>{
-      const latest = s.imagery.collection_latest_utc;
-      const date = latest ? new Date(latest) : null;
-      return date && !Number.isNaN(date.getTime()) ? "Not in Earth Engine yet (its EMIT collection ends "+new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(date)+"). Retried on each build." : "Earth Engine collection cutoff is unknown; scene availability is unknown. Retried on each build.";
-    }))];
-    for (const text of pendingNotes) box.append(el("p",{class:"fo-muted",text}));
-    if (e.scenes.some(s=>s.imagery.status==="unavailable" && s.imagery.message?.includes("availability is unknown"))) box.append(el("p",{class:"fo-muted",text:"Earth Engine scene availability is unknown; imagery is retried on each build."}));
-    for (const s of e.scenes) box.append(emitCoverageNote(s));
-    for (const s of e.scenes.filter(emitUsable)) box.append(el("div",{class:"fo-chips"},
-      ...[[s.imagery.ch4,"CH4 index"],[s.imagery.rgb,"True colour"]].filter(r=>r[0]).map(r=>el("figure",null,el("img",{src:r[0],alt:r[1]+" at "+s.time_utc,loading:"lazy"}),el("figcaption",{class:"fo-muted",text:r[1]+" · "+emitTime(s.time_utc)+" UTC"+(r[1]==="CH4 index"?" · Grey: no data; dark blue: ≤1σ.":" · Grey: no data."+(s.imagery.legacy_render?" Older render: black may also be missing data.":""))})))));
+    else box.append(emitCarousel(e.scenes.map(s=>({...s,group:["before","during","after"].includes(s.phase)?s.phase+" the spell":s.phase,tag:s.phase,phase:null})),"EMIT scenes for "+foName(c),s=>[firstWith(s,x=>emitUsable(x)&&x.tag==="during"),firstWith(s,emitUsable),0].find(i=>i>=0)));
     box.append(el("p",{class:"fo-muted",text:e.caption}));
     return box;
   }
@@ -2148,13 +2371,22 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     overview.append(locator); foRoot.append(overview);
     if(!FL.candidates.length){foRoot.append(el("p",{text:"No candidates meet the screen on the available nights."}));return;}
     const list=el("div",{class:"fo-list",role:"group","aria-label":"Ranked candidates"}), detail=el("div",{id:"fo-detail-host"}), workspace=el("div",{class:"fo-workspace"},list,detail);
-    function choose(c, scroll=false){
+    let current=null;
+    function choose(c, scroll=false, hold=true){
+      current=c.id;
       list.querySelectorAll(".fo-row").forEach(row=>row.setAttribute("aria-current",String(row.dataset.id===c.id)));
       locator.querySelectorAll("circle").forEach(dot=>{dot.setAttribute("stroke",dot.dataset.id===c.id?C.ink:C.sea);dot.setAttribute("stroke-width",dot.dataset.id===c.id?2:1);});
-      detail.replaceChildren(foDetail(c));
+      swapDetail(detail,foDetail(c),hold);revealRow(list,c.id,false);
       if(scroll && matchMedia("(max-width:700px)").matches) detail.scrollIntoView({block:"start"});
     }
     foChoose = choose;
+    foStep=d=>{
+      const from=fromRow(list)?.dataset.id??current,i=FL.candidates.findIndex(c=>c.id===from),c=FL.candidates[Math.max(0,Math.min(FL.candidates.length-1,i+d))];
+      if(!c)return;
+      if(c.id===current){revealRow(list,c.id,true,!twoPane());return;}  // already selected: move focus, keep its carousel
+      history.replaceState(null,"","#flare-outs/card/"+encodeURIComponent(c.id));
+      keyedMove(list,detail,c.id,hold=>choose(c,false,hold));
+    };
     for(const c of FL.candidates){
       const row=el("button",{type:"button",class:"fo-row","aria-current":"false"}); row.dataset.id=c.id;
       row.append(foBadge(c.tier),el("strong",{class:"fo-name",text:foName(c)}),
@@ -2165,7 +2397,8 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
       const [x,y]=projection([c.unit.lon,c.unit.lat]);
       const dot=svg("circle",{cx:x,cy:y,r:5,fill:c.tier==="Watch"?C["ink-3"]:c.tier==="High"?C["flare-3"]:C["flare-5"],tabindex:0,role:"button","aria-label":foName(c)+", "+c.tier});dot.dataset.id=c.id;
       const title=svg("title");title.textContent=foName(c);dot.append(title);
-      dot.addEventListener("click",()=>choose(c,true));dot.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(c,true);}});locator.append(dot);
+      const pick=()=>{history.replaceState(null,"","#flare-outs/card/"+encodeURIComponent(c.id));choose(c,true);};
+      dot.addEventListener("click",pick);dot.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();pick();}});locator.append(dot);
     }
     const timeline=svg("svg",{class:"spell-timeline",role:"group","aria-label":"Dark spell timeline; select a bar to open its evidence"});
     foRoot.append(el("p",{class:"fo-muted",text:"Spell timeline · from 60 nights before the earliest spell to "+md(FL.as_of)+" · record starts "+md(NIGHTS[0])}),timeline);
@@ -2189,7 +2422,7 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
         if(c.status==="ongoing")timeline.append(svg("path",{d:`M${end-4},${y}l4,5l-4,5`,fill:"none",stroke:color,"stroke-width":1.5}));
       });
     };redrawSpells();
-    foRoot.append(workspace);choose(FL.candidates[0]);
+    paneWheel(workspace);foRoot.append(keyHint("cards"),workspace);choose(FL.candidates[0]);
   }
 
   // One compact payload is fetched on first opening. Rows are dark runs.
@@ -2209,23 +2442,17 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     });
     return button;
   }
-  function dnScenes(title, scenes, status) {
-    const parts=title.split(" · ");
-    const box=el("section",null,parts[1]?el("h3",null,el("span",{style:"white-space:nowrap",text:parts[0]+" ·"})," ",el("span",{style:"white-space:nowrap",text:parts[1]})):el("h3",{text:title}));
-    if(status!=="available") box.append(el("p",{class:"fo-muted",text:"EMIT listing "+status+"; coverage may be incomplete."}));
-    if(!scenes.length) box.append(el("p",{text:status==="available"?"No matching scene in the record.":"Coverage is unknown while the listing is incomplete."}));
-    for(const s of scenes){
-      const im=s.imagery||{}, time=emitTime(s.time_utc);
-      const hours=s.hours_from_dark_pass;
-      const scene=el("div",{class:"dn-scene"},el("h4",{text:time+" UTC"}),
-        el("p",{text:s.phase+(hours==null?"":" · "+(hours>=0?"+":"")+hours.toFixed(1)+" hours from nearest clear dark pass in the run")}),
-        el("p",{class:"fo-muted",text:"Scene cloud: "+(s.cloud_cover==null?"unreported":s.cloud_cover+"% of scene area")+" · Imagery: "+(im.status||"unavailable")+(im.message?" — "+im.message:"")}));
-      scene.append(emitCoverageNote(s));
-      if(s.browse_url)scene.append(el("a",{href:s.browse_url,target:"_blank",rel:"noopener",text:"NASA browse ↗"}));
-      if(emitUsable(s))scene.append(el("div",{class:"fo-chips"},...[[im.ch4,"CH4 index"],[im.rgb,"True colour"]].filter(r=>r[0]).map(r=>el("figure",null,
-        el("img",{src:r[0],alt:r[1]+" at "+s.time_utc,loading:"lazy",width:512,height:512}),el("figcaption",{class:"fo-muted",text:r[1]+(r[1]==="CH4 index"?" · Grey: no data; dark blue: ≤1σ.":" · Grey: no data."+(s.imagery.legacy_render?" Older render: black may also be missing data.":""))})))));
-      box.append(scene);
-    }
+  // Scenes near the run, then comparison scenes from lit nights, in one carousel.
+  function dnEmit(run) {
+    const source=DN.sources[run.source_id],status=source.emit_status;
+    const near=dnSceneRefs(run).map(s=>({...s,group:"near the dark run",tag:s.phase}));
+    const comparison=source.comparison_scenes.map(id=>({...source.scenes[id],phase:"lit on both sides",group:"comparison",tag:"lit"}));
+    const box=el("section",{class:"emit-section"},el("h3",{text:"EMIT scenes"}),
+      el("p",{class:"fo-muted",text:dnCount(near.length,"scene")+" near the dark run · "+dnCount(comparison.length,"comparison scene")+" from nights lit on both sides"}));
+    if(status!=="available")box.append(el("p",{class:"fo-muted",text:"EMIT listing "+status+"; coverage may be incomplete."}));
+    if(near.length+comparison.length)box.append(emitCarousel([...near,...comparison],"EMIT scenes for "+dnName(run),
+      s=>near.length?Math.max(0,firstWith(near,emitUsable)):Math.max(0,firstWith(s,emitUsable))));
+    else box.append(el("p",{text:status==="available"?"No matching scene in the record.":"Coverage is unknown while the listing is incomplete."}));
     return box;
   }
   function dnSeries(source) {
@@ -2296,7 +2523,6 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     return box;
   }
   function dnDetail(run) {
-    const source=DN.sources[run.source_id];
     const box=el("section",{class:"fo-detail dn-detail","aria-label":"Selected dark run"},
       el("h2",{text:dnName(run)}),el("p",{text:run.start+" to "+run.end+" · "+dnCount(run.clear_dark_nights,"clear dark night")+" in the run · "+dnCount(run.nights.length,"qualifying night")+" listed."}),dnChart(run));
     for(const id of run.neighbours){
@@ -2307,8 +2533,7 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     }
     box.append(el("details",null,el("summary",{text:"VIIRS bracket"}),foTable(["Pass","Time UTC"],[["Last saw the flare",run.bracket.last_lit],["First clear dark pass",run.bracket.first_dark],["Last clear dark pass",run.bracket.last_dark],["First saw it after",run.bracket.recovery]])),
       el("p",{class:"fo-muted",text:"Labels follow VIIRS passes. A daytime scene beside a single dark night is boundary: its timing cannot establish what happened between passes. Scene cloud is the share of scene area, not cloud at this source."}),
-      dnScenes("EMIT scenes near the dark run",dnSceneRefs(run),source.emit_status),
-      dnScenes("Comparison scenes · lit on both sides",source.comparison_scenes.map(id=>({...source.scenes[id],phase:"lit on both sides"})),source.emit_status),
+      dnEmit(run),
       el("p",{class:"fo-muted",text:DN.caption}),dnMap(run));
     if(run.card_id)box.append(el("p",null,el("a",{href:"#flare-outs/card/"+encodeURIComponent(run.card_id),text:"Open the flare-out card →"})));
     for(const n of run.nights)box.append(dnNight(n));
@@ -2327,7 +2552,8 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     for(const [v,t] of [["surprise","Most surprising"],["heat","Brightest"],["recent","Most recent"]])sort.append(el("option",{value:v,text:t}));
     const filters=el("div",{class:"dn-filters"},el("label",{class:"dn-check"},emitOnly,"With an EMIT scene"),el("label",null,"Minimum recent heat",heat),el("label",null,"Region",region),el("label",null,"Sort",sort));
     const count=el("p",{class:"fo-muted",role:"status"}),list=el("div",{class:"fo-list",role:"group","aria-label":"Dark runs"}),detail=el("div"),more=el("button",{type:"button",class:"dn-more",text:"Show more"});
-    dnRoot.append(filters,count,el("div",{class:"fo-workspace"},el("div",null,list,more),detail));
+    const workspace=el("div",{class:"fo-workspace"},el("div",null,list,more),detail);paneWheel(workspace);
+    dnRoot.append(filters,count,keyHint("dark runs"),workspace);
     let filtered=[],limit=50,selected=null,dateFilter=null;
     const unit=NN<365?"week":"month",bins=calendarBins(unit),hist=svg("svg",{class:"dn-histogram",role:"img","aria-label":"Dark runs by "+unit+"; drag or enter dates to filter"});
     const counts=bins.map(d=>DN.runs.filter(r=>r.start>=NIGHTS[d.a]&&r.start<=NIGHTS[d.b]).length),max=d3.max(counts)||1;
@@ -2371,12 +2597,20 @@ select { color:var(--ink);background:var(--panel);border:1px solid var(--rule);b
     reset.addEventListener("click",()=>{dateFilter=null;syncDates();group.call(brush.move,null);apply();});
     filters.before(el("p",{class:"fo-muted",text:"Run start dates · 1 bar = 1 "+unit}),hist,dateInputs);redrawDarkHistogram();
 
-    function choose(run,scroll){
+    function choose(run,scroll,hold=true){
       selected=run.id;
       list.querySelectorAll(".dn-row").forEach(r=>r.setAttribute("aria-current",String(r.dataset.id===selected)));
-      detail.replaceChildren(dnDetail(run));
+      swapDetail(detail,dnDetail(run),hold);revealRow(list,run.id,false);
       if(scroll&&matchMedia("(max-width:700px)").matches)detail.scrollIntoView({block:"start"});
     }
+    dnStep=d=>{
+      const from=fromRow(list)?.dataset.id??selected,i=filtered.findIndex(r=>r.id===from),run=filtered[Math.max(0,Math.min(filtered.length-1,i+d))];
+      if(!run)return;
+      if(run.id===selected){revealRow(list,run.id,true,!twoPane());return;}
+      const index=filtered.indexOf(run);
+      history.replaceState(null,"","#flare-outs/dark-nights/"+encodeURIComponent(run.id));
+      keyedMove(list,detail,run.id,hold=>{if(index>=limit){limit=Math.max(limit+50,index+1);selected=run.id;rows();}choose(run,false,hold);});
+    };
     dnChoose=(run,scroll)=>{
       // A neighbour may be outside the current filters; make its selection visible.
       if(!filtered.some(r=>r.id===run.id)){emitOnly.checked=false;heat.value="any";region.value="";dateFilter=null;syncDates();group.call(brush.move,null);apply(run.id);}
