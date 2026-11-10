@@ -25,7 +25,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `pipeline.py` | Date-range run: selects granules, processes them in parallel, writes one row per site per night. |
 | `granule.py` | Processes one granule: site pixels, M10 detection, M11-M13 confirmation, Planck fit, cloud mask. |
 | `nightfire.py` | Physics: Planck function, zone thresholds, Planck fit, pixel area, radiant heat, solar zenith. |
-| `nodd.py` | NOAA bucket listing, granule index, HTTP byte-range file object for h5py. |
+| `nodd.py` | NOAA file listing on AWS S3 or NOAA's Azure copy (D63), granule index, HTTP byte-range file object for h5py. |
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
@@ -81,7 +81,8 @@ through a local server.
 
 Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
-must be within NOAA's ~91-day bucket retention.
+must be within NOAA's ~91-day AWS retention. For older nights (from mid-2023),
+pass `source="azure"` to `pipeline.main` to read NOAA's Azure copy (D63).
 
 ## Monthly update and flare-out review
 
@@ -260,8 +261,13 @@ M7, M8, M10-M13 plus lat/lon total ~43 MB per granule; adding M14-M16 gives
 satellite, 20-28 GB per night for three satellites. EOG reports 150 GB of night
 data per instrument per night for the global run (Elvidge 2023).
 
-Backfill beyond 91 days needs NOAA CLASS SDR orders or NASA LAADS L1B
-(`VNP02MOD`/`VJ102MOD`), whose calibration differs from NOAA's IDPS SDRs.
+NOAA's Azure copy (`https://jpss.blob.core.windows.net/{snpp,noaa-20,noaa-21}`)
+holds the same files under the same keys back to mid-2023 and is not trimmed
+to 90 days. Over UTC 2026-08-08 to 11-08 all 2,126,617 AWS files matched it by
+size and MD5, and a rerun of night 2026-09-20 from Azure reproduced the backfill
+byte for byte (D63). Nights before mid-2023 need NOAA CLASS SDR orders or NASA
+LAADS L1B (`VNP02MOD`/`VJ102MOD`), whose calibration differs from NOAA's IDPS
+SDRs.
 
 ## Published method
 

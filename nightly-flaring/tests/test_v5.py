@@ -283,7 +283,7 @@ def test_build_jobs_oldest_first(monkeypatch):
             )
         )
 
-    def index(sat, day, session):
+    def index(sat, day, session, source="aws"):
         out = {}
         for k in (0, 60):
             start = base + timedelta(minutes=offsets[sat] + k)

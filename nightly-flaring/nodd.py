@@ -1,7 +1,14 @@
-"""Access to NOAA Open Data Dissemination (NODD) VIIRS files on public S3.
+"""Access to NOAA Open Data Dissemination (NODD) VIIRS files.
 
-Buckets are anonymous and free; they keep a rolling ~91 days. Files are read
-over HTTP byte ranges, so h5py only downloads the datasets it touches.
+Two anonymous, free copies hold the same files under the same keys:
+
+- ``aws``: public S3 buckets; M-band SDRs, GEO-TC and the cloud mask keep a
+  rolling ~90 days (NODD retention policy from 2026-09-14).
+- ``azure``: NOAA's Azure containers; on 2026-11-09 they held these products
+  back to 2023 (D63).
+
+Files are read over HTTP byte ranges, so h5py only downloads the datasets it
+touches.
 """
 
 from __future__ import annotations
@@ -32,9 +39,24 @@ PRODUCTS = {
 SDR_RE = re.compile(r"_(npp|j01|j02)_d(\d{8})_t(\d{7})_e(\d{7})_")
 JRR_RE = re.compile(r"_(npp|j01|j02|n20|n21)_s(\d{8})(\d{7})_e(\d{8})(\d{7})_")
 S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
+AZURE_ACCOUNT = "https://jpss.blob.core.windows.net"
+AZURE_CONTAINERS = {"SNPP": "snpp", "NOAA-20": "noaa-20", "NOAA-21": "noaa-21"}
+AZURE_PREFIX = "azure:"
+SOURCES = ("aws", "azure")
+
+
+def bucket_name(satellite: str, source: str = "aws") -> str:
+    """Storage location for ``satellite``; Azure names carry ``azure:``."""
+    if source == "aws":
+        return BUCKETS[satellite][0]
+    if source == "azure":
+        return AZURE_PREFIX + AZURE_CONTAINERS[satellite]
+    raise ValueError(f"source must be one of {SOURCES}, got {source!r}")
 
 
 def bucket_url(bucket: str) -> str:
+    if bucket.startswith(AZURE_PREFIX):
+        return f"{AZURE_ACCOUNT}/{bucket[len(AZURE_PREFIX) :]}"
     return f"https://{bucket}.s3.amazonaws.com"
 
 
@@ -62,7 +84,9 @@ def get_with_retries(
 
 
 def list_keys(bucket: str, prefix: str, session: requests.Session) -> list[str]:
-    """All object keys under ``prefix`` (S3 ListObjectsV2, paginated)."""
+    """All object keys under ``prefix`` (S3 ListObjectsV2 or Azure List Blobs)."""
+    if bucket.startswith(AZURE_PREFIX):
+        return _list_azure(bucket, prefix, session)
     keys: list[str] = []
     params = {"list-type": "2", "prefix": prefix}
     while True:
@@ -75,6 +99,20 @@ def list_keys(bucket: str, prefix: str, session: requests.Session) -> list[str]:
         params["continuation-token"] = token.text
 
 
+def _list_azure(bucket: str, prefix: str, session: requests.Session) -> list[str]:
+    """Azure List Blobs, paginated by ``NextMarker``."""
+    keys: list[str] = []
+    params = {"restype": "container", "comp": "list", "prefix": prefix}
+    while True:
+        resp = get_with_retries(session, bucket_url(bucket), params=params, timeout=60)
+        root = ET.fromstring(resp.content)
+        keys += [el.text for el in root.iter("Name") if el.text]
+        marker = root.findtext("NextMarker")
+        if not marker:
+            return keys
+        params["marker"] = marker
+
+
 def _hhmmsss(date: str, t: str) -> datetime:
     """'20261101', '0200577' -> datetime (tenths of a second)."""
     base = datetime.strptime(date, "%Y%m%d")
@@ -84,10 +122,10 @@ def _hhmmsss(date: str, t: str) -> datetime:
 
 
 def granule_index(
-    satellite: str, day: datetime, session: requests.Session
+    satellite: str, day: datetime, session: requests.Session, source: str = "aws"
 ) -> dict[str, dict]:
     """Map granule start (``dYYYYMMDD_tHHMMSSS``) to times and per-product keys."""
-    bucket, _ = BUCKETS[satellite]
+    bucket = bucket_name(satellite, source)
     folder = day.strftime("%Y/%m/%d")
     index: dict[str, dict] = {}
     for name, product in PRODUCTS.items():

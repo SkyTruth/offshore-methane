@@ -29,7 +29,7 @@ Format: **Choice**, **Alternatives**, **Why**, **Evidence**, **Status**.
   charge.
 - **Evidence:** retention probed 2026-11-08: no files before 2026; first full
   day 2026-08-09 (NOAA-20/21) and 2026-08-11 (SNPP).
-- **Status:** active. Backfill beyond about 91 days needs another source.
+- **Status:** active. Nights older than the AWS window: NOAA's Azure copy (D63).
 
 ### D03 Granule selection from NASA CMR footprints (v1)
 - **Choice:** 6-minute VNP03MOD/VJ103MOD/VJ203MOD footprints split into 4
@@ -1234,6 +1234,67 @@ view-angle effects and non-upstream classification remain deferred. The
   rules, cache progression and finality, compact payload, and monthly rebuild.
 - **Networked build results:** pending; the main session will fill this line.
 - **Status:** active; review material only.
+
+### D63 NOAA's Azure copy for nights older than the AWS window (v5)
+- **Choice:** `pipeline.main(source="azure")` reads the same NODD files from
+  NOAA's Azure containers, `https://jpss.blob.core.windows.net/{snpp,noaa-20,noaa-21}`,
+  under the same keys. `nodd.bucket_name` maps a satellite to an S3 bucket or
+  an `azure:` container; `nodd.list_keys` pages S3 ListObjectsV2 or Azure List
+  Blobs. The default source stays `aws`; `backfill.py` and `update.py` are
+  unchanged.
+- **Alternatives:** NASA LAADS L1B (`VNP02MOD`/`VJ102MOD`/`VJ202MOD` from
+  2012/2018/2023; Earthdata login, a NetCDF reader and a calibration
+  cross-check against IDPS); NOAA CLASS orders; AWS only (about 90 nights).
+- **Why:** from 2026-09-14 NODD keeps M-band SDRs, GEO-TC and the cloud mask on
+  AWS for 90 days. The Azure copy, listed in the same NODD registry entry
+  under the same license, held these products back to 2023 on 2026-11-09.
+- **Evidence (probes and runs 2026-11-09):**
+  - *Coverage* (day folders per month): M-bands, GEO-TC and cloud mask from
+    2023-06-22 (NOAA-20) and 2023-06 (SNPP); NOAA-21 M-bands and GEO-TC from
+    2023-02-27, cloud mask from 2023-11-13. Months with missing days: NOAA-20
+    cloud mask Dec 2023 (6/31 days), GEO-TC and mask Aug 2024 (13/31);
+    NOAA-21 mask Dec 2024 (7/31); SNPP GEO-TC Oct 2023 (11/31), all three
+    Jul 2024 (19/31), Aug 2024 (13/31 for GEO-TC and mask) and Jul 2026
+    (22/31). M-band SDRs alone start 2022-08 for SNPP and NOAA-20, without
+    GEO-TC before 2023-06. Sampled days held 1,012–1,013 granules per product.
+  - *Same files:* listings of the 8 products × 3 satellites for UTC
+    2026-08-08 to 11-08 found 2,126,617 files on AWS. Every one is on Azure
+    with the same size and MD5 (0 mismatches). The 16,772 Azure-only files on
+    days AWS still lists are all on UTC 08-10, the AWS deletion edge.
+  - *Same results:* night 2026-09-20 rerun from Azure (1,292 granules,
+    11.7 GB) reproduced all 2,584 per-granule cache files of `v5_backfill`
+    byte for byte, and its 7,637 site-nights in every column. `granule.py`
+    and `nightfire.py` are unchanged since the backfill commit `479736f`.
+  - *Older nights* (one night each; 2026 GFW site list): 2023-09-15,
+    2024-03-15, 2024-10-15 and 2025-06-15 completed 1,215–1,322 of
+    1,215–1,322 granules in 8.6–9.5 min and 10.9–11.4 GB each. A one-night
+    run reads two UTC days; a continuous run reads about 5.7 GB per night
+    (D50).
+
+    | Night (MYC year) | Flaring sites | Heat at flaring sites | Log-RH r vs MYC (n) | Median ratio | Per-pass detection, persistent (ours / MYC) |
+    | --- | --- | --- | --- | --- | --- |
+    | 2023-09-15 (2023) | 113 | 463 MW | 0.73 (101) | 0.83 | 0.65 (447/684) / 0.69 |
+    | 2024-03-15 (2024) | 151 | 458 MW | 0.79 (138) | 0.97 | 0.67 (473/704) / 0.74 |
+    | 2024-10-15 (2024) | 118 | 425 MW | 0.71 (109) | 0.93 | 0.58 (440/761) / 0.71 |
+    | 2025-06-15 (2025) | 163 | 426 MW | 0.73 (146) | 0.75 | 0.53 (496/937) / 0.64 |
+    | 2026-09-20 (2025) | 145 | 880 MW | 0.36 (125) | 0.88 | 0.48 (392/825) / 0.62 |
+
+    The 87 full 2026 nights have 85–195 flaring sites (median 130) and
+    238–963 MW (median 651, 5th percentile 441). At sites flaring on the
+    old night and on ≥10 nights in 2026, old-night heat over the site's 2026
+    median is 0.95–1.23 (n = 95–138) against 0.98 (n = 132) for 2026-09-20.
+    The lower old-night sums come from sites larger in 2026: site 4267
+    (25.18 N 52.88 E, Das Island, not in the upstream MYC catalogue) has a
+    2026 median of 79 MW and 9–30 MW on the old nights; sites 4452 and 4513
+    have MYC volumes of 0.000–0.001 bcm/yr in 2022–2025, were clear and dark
+    on the old nights, and were lit on 77/82 clear nights in 2026.
+- **Limits:** sites are the 2026 GFW list, so structures removed before 2026
+  are missing and newer ones are included. NOAA-21 passes before 2023-11-13
+  have no cloud mask and are never clear: on 2023-09-15 its 17,663 site
+  passes held 297 detections, all counted under cloud. 2025-06-15 had 33
+  not-observed site-nights, all at 59–72° N. Each old night is one sample.
+- **Status:** active (v5); default source `aws`. The NASA L1B calibration
+  comparison over the 2023–2026 overlap is not done.
 
 ## V5 development evidence (2026-11-08)
 

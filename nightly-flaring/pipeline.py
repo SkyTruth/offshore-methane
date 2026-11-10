@@ -46,10 +46,14 @@ def _days(start: date, end: date) -> list[date]:
     return [start + timedelta(days=i) for i in range((end - start).days + 1)]
 
 
-def build_jobs(sites: pd.DataFrame, start: date, end: date) -> list[dict]:
+def build_jobs(
+    sites: pd.DataFrame, start: date, end: date, source: str = "aws"
+) -> list[dict]:
     """Granule jobs covering local nights ``start``..``end`` for all satellites.
 
     The ~01:30 local overpasses of night N fall on UTC dates N and N+1.
+    ``source`` picks the NODD copy (``nodd.SOURCES``); Azure reaches back to
+    2023 (D63).
     """
     utc_days = _days(start, end + timedelta(days=1))
     session = requests.Session()
@@ -71,8 +75,8 @@ def build_jobs(sites: pd.DataFrame, start: date, end: date) -> list[dict]:
         index: dict[str, dict] = {}
         for d in [utc_days[0] - timedelta(days=1), *utc_days]:
             day = datetime(d.year, d.month, d.day)
-            index.update(nodd.granule_index(sat, day, session))
-        bucket = nodd.BUCKETS[sat][0]
+            index.update(nodd.granule_index(sat, day, session, source))
+        bucket = nodd.bucket_name(sat, source)
         site_xy = sites.set_index("site_id")[["lat", "lon"]]
         for gid, g in sorted(index.items()):
             if not all(k in g for k in REQUIRED):
@@ -429,8 +433,13 @@ def main(
     sites_csv: Path = SITES_CSV,
     out_dir: Path = OUT_DIR,
     max_granules: int | None = None,
+    source: str = "aws",
 ) -> pd.DataFrame:
-    """Run nights ``start``..``end`` (inclusive, local evening dates)."""
+    """Run nights ``start``..``end`` (inclusive, local evening dates).
+
+    ``source="azure"`` reads NOAA's Azure copy, which holds nights older than
+    the ~90-day AWS window (D63).
+    """
     d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
     out_dir.mkdir(parents=True, exist_ok=True)
     sites = pd.read_csv(sites_csv)
@@ -438,7 +447,7 @@ def main(
     if expected_jobs_path(out_dir, tag).exists():
         jobs = persistent_jobs([], out_dir, tag)
     else:
-        jobs = build_jobs(sites, d0, d1)
+        jobs = build_jobs(sites, d0, d1, source)
         if max_granules:
             jobs = jobs[:max_granules]
         jobs = persistent_jobs(jobs, out_dir, tag)
