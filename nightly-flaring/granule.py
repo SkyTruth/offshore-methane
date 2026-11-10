@@ -6,6 +6,9 @@ only when M10 shows a hot pixel near a site. The cloud mask is read at site pixe
 
 from __future__ import annotations
 
+import time
+import traceback
+from contextlib import ExitStack
 from datetime import datetime, timedelta
 
 import h5py
@@ -16,6 +19,8 @@ from scipy.spatial import cKDTree
 
 import nightfire as nf
 import nodd
+import orbit
+import speedup
 
 WINDOW = 2  # pixels either side of the site pixel searched for hot pixels
 MAX_SITE_PIXEL_M = 1200.0  # site must be this close to a valid pixel centre
@@ -437,25 +442,179 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
     ``job`` holds ``satellite``, ``bucket``, ``gid``, ``start`` (datetime),
     ``keys`` (product -> S3 key) and ``sites`` (list of (site_id, lat, lon)).
     """
+    with ExitStack() as stack:
+        return _process_granule(job, stack)
+
+
+def process_job(job: dict) -> dict:
+    """Worker envelope: account for empty results and failed attempts (T0)."""
+    global _SESSION
+    original = _session()
+    counter = nodd.CountingSession(original)
+    _SESSION = counter
+    metrics = {}
+    job = dict(job, _metrics=metrics)
+    wall, cpu = time.perf_counter(), time.process_time()
+    result = dict(records=[], copies=[], error=None)
+    try:
+        result["records"], result["copies"] = process_granule(job)
+    except Exception:
+        result["error"] = traceback.format_exc()
+    finally:
+        _SESSION = original
+    result["stats"] = dict(
+        bytes_fetched=counter.bytes_fetched,
+        requests=counter.requests,
+        heads=counter.heads,
+        wall_s=time.perf_counter() - wall,
+        cpu_s=time.process_time() - cpu,
+        accounting_complete=True,
+        **metrics,
+    )
+    return result
+
+
+def _process_granule(job: dict, stack: ExitStack) -> tuple[list[dict], list[dict]]:
     base = nodd.bucket_url(job["bucket"])
     keys = job["keys"]
     nbytes = 0
+    opts = speedup.options(job)
+    metrics = job.get("_metrics", {})
+
+    def full_fallback(reason):
+        metrics["geo_mode"] = "fallback_" + reason
+        config = dict(
+            job.get("speedup", {}),
+            windowed_geo=False,
+            header_prefilter=False,
+            orbit_whitelist=False,
+        )
+        return _process_granule(dict(job, speedup=config), stack)
+
+    prediction = None
+    if opts.orbit_whitelist or opts.windowed_geo:
+        try:
+            if not opts.tle_dir:
+                raise ValueError("no local TLE directory")
+            prediction = orbit.predict(job, opts.tle_dir)
+            metrics["orbit"] = "predicted"
+            if opts.orbit_whitelist and not prediction["eligible"].any():
+                metrics.update(skipped=True, orbit="outside_swath")
+                return [], []
+        except (ValueError, OSError, KeyError, RuntimeError):
+            metrics["orbit"] = "fallback_tle"
+
+    geo_file = geo_h = None
+    attrs = {}
+    if opts.header_prefilter and speedup.solar_skip(job):
+        metrics.update(prefilter="site_solar_bound", skipped=True)
+        return [], []
+    if opts.header_prefilter or opts.windowed_geo:
+        geo_file = stack.enter_context(
+            nodd.HTTPRangeFile(f"{base}/{keys['geo']}", _session(), opts.block_size)
+        )
+        geo_h = stack.enter_context(h5py.File(geo_file, "r"))
+        attrs = speedup.header(geo_h)
+    if opts.header_prefilter:
+        skip, reason = speedup.prefilter(job, opts, attrs)
+        metrics["prefilter"] = reason
+        if skip:
+            metrics["skipped"] = True
+            return [], []
+
+    l10 = q10 = None
+    sparse = sparse_file = sparse_h = nearest = None
+    if opts.windowed_geo:
+        l10, q10, b = _band(f"{base}/{keys['M10']}", "M10")
+        nbytes += b
+        if prediction is not None and l10.shape != (768, 3200):
+            try:
+                prediction = orbit.predict(job, opts.tle_dir, l10.shape)
+            except (ValueError, OSError, KeyError, RuntimeError):
+                prediction = None
+        certified, edge_sza = speedup.night_certificate(
+            attrs, job["start"], opts.night_margin_deg
+        )
+        metrics["night_edge_min_sza"] = edge_sza
+        metrics["geo_mode"] = "fallback_prediction"
+        if not keys.get("cloud"):
+            metrics["geo_mode"] = "fallback_missing_jrr"
+        elif job["start"].year < 2026:
+            # Historic sample has different GEO/JRR fill sentinels; keep full GEO
+            # until that product generation has broader valid-pixel evidence.
+            metrics["geo_mode"] = "fallback_unvalidated_jrr_epoch"
+        elif not certified:
+            metrics["geo_mode"] = "fallback_night_mask"
+        elif prediction is not None:
+            distances = speedup.footprint_distances(job, attrs)
+            excluded = (
+                distances > opts.footprint_buffer_km if distances is not None else None
+            )
+            # Sites predicted beyond the image by more than the margins cannot
+            # have a pixel within MAX_SITE_PIXEL_M; leave them out (D64).
+            far = speedup.far_outside(prediction, l10.shape, opts)
+            if not speedup.margins_cover_error(opts):
+                far[:] = False
+            excluded = far if excluded is None else (excluded | far)
+            metrics["geo_far_outside"] = int(far.sum())
+            if excluded.all():
+                # No site can be observed: the full read would return no rows.
+                metrics.update(geo_mode="all_sites_excluded", skipped=True)
+                return [], []
+            else:
+                try:
+                    sparse_file = stack.enter_context(
+                        nodd.HTTPRangeFile(
+                            f"{base}/{keys['cloud']}", _session(), opts.block_size
+                        )
+                    )
+                    sparse_h = stack.enter_context(h5py.File(sparse_file, "r"))
+                    sparse = speedup.SparseGeo(sparse_h, l10.shape)
+                    nearest = sparse.nearest(
+                        l10,
+                        np.array(job["sites"], dtype=object),
+                        prediction,
+                        opts,
+                        excluded,
+                    )
+                    if nearest is None:
+                        metrics["geo_mode"] = "fallback_" + sparse.reason
+                        sparse = None
+                    else:
+                        metrics["geo_mode"] = "windowed"
+                        metrics["geo_widened"] = sparse.widened
+                        metrics["geo_certified_misses"] = sparse.misses
+                except (KeyError, ValueError, OSError, requests.HTTPError):
+                    metrics["geo_mode"] = "fallback_jrr_layout_or_read"
+                    sparse = None
 
     geo = "All_Data/VIIRS-MOD-GEO-TC_All"
-    (lat, lon), b = _read(
-        f"{base}/{keys['geo']}", [f"{geo}/Latitude", f"{geo}/Longitude"]
-    )
-    nbytes += b
-    l10, q10, b = _band(f"{base}/{keys['M10']}", "M10")
-    nbytes += b
+    if sparse is None:
+        if geo_h is not None:
+            lat, lon = geo_h[f"{geo}/Latitude"][()], geo_h[f"{geo}/Longitude"][()]
+            nbytes += geo_file.bytes_fetched
+        else:
+            (lat, lon), b = _read(
+                f"{base}/{keys['geo']}", [f"{geo}/Latitude", f"{geo}/Longitude"]
+            )
+            nbytes += b
+    else:
+        lat, lon = sparse.lat, sparse.lon
+    if l10 is None:
+        l10, q10, b = _band(f"{base}/{keys['M10']}", "M10")
+        nbytes += b
     valid = np.isfinite(l10) & (lat > nf.FLOAT_FILL_MAX) & (lon > nf.FLOAT_FILL_MAX)
+    if sparse is not None:
+        valid = np.isfinite(l10) & sparse.valid
     nrow, ncol = lat.shape
 
     # Site -> nearest valid pixel.
     if not valid.any():
         return [], []
     sites = np.array(job["sites"], dtype=object)
-    rows, cols, dist_m = site_pixels(lat, lon, l10, sites)
+    rows, cols, dist_m = (
+        nearest if sparse is not None else site_pixels(lat, lon, l10, sites)
+    )
     inside = (
         (dist_m < MAX_SITE_PIXEL_M)
         & (rows > 0)
@@ -467,11 +626,19 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
         return [], []
     sites = sites[inside]
     rows, cols, dist_m = rows[inside], cols[inside], dist_m[inside]
+    if sparse is not None:
+        sparse.ensure(zip(rows, cols))
+        failure = sparse.check(
+            l10, job["start"] + timedelta(seconds=GRANULE_SECONDS / 2)
+        )
+        if failure:
+            return full_fallback(failure)
 
     mid = job["start"] + timedelta(seconds=GRANULE_SECONDS / 2)
     sza = np.full(lat.shape, np.nan)
-    sza[valid] = nf.solar_zenith_deg(lat[valid], lon[valid], mid)
-    night = valid & (sza >= SZA_NIGHT)
+    located = valid if sparse is None else valid & np.isfinite(lat) & np.isfinite(lon)
+    sza[located] = nf.solar_zenith_deg(lat[located], lon[located], mid)
+    night = valid & (sza >= SZA_NIGHT) if sparse is None else valid.copy()
     if not night[rows, cols].any():
         return [], []
 
@@ -482,6 +649,13 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
 
     clusters = candidate_clusters(hot10, l10, rows, cols)
     cand = {rc for cluster in clusters for rc in cluster["pixels"]}
+    if sparse is not None:
+        # Covers Planck footprint neighbours, cluster/peak positions, merge
+        # distances, RH centroids and all downstream lat/lon uses.
+        sparse.ensure(cand)
+        failure = sparse.check(l10, mid)
+        if failure:
+            return full_fallback(failure)
 
     # Stage 2: confirmation bands and Planck fit for candidate pixels.
     pixels = {}
@@ -549,9 +723,18 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
     # Cloud mask at site pixels (0 clear, 1 probably clear, 2/3 cloudy).
     clear_neighbors = np.zeros(len(sites), dtype=int)
     cloud = np.full(len(sites), -1, dtype=int)
-    if keys.get("cloud"):
-        f = nodd.HTTPRangeFile(f"{base}/{keys['cloud']}", _session())
-        with h5py.File(f, "r") as h:
+    reduced = opts.tier2_detections_only and not speedup.tier1(job, opts)
+    metrics["reduced"] = reduced
+    if keys.get("cloud") and (not reduced or copies):
+        if sparse_h is not None:
+            h = sparse_h
+            f = None
+        else:
+            f = stack.enter_context(
+                nodd.HTTPRangeFile(f"{base}/{keys['cloud']}", _session())
+            )
+            h = stack.enter_context(h5py.File(f, "r"))
+        if h is not None:
             ds = h["CloudMask"]
             if ds.shape == lat.shape:
                 for copy in copies:
@@ -562,13 +745,22 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
                         cm,
                         int(np.isin(window, [0, 1]).sum()) - int(cm in (0, 1)),
                     )
-                cloud = np.array([int(ds[r, c]) for r, c in zip(rows, cols)])
-                for k, (r, c) in enumerate(zip(rows, cols)):
-                    window = ds[r - 1 : r + 2, c - 1 : c + 2]
-                    clear_neighbors[k] = np.isin(window, [0, 1]).sum() - int(
-                        cloud[k] in (0, 1)
-                    )
-        nbytes += f.bytes_fetched
+                if not reduced:
+                    cloud = np.array([int(ds[r, c]) for r, c in zip(rows, cols)])
+                    for k, (r, c) in enumerate(zip(rows, cols)):
+                        window = ds[r - 1 : r + 2, c - 1 : c + 2]
+                        clear_neighbors[k] = np.isin(window, [0, 1]).sum() - int(
+                            cloud[k] in (0, 1)
+                        )
+        if f is not None:
+            nbytes += f.bytes_fetched
+
+    if sparse_file is not None:
+        nbytes += sparse_file.bytes_fetched
+    if sparse is not None and geo_file is not None:
+        nbytes += geo_file.bytes_fetched
+    if sparse is not None:
+        metrics["geo_chunks"] = len(sparse.loaded)
 
     records = []
     for k in range(len(sites)):
@@ -629,6 +821,16 @@ def process_granule(job: dict) -> tuple[list[dict], list[dict]]:
         ):
             row[key] = ";".join(str(pair[i]) for pair in copy["pairs"])
         copy_records.append(row)
+    if reduced:
+        had_nondetections = any(not r["detected"] for r in records)
+        records = [r for r in records if r["detected"]]
+        if had_nondetections:
+            # The full table serializes these optional integer coordinates as
+            # floats when non-detections introduce NaNs. Preserve those exact
+            # detection field strings after removing the other rows.
+            for rec in records:
+                for key in ("peak_row", "peak_col", "temp_k", "area_m2", "rh_peak_mw"):
+                    rec[key] = float(rec[key])
     return records, copy_records
 
 

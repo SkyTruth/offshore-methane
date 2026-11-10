@@ -1296,6 +1296,182 @@ view-angle effects and non-upstream classification remain deferred. The
 - **Status:** active (v5); default source `aws`. The NASA L1B calibration
   comparison over the 2023–2026 overlap is not done.
 
+### D64 Opt-in cold-run certificates with complete traffic accounting (v5)
+- **Choice:** keep T0 traffic accounting always on; keep the existing processing
+  defaults and 12 workers. T1/T2/T7 remain opt-in through `speedup.Options` /
+  `pipeline.main(speedup={...})`, with separate output folders per option set.
+  **Round 2 supersedes the round-1 audited footprint/index implementation and
+  its cold-run conclusion:** remove per-object audits/ETag indexes entirely.
+  T0, T4a/T4b and T5 retain their round-1 contracts. No new default is enabled.
+  - **T0:** sidecars count response-body bytes and every HTTP attempt, including
+    HEADs, errors, retries and empty jobs, plus CPU/wall time. Legacy cache
+    traffic and killed-worker in-flight traffic remain explicitly unknown.
+    Existing site/copy schemas stay unchanged.
+  - **T1 v2:** skip when every site's solar bound excludes a night pixel within
+    1.2 km, or every site is more than **25 km** outside the header G-Ring in a
+    centroid gnomonic plane. Invalid geometry retains the job. The 25 km default
+    supplies substantial margin despite zero wrong skips at 0/10/25/50/100 km.
+    Never skip using the `Day` flag: two such August jobs produced rows. Reuse
+    the opened GMTCO HDF5/range object and metadata blocks when retained.
+  - **T7:** local daily TLE-AUX text, nearest epoch within three days, SGP4,
+    WGS84 sites, GMST Earth rotation and the inertial VIIRS scan plane. Use the
+    filename's decisecond start/end (midnight rollover included); header-only
+    offline validation uses a nominal 84.5 s interval. A visible ±60° scan-angle
+    and ±10 s temporal whitelist can skip before any download. Failures/stale
+    TLEs retain jobs. Fit cross-track look-angle to native scan samples once:
+    `raw = -3219.70057624 * angle_rad + 3152.42729942`; invert the fixed
+    1:1/2:1/3:1/2:1/1:1 aggregation zones for columns. Rows use interval fraction
+    minus five lines. Keep CMR job building; no orbit-only CMR replacement.
+  - **T2 v2:** JRR chunk windows at predicted pixels with ±64 rows / ±96 columns.
+    Require a nearest finite-M10 pixel within 1.2 km, an interior window hit
+    with ±16-row bow-tie support, and no near tie. Widen once, then full GMTCO.
+    Per-site 25 km footprint exclusions can certify misses. Main-session
+    change (2026-11-10): a site predicted beyond the image by more than the
+    margins is left out, and a nearest window pixel at ≥1.2 km is a certified
+    miss, both only while the margins exceed the measured prediction error
+    plus bow-tie overlap and radius (`speedup.margins_cover_error`: rows
+    26.68 + 16 + 3, columns 14.05 + 3). Sol's round-2 rule sent every job with
+    an off-image prediction to full GMTCO, which disabled windows on all three
+    large Night samples. A job whose sites are all excluded returns no rows.
+    Image-space thresholds require all eight G-Ring vertices and 32 divisions
+    of every edge at SZA ≥96° (95° + **1° margin**), and reject an enclosed solar
+    subpoint. Finite M10 supplies the image validity mask; load site/candidate
+    halos for SZA, footprints, peaks, merges and centroids. Reuse JRR for clouds.
+    Missing JRR (including early NOAA-21), uncertain night masks/layouts,
+    prediction failures and pre-2026 products retain full reads. Historic fill
+    differences prohibit claiming whole-array equality for that generation.
+    Keep as experimental: the complete-job samples establish correctness and
+    fallbacks, not a nightly sparse saving; all three large Night jobs contain
+    unobserved sites and take the cheap full-read path.
+  - **T3:** remove the draft flag/path. Non-detections still need site/cloud
+    rows; no extra useful shortcut was demonstrated on the seven samples.
+  - **T4a/T5:** keep optional tier-1 / NOAA-20 submission priorities, with stable
+    chronological order otherwise. Tier 1 is the independently reproduced
+    736-site lit union over 88 reference nights; no MYC additions. Satellite
+    priority precedes site tier when combined. These options save no bytes.
+  - **T4b:** explicit reduced product only on granules with no tier-1 site:
+    omit non-detections and per-site cloud reads; retained detections have
+    `cloud_mask=-1`, `cloud_clear_neighbors=0`. Preserve copy records and peak
+    cloud evidence. Suppress normal aggregation; write the reduced table.
+    Exposure and clear/cloudy denominators cannot be computed from that product.
+  - **T6/harness:** control/best/control on Aug 14, Sep 20, Oct 25; historic
+    control/best on Jun 20, 2024, using that control as its reference; then best
+    at 24/32 workers on Sep 20 (12 already measured). Best means T1+T7+T2,
+    not a measured winner. No audits or reused HTTP/science caches. Rebuild
+    boundary site unions using adjacent-day CMR slices, without extra SDR
+    listings or selecting sites from reference values. A 9,000 s cumulative
+    supervisor deadline terminates the process group and marks in-flight
+    traffic unknown. Stop immediately on identity/accounting failure; persist
+    differences and fallback/skip reasons. Reject partial processing caches.
+- **Alternatives:** preserve round-1 per-object full-array proofs; use `Day`
+  skips; narrow orbit margins; trust unbounded local hits; use image thresholds
+  across the terminator; silently normalize historic fills; assume sparse
+  stress subsets establish whole-job/network savings; change production defaults.
+- **Why:** audits consume the bytes a cold run should avoid. These cheap
+  certificates use real-data margins and full-read fallback. Orbit prediction
+  supplies useful windows and avoids header requests, even though its job
+  exclusions add no jobs beyond T1 on the supplied nights. Conservative misses
+  can defeat T2; preflight avoids that extra traffic where predictions already
+  show the problem. Live timing and full-band/reference identity remain gates.
+- **Evidence (2026-11-09/10, offline):** all three nights have 3,896 job headers,
+  2,460 rows-producing jobs and 170,715 reference site rows. T1 25 km plus solar
+  skips 414/417/463 jobs (1,294 total), **zero wrong skips**. Across the five
+  tested buffers, wrong job skips remain zero; per-site 25 km exclusions also
+  miss zero reference rows. T7 drops 333/361/397 jobs (1,091 total), zero wrong
+  jobs or reference-site exclusions. Including solar gives 1,135 zero-download
+  jobs. Absolute row errors (n=170,715): median 3.86, p95 10.74, p99 14.47,
+  max 26.68; columns: 2.26, 11.31, 12.38, 14.05. Cross-track fit n=16,800
+  sampled real pixels across all seven granules. Full float32 JRR/GMTCO equality
+  holds for six 2026 arrays of 2,457,600 elements per coordinate; 2024 differs
+  at 51,200 fill pixels (`-999.3` vs `-999.0`), with zero valid-coordinate
+  differences. Finite-M10/invalid-GEO violations: 0/7 granules. Night certificates
+  accept 3/7 (true minima 126.72–128.56°), reject all Both/Day samples (true
+  minima 83.87–89.69°); edge minima are conservative within 0.030° on all seven.
+  Complete-job M10/GEO/cloud sample outputs agree with control for 7/7 granules
+  (14 CSVs excluding only `bytes_granule`), 4,384 site rows; reference nearest
+  pixels agree on all 4,382 available rows. Confirmation-band data were not
+  supplied, so this is not a real full-fit/reference-file equivalence claim.
+  Separate sparse stress checks and synthetic detection/copy tests cover that
+  path. Adjacent CMR reconstruction matches all 3,896 reference site counts
+  and omits zero reference rows. Frozen HEAD/default synthetic CSV bytes agree
+  on 2/2 files including `bytes_granule`. No live HTTP, new live benchmark,
+  commit, push, publication or backfill was run. See `outputs/speedup/REPORT.md`
+  and machine-readable evidence for tests and measurements. Offline suite: 274
+  tests; ruff check and formatting of changed Python files pass. The five
+  pre-existing unrelated formatting failures remain untouched. Baseline 220-night
+  projection remains roughly 14–15 h (D50/spec); optimized projection awaits live.
+- **Live evidence (main session, 2026-11-10; Azure; `outputs/speedup/cold_r2b/`):**
+  every run reproduced its reference: all per-granule site CSVs equal except
+  `bytes_granule`, all copy CSVs raw-identical, 0 wrong skips (2,366–2,688
+  files per run). Single-night runs read two UTC days.
+
+  | Night | Run | Workers | Download | Requests | Wall |
+  | --- | --- | --- | --- | --- | --- |
+  | 2026-08-14 | control / best / control | 12 | 15.46 / 5.94 / 15.46 GB | 23,252 / 34,767 / 23,252 | 8.4 / 6.0 / 8.3 min |
+  | 2026-09-20 | control / best / control | 12 | 15.90 / 5.96 / 15.90 GB | 24,241 / 36,525 / 24,241 | 8.3 / 6.4 / 8.3 min |
+  | 2026-09-20 | best | 24 / 32 | 5.96 GB | 36,525 | 3.5 / 3.0 min |
+  | 2026-10-25 | control / best / control | 12 | 15.47 / 4.82 / 15.47 GB | 23,387 / 35,237 / 23,387 | 8.5 / 6.3 / 9.3 min |
+  | 2024-06-20 | control / best | 12 | 14.14 / 10.02 GB | 20,907 / 18,800 | 7.9 / 5.8 min |
+
+  Best mode cuts bytes 2.6–3.2× on 2026 nights but adds ~50% requests; at 12
+  workers it is latency-bound (Azure first byte 0.44 s; 13–17 MB/s). At 32
+  workers it reaches 33 MB/s, near the 34–37 MB/s link, 2.8× faster than
+  control (3.0 vs 8.3 min). Job paths on 2026-09-20 (n=1,292): windowed 847
+  (5.70 GB), orbit skip 363, header skip 49, solar skip 5, night-mask fallback
+  28 (0.26 GB); 68,155 far-outside site predictions left out and 6,343
+  certified misses. 2024-06-20 saves only the skips: 777 jobs use full GMTCO
+  (pre-2026 fill sentinels), 7 lack JRR.
+- **Main-session operational changes:** `pipeline.build_jobs` lists days in
+  parallel (16 threads, merged in day order; 3 nights in 16 s), since serial
+  listing would take ~40 min before a 220-night run; `backfill.main` passes
+  `source` and `speedup` through.
+- **Status:** T0 active. T1 v2 + T7 + T2 v2 ("best") at 32 workers passed live
+  identity on four nights and runs the 2026 backlog (01-01..08-08,
+  `outputs/v5_backlog_2026/`); still opt-in, not the default. T4/T5 optional
+  orderings; T4b reduced product experimental; T3 removed.
+
+### D65 2026 backlog from Azure with the D64 fast mode (v5)
+- **Choice:** local nights 2026-01-01..08-08 (220) from NOAA's Azure copy
+  (D63) with T1 v2 + T7 + T2 v2 at 32 workers (D64), through `backfill.py`
+  into `outputs/v5_backlog_2026/` (run script `outputs/backlog_2026/run_backlog.py`,
+  orbit files `outputs/backlog_2026/tle/`). `pipeline._run_pass` now keeps at
+  most 4 queued jobs per worker (`IN_FLIGHT_PER_WORKER`).
+- **Alternatives:** the current method at 12 workers (projected 14–17 h:
+  D50 3.9 min/night; live single-night controls 8.3–9.3 min per two UTC
+  days); a cloud machine next to the data in Amsterdam (not set up).
+- **Why:** the user asked for the backlog once the fast mode passed live
+  identity (D64) and for its timing.
+- **Evidence (2026-11-10):**
+  - *Deadlock:* the first attempt (06:48 UTC) built 134,364 jobs in 6.5 min,
+    then hung for 2 h with no results: CPython 3.10's `ProcessPoolExecutor`
+    blocked the main thread in `os.write` on its wake-up pipe after all jobs
+    were submitted at once (all 32 workers idle). Earlier runs submitted at
+    most 36,875. With bounded submission, 80,000 jobs passed through 32
+    workers in 15 s; test `test_bounded_completed_limits_queue_and_keeps_order`.
+  - *Run:* restarted 08:51:30 UTC from the frozen job list, done 13:59:48 UTC:
+    **308.3 min** (processing 292.3 min, then aggregation and MYC
+    validation), 134,364/134,364 granules, 0 errors, 586.7 GB (2.67 GB per
+    night; 33.4 MB/s, the link limit). Throughput fell from 503 to 428
+    granules/min as summer nights brought more night-mask fallbacks.
+  - *Results:* 1,680,140 site-nights (7,637 × 220): clear, no flare 56.9%;
+    cloudy 40.7%; flaring 1.61%; flaring under cloud 0.73%; not observed
+    0.10% (1,711, mostly May–July at high latitude). Flaring sites per night
+    median 124 (range 63–227) against 130 (85–195) on the 87 later nights;
+    summed heat median 552 MW (140–1,015) against 651 MW (238–963). Against
+    MYC25Q4 2025: log-RH r = 0.75 (n = 503), median ratio 0.67; per-pass
+    detection at persistent sites, like-for-like, 0.58 (86,005/155,811)
+    against 0.63; persistent sites detected at least once 96.6% (344/356).
+  - *March–April:* Persian Gulf heat fell from 364–380 MW per night (Jan–Feb)
+    to 125 (Mar) and 174 (Apr), then 344 (May) and 601 (Jun); its lit share
+    of clear site-nights fell from 0.034–0.037 to 0.020. NOAA-20/21 detection
+    counts stay within 4,000–4,600 per month, so it is not a single-sensor
+    gap. SNPP is low in March and July, matching its missing Azure days
+    (25/31, 22/31); NASA CMR lists no SNPP night footprints on 07-14..16 and
+    08-04..05. The cause of the Gulf drop is not established.
+- **Status:** results in this worktree, not yet joined to the production
+  outputs or the website; code uncommitted (D63/D64/D65 changes on branch
+  `t3/azure-archive-test`).
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

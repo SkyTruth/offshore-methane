@@ -18,8 +18,13 @@ import json
 import sys
 import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    wait,
+)
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -32,6 +37,7 @@ if str(HERE) not in sys.path:
 import granule  # noqa: E402
 import granule_coverage  # noqa: E402
 import nodd  # noqa: E402
+import speedup as speed  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 SITES_CSV = OUT_DIR / "gfw_oil_sites.csv"
@@ -40,6 +46,8 @@ SZA_CLEAR = 97.0  # clear-overpass rule (MYC25Q4 README)
 BCM_PER_MW_YEAR = 0.0116  # John Zink calibration slope (MYC25Q4 README)
 SLICE_MARGIN = timedelta(seconds=20)
 REQUIRED = ("geo", "M10", "M11", "M12", "M13")
+LISTING_THREADS = 16  # parallel day listings in build_jobs
+IN_FLIGHT_PER_WORKER = 4  # bounded submission queue in _run_pass
 
 
 def _days(start: date, end: date) -> list[date]:
@@ -56,7 +64,6 @@ def build_jobs(
     2023 (D63).
     """
     utc_days = _days(start, end + timedelta(days=1))
-    session = requests.Session()
     jobs = []
     for sat, short_name in granule_coverage.PRODUCTS.items():
         frames = []
@@ -73,9 +80,16 @@ def build_jobs(
         for col in ("slice_start", "slice_end"):
             slices[col] = pd.to_datetime(slices[col]).dt.tz_convert(None)
         index: dict[str, dict] = {}
-        for d in [utc_days[0] - timedelta(days=1), *utc_days]:
+        days = [utc_days[0] - timedelta(days=1), *utc_days]
+
+        def listing(d: date) -> dict[str, dict]:
             day = datetime(d.year, d.month, d.day)
-            index.update(nodd.granule_index(sat, day, session, source))
+            return nodd.granule_index(sat, day, requests.Session(), source)
+
+        # Listings are latency-bound; list days in parallel, merge in day order.
+        with ThreadPoolExecutor(LISTING_THREADS) as pool:
+            for part in pool.map(listing, days):
+                index.update(part)
         bucket = nodd.bucket_name(sat, source)
         site_xy = sites.set_index("site_id")[["lat", "lon"]]
         for gid, g in sorted(index.items()):
@@ -113,6 +127,33 @@ def _copies_path(job: dict, cache_dir: Path) -> Path:
     return _cache_path(job, cache_dir).with_name(f"{job['gid']}_copies.csv")
 
 
+def _stats_path(job: dict, cache_dir: Path) -> Path:
+    return _cache_path(job, cache_dir).with_suffix(".stats.json")
+
+
+def traffic_summary(jobs: list[dict], cache_dir: Path) -> dict:
+    """Actual response bytes/attempts, including failures and empty granules.
+
+    Legacy caches have unknown traffic; do not infer it from site rows.
+    """
+    stats = [
+        json.loads(_stats_path(j, cache_dir).read_text())
+        for j in jobs
+        if _stats_path(j, cache_dir).exists()
+    ]
+    attempts = [a for s in stats for a in s["attempts"]]
+    return dict(
+        accounted_jobs=len(stats),
+        unknown_jobs=len(jobs) - len(stats),
+        accounting_complete=len(stats) == len(jobs)
+        and all(a["accounting_complete"] for a in attempts),
+        bytes_fetched=sum(a["bytes_fetched"] for a in attempts),
+        requests=sum(a["requests"] for a in attempts),
+        cpu_s=sum(a["cpu_s"] for a in attempts),
+        attempts=len(attempts),
+    )
+
+
 def _write_csv_atomic(frame: pd.DataFrame, path: Path) -> None:
     """Write ``frame`` to a temporary sibling, then rename it into place."""
     tmp = path.with_name(path.name + ".tmp")
@@ -133,11 +174,12 @@ def write_manifest(jobs: list[dict], cache_dir: Path, path: Path) -> dict:
     ]
     frame = pd.DataFrame(rows, columns=["satellite", "granule", "n_sites", "complete"])
     frame.to_csv(path, index=False)
-    missing = frame[~frame.complete]
+    missing = frame.loc[~frame.complete.astype(bool)]
     summary = dict(
         expected=len(frame),
         complete=int(frame.complete.sum()),
         missing=missing[["satellite", "granule"]].values.tolist(),
+        traffic=traffic_summary(jobs, cache_dir),
     )
     print(f"manifest: {summary['complete']}/{summary['expected']} granules complete")
     return summary
@@ -158,6 +200,23 @@ def run_jobs(
     Failed granules (usually transient network errors) are retried up to
     ``attempts`` passes; any still missing are reported and left uncached.
     """
+    if workers < 1 or attempts < 1:
+        raise ValueError("workers and attempts must be positive")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Cache identity is independent of immutable coverage manifests. Never
+    # silently reuse a reduced/experimental result for a different mode.
+    config_path = cache_dir / "speedup_options.json"
+    configs = {json.dumps(j.get("speedup", {}), sort_keys=True) for j in jobs}
+    if len(configs) > 1:
+        raise ValueError("all jobs in a cache must use the same speedup options")
+    config = next(iter(configs), "{}")
+    if config_path.exists():
+        if json.loads(config_path.read_text()) != json.loads(config):
+            raise ValueError("cache speedup options differ; use a separate out_dir")
+    else:
+        if config != "{}" and any(cache_complete(j, cache_dir) for j in jobs):
+            raise ValueError("experimental modes require a new cache directory")
+        config_path.write_text(config)
     for attempt in range(1, attempts + 1):
         todo = [
             j
@@ -181,22 +240,86 @@ def run_jobs(
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _bounded_completed(pool, todo: list[dict], limit: int):
+    """Yield ``(future, job)`` as jobs finish, keeping at most ``limit`` queued.
+
+    Submitting every job at once deadlocks CPython 3.10's ProcessPoolExecutor
+    once its wake-up pipe fills: the 2026 backlog (134,364 jobs) hung with the
+    main thread blocked in ``os.write`` and all workers idle (D64). Submission
+    order is unchanged.
+    """
+    pending = iter(todo)
+    futures: dict = {}
+
+    def fill() -> None:
+        while len(futures) < limit:
+            job = next(pending, None)
+            if job is None:
+                return
+            futures[pool.submit(granule.process_job, job)] = job
+
+    fill()
+    while futures:
+        finished, _ = wait(futures, return_when=FIRST_COMPLETED)
+        for fut in finished:
+            yield fut, futures.pop(fut)
+        fill()
+
+
 def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
     """One parallel pass over ``todo``; returns the number of failed granules."""
     t0, done, nbytes, errors = time.time(), 0, 0, []
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(granule.process_granule, j): j for j in todo}
-        for fut in as_completed(futures):
-            job = futures[fut]
+        for fut, job in _bounded_completed(pool, todo, workers * IN_FLIGHT_PER_WORKER):
             done += 1
             try:
-                recs, copies = fut.result()
+                result = fut.result()
             except Exception:
                 errors.append({"granule": job["gid"], "satellite": job["satellite"]})
                 print(
                     f"ERROR {job['satellite']} {job['gid']}\n{traceback.format_exc()}"
                 )
+                # A killed worker cannot report traffic: keep that uncertainty
+                # explicit rather than publishing an understated complete total.
+                result = dict(
+                    records=[],
+                    copies=[],
+                    error="worker failed",
+                    stats=dict(
+                        bytes_fetched=0, requests=0, cpu_s=0, accounting_complete=False
+                    ),
+                )
+            stats_path = _stats_path(job, cache_dir)
+            stats_path.parent.mkdir(parents=True, exist_ok=True)
+            previous = (
+                json.loads(stats_path.read_text())
+                if stats_path.exists()
+                else dict(attempts=[])
+            )
+            previous["attempts"].append(
+                dict(
+                    **result["stats"],
+                    error=result["error"],
+                    completed_utc=datetime.now(timezone.utc).isoformat(),
+                    n_rows=len(result["records"]),
+                    n_copies=len(result["copies"]),
+                )
+            )
+            tmp = stats_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(previous, indent=2))
+            tmp.replace(stats_path)
+            nbytes += result["stats"]["bytes_fetched"]
+            if result["error"]:
+                if not any(
+                    e["granule"] == job["gid"] and e["satellite"] == job["satellite"]
+                    for e in errors
+                ):
+                    errors.append(
+                        {"granule": job["gid"], "satellite": job["satellite"]}
+                    )
+                print(f"ERROR {job['satellite']} {job['gid']}\n{result['error']}")
                 continue
+            recs, copies = result["records"], result["copies"]
             path = _cache_path(job, cache_dir)
             path.parent.mkdir(parents=True, exist_ok=True)
             df = pd.DataFrame(recs, columns=granule.RECORD_COLUMNS)
@@ -207,12 +330,16 @@ def _run_pass(todo: list[dict], cache_dir: Path, workers: int) -> int:
                 _copies_path(job, cache_dir),
             )
             _write_csv_atomic(df, path)
-            nbytes += int(df["bytes_granule"].max()) if len(df) else 0
+            previous["attempts"][-1]["results_written_utc"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            tmp.write_text(json.dumps(previous, indent=2))
+            tmp.replace(stats_path)
             if done % 25 == 0 or done == len(todo):
                 mins = (time.time() - t0) / 60
                 print(
                     f"{done}/{len(todo)} granules, {nbytes / 1e9:.2f} GB "
-                    f"(observed-site granules), {mins:.1f} min"
+                    f"(all attempts, including empty granules), {mins:.1f} min"
                 )
     if errors:
         print(f"{len(errors)} granules failed this pass")
@@ -434,6 +561,7 @@ def main(
     out_dir: Path = OUT_DIR,
     max_granules: int | None = None,
     source: str = "aws",
+    speedup: dict | None = None,
 ) -> pd.DataFrame:
     """Run nights ``start``..``end`` (inclusive, local evening dates).
 
@@ -451,6 +579,8 @@ def main(
         if max_granules:
             jobs = jobs[:max_granules]
         jobs = persistent_jobs(jobs, out_dir, tag)
+    if speedup is not None:
+        jobs = speed.configure(jobs, speed.Options(**speedup))
     over = run_jobs(jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", workers)
     if over.empty:
         over = pd.DataFrame(columns=granule.RECORD_COLUMNS)
@@ -469,6 +599,13 @@ def main(
     )
     (out_dir / f"run_summary_{tag}.json").write_text(json.dumps(summary, indent=2))
     copies.to_csv(out_dir / f"copies_{tag}.csv", index=False)
+    if speedup and speedup.get("tier2_detections_only"):
+        # Missing clear/non-detection exposures must never masquerade as a
+        # standard nightly product. Only explicit detection records are saved.
+        summary["reduced_mode"] = "tier2 detections only; no site-night aggregation"
+        (out_dir / f"run_summary_{tag}.json").write_text(json.dumps(summary, indent=2))
+        over.to_csv(out_dir / f"detections_and_tier1_{tag}.csv", index=False)
+        return over
     missing = missing_observations(
         jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", sites, d0, d1
     )

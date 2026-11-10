@@ -45,6 +45,31 @@ AZURE_PREFIX = "azure:"
 SOURCES = ("aws", "azure")
 
 
+class CountingSession:
+    """Count every HTTP attempt and response body, including HEAD and errors.
+
+    The wrapped session owns connection pooling. Counts are per job; unlike
+    ``HTTPRangeFile.requests``, these include HEADs and failed requests.
+    """
+
+    def __init__(self, session):
+        self.session = session
+        self.bytes_fetched = self.requests = self.heads = 0
+
+    def _request(self, method, *args, **kwargs):
+        self.requests += 1
+        self.heads += method == "head"
+        response = getattr(self.session, method)(*args, **kwargs)
+        self.bytes_fetched += len(response.content)
+        return response
+
+    def get(self, *args, **kwargs):
+        return self._request("get", *args, **kwargs)
+
+    def head(self, *args, **kwargs):
+        return self._request("head", *args, **kwargs)
+
+
 def bucket_name(satellite: str, source: str = "aws") -> str:
     """Storage location for ``satellite``; Azure names carry ``azure:``."""
     if source == "aws":
@@ -166,6 +191,7 @@ class HTTPRangeFile(io.RawIOBase):
         resp = session.head(url, timeout=60)
         resp.raise_for_status()
         self.size = int(resp.headers["Content-Length"])
+        self.etag = resp.headers.get("ETag")
         self.pos = 0
         self.cache: dict[int, bytes] = {}
         self.bytes_fetched = 0

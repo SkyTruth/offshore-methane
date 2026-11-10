@@ -26,6 +26,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `granule.py` | Processes one granule: site pixels, M10 detection, M11-M13 confirmation, Planck fit, cloud mask. |
 | `nightfire.py` | Physics: Planck function, zone thresholds, Planck fit, pixel area, radiant heat, solar zenith. |
 | `nodd.py` | NOAA file listing on AWS S3 or NOAA's Azure copy (D63), granule index, HTTP byte-range file object for h5py. |
+| `speedup.py`, `bench_speedup.py` | Opt-in cold T1/T2/T7 certificates, priority options, and bounded single-night benchmarks (D64). |
 | `validate_myc25.py` | Matches a run to EOG's MYC25Q4 annual sites and reports detection rates and volume agreement. |
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
@@ -83,6 +84,85 @@ Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day AWS retention. For older nights (from mid-2023),
 pass `source="azure"` to `pipeline.main` to read NOAA's Azure copy (D63).
+
+## Traffic accounting and speed experiments (D64)
+
+Every newly processed granule has a `<gid>.stats.json` sidecar alongside its
+unchanged site/copy CSVs. It records response-body bytes, HTTP attempts (HEAD
+included), CPU/wall time, empty results and failures across retries. The run
+summary totals all these attempts; older caches without sidecars are explicitly
+unknown. `bytes_granule` remains the legacy site-row diagnostic and must not be
+used for total traffic. Retain T0 accounting for future runs.
+
+All speed options default off. `pipeline.main(speedup={...})` accepts
+`header_prefilter` (T1), `orbit_whitelist` (T7), `windowed_geo` (T2),
+`tle_dir`, `footprint_buffer_km`, `night_margin_deg`, `row_margin`,
+`col_margin`, `block_size`, `tier_order`, `tier2_detections_only`,
+`satellite_first`, and `tier1_ids`; see `speedup.Options`. Use a fresh `out_dir`
+per option set. `workers` remains separate. Install `requirements.txt`, including
+`sgp4`, before using the pipeline.
+
+T1 uses a site solar bound or the header G-Ring with a **25 km buffer**; it
+never skips on the `Day` flag. T7 uses local daily TLE-AUX HDF5 files under
+`tle_dir/<snpp|noaa-20|noaa-21>/`, the nearest epoch within three days, SGP4,
+and granule filename endpoints. Its padded ±60° / ±10 s swath can skip a job
+before any download and supplies pixel predictions for T2. Missing/stale TLEs
+retain the job. The GMTCO header handle is reused for full-read fallback.
+
+T2 reads JRR geolocation chunks around predictions (±64 rows, ±96 columns).
+A nearest pixel must be within 1.2 km, clear of the loaded window border with
+16-row bow-tie support, and free of ties; otherwise widen once then use full
+GMTCO. Loaded chunks also invalidate the certificate on a finite-M10 GEO fill
+or an SZA below 95°, including chunks loaded for later candidate halos. Predictions outside the image go directly to full reads. Whole-image
+thresholds require SZA ≥96° on the eight G-Ring points and 32 subdivisions of
+each edge; uncertain night masks, missing JRR, and pre-2026 data use full GMTCO.
+Finite M10 is the image validity mask (zero finite-M10/GEO-fill violations in
+all seven samples). Site, cluster, peak and footprint-neighbor coordinates are
+loaded before downstream uses; CloudMask reuses the open JRR handle.
+
+These are empirical certificates with explicit margins, replacing round 1's
+per-granule full-array audits. Six 2026 samples have exactly equal JRR/GMTCO
+float32 arrays. The 2024 sample has 51,200 differing fill pixels (`-999.3`
+versus `-999.0`); valid coordinates match, but historic sparse reads remain off.
+On three nights, T1 skips 1,294/3,896 jobs with zero wrong skips. T7 excludes
+zero of 170,715 reference site rows; maximum prediction errors are 26.7 rows
+and 14.1 columns. **T2 still needs a live value test:** all three large complete
+night sample jobs use the early full-read fallback because some sites are
+outside the image. Sparse-path stress checks use an explicitly narrower scope.
+T3 was removed: no demonstrated benefit beyond T1/T2/T7.
+
+Optional `tier_order=True` (with explicit tier-1 IDs) and
+`satellite_first="NOAA-20"` prioritize early results and save no bytes themselves.
+T4b remains a reduced product: tier-2-only granules lose non-detection site rows;
+retained detections have `cloud_mask=-1`, `cloud_clear_neighbors=0`. Copy CSVs
+retain peak-cloud evidence. Normal nightly aggregation is suppressed; output is
+`detections_and_tier1_<tag>.csv`.
+
+Run the offline planner, then the generated driver in a network-enabled session:
+
+```bash
+cd nightly-flaring
+export PYTHONDONTWRITEBYTECODE=1
+PY=/Users/jonathanraphael/.t3/worktrees/offshore-methane/t3-d5acd8c5/nightly-flaring/.venv/bin/python
+"$PY" bench_speedup.py
+"$PY" outputs/speedup/run_protocol.py > outputs/speedup/cold_r2.log 2>&1
+"$PY" -c 'import bench_speedup as b; b.main(action="report", out_dir=b.OUTPUT / "cold_r2")'
+```
+
+The driver runs control → T1+T7+T2 → control on 2026-08-14, 09-20 and 10-25,
+then control → T1+T7+T2 on 2024-06-20 (the first control becomes its reference).
+Sep 20 best at 24/32 workers follows; its first 12-worker run supplies that
+comparison. Adjacent-day CMR slices reproduce reference job site scope without
+listing extra SDR days or using reference values to select sites. Modes use
+fresh workers, HTTP caches and result folders under `outputs/speedup/cold_r2/`;
+partial caches are rejected. No geometry audits run. The supervisor stops the
+entire worker process group at the cumulative 9,000 s budget. A hard stop marks
+in-flight traffic unknown in `budget_stop.json`; incomplete runs are not timing
+evidence. Exact CSV-field/copy-byte comparisons stop on failure and write
+`failure_stop.json`. Bytes, requests, CPU, skips, fallbacks, wall time and
+identity checks appear in JSON/CSV and `LIVE_REPORT.md`. Completed measurements
+can be read on resume; no completed processing cache is timed again.
+See `outputs/speedup/REPORT.md` for offline evidence and remaining live gates.
 
 ## Monthly update and flare-out review
 

@@ -8,3 +8,4 @@ earthengine-api
 protobuf>=5.29.6,<6
 google-api-core>=2.27,<2.30
 grpcio-status>=1.71,<1.72
+sgp4>=2.27,<3

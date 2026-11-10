@@ -54,8 +54,13 @@ def main(
     out_dir: Path = pipeline.OUT_DIR / "v5_backfill",
     workers: int = 12,
     attempts: int = 5,
+    source: str = "aws",
+    speedup: dict | None = None,
 ) -> None:
-    """Run local nights ``start``..``end`` into ``out_dir``, then validate."""
+    """Run local nights ``start``..``end`` into ``out_dir``, then validate.
+
+    ``source`` and ``speedup`` pass through to ``pipeline.main`` (D63, D64).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
@@ -65,7 +70,14 @@ def main(
     for attempt in range(1, attempts + 1):
         _status(out_dir, phase="pipeline", attempt=attempt, start=start, end=end)
         try:
-            pipeline.main(start=start, end=end, workers=workers, out_dir=out_dir)
+            pipeline.main(
+                start=start,
+                end=end,
+                workers=workers,
+                out_dir=out_dir,
+                source=source,
+                speedup=speedup,
+            )
             break
         except Exception:
             print(f"pipeline attempt {attempt} failed\n{traceback.format_exc()}")
