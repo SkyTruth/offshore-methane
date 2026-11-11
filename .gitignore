@@ -92,6 +92,6 @@ data/*
 !data/structures.csv
 !data/windows.csv
 !data/event_granule.csv
-!data/sgi_vs_sga_pixels.csv
+!data/sgi_vs_sga_pixels.parquet
 !data/models/
 !data/models/*
