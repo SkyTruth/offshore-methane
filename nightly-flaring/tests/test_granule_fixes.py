@@ -244,6 +244,6 @@ def test_main_creates_independent_output_paths(tmp_path, monkeypatch):
         out_dir=output,
     )
     assert seen == [([job], output / "overpasses_v5", 12)]
-    assert (output / "overpasses_2026-10-29_2026-10-29.csv").exists()
-    assert (output / "site_nights_2026-10-29_2026-10-29.csv").exists()
+    assert (output / "overpasses_2026-10-29_2026-10-29.parquet").exists()
+    assert (output / "site_nights_2026-10-29_2026-10-29.parquet").exists()
     assert result.iloc[0].rh_mw == 3

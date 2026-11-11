@@ -13,6 +13,7 @@ import pandas as pd
 import backfill
 import build_viewer
 import pipeline
+import store
 
 
 def last_processed(segments: list[tuple[Path, str]]) -> date:
@@ -20,8 +21,8 @@ def last_processed(segments: list[tuple[Path, str]]) -> date:
     return max(
         date.fromisoformat(
             str(
-                pd.read_csv(
-                    folder / f"site_nights_{tag}.csv", usecols=["night"]
+                store.read_segment(
+                    folder, tag, "site_nights", columns=["night"]
                 ).night.max()
             )
         )
@@ -243,9 +244,7 @@ def main(
             workers,
             accept_missing,
         )
-    result = build_viewer.main(
-        segments=build_viewer.find_segments(base), site_dir=site_dir
-    )
+    result = build_viewer.main(base=base, site_dir=site_dir)
     if publish:
         build_viewer.publish_pages(result)
     return result

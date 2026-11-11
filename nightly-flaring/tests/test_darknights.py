@@ -565,6 +565,7 @@ def test_build_writes_lazy_json_and_monthly_update_rebuilds_it(monkeypatch, tmp_
     monkeypatch.setattr(b, "find_segments", lambda *a: [(tmp_path, "fixture")])
     monkeypatch.setattr(b, "load_segments", lambda *a: (n, p))
     monkeypatch.setattr(b, "load_copies", lambda *a: c)
+    monkeypatch.setattr(b, "load_tables", lambda *a: (n, p, c))
     monkeypatch.setattr(
         b,
         "build_data",

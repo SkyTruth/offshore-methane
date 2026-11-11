@@ -3,6 +3,7 @@ h5py
 mapbox-vector-tile
 requests
 scikit-learn
+pyarrow>=17
 earthengine-api
 # Keep Earth Engine's Google stack compatible with mapbox-vector-tile's protobuf.
 protobuf>=5.29.6,<6

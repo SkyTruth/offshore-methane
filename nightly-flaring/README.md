@@ -31,6 +31,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `backfill.py` | Detached backfill runner: warms the CMR cache, runs the pipeline with retries, validates; writes `status.json` (D50). |
 | `gates_30n.py` | Evaluates the backfill gates (reviews.md, review 4) for a run folder against the v3 30-night files; writes `gates.json` and per-gate lists. |
 | `build_viewer.py` | Joins every run segment under `outputs/v5_*` into one night series and builds the website in `outputs/site/` (page with static data, aggregates, basemap and explainer; hashed yearly night chunks; per-site pass files; image chips); `publish_pages` deploys it to GitHub Pages (D51, D52). |
+| `store.py` | Fixed Arrow schemas, legacy-frame readers, CSV conversion and the merged night-partitioned Parquet store (D69). |
 | `flareouts.py` | Source-centred High / Mid / Watch thermal-departure evidence cards; recalibrates from combined nights and copies on each build (D58). |
 | `emit.py` | Public EMIT overpasses, browse links and optional Earth Engine CH4-index / true-colour chips cached under `outputs/emit_cache/` (D59). |
 | `darknights.py` | Clear dark runs with per-night evidence, compact EMIT scene references and a persistent render queue (D62). |
@@ -39,7 +40,7 @@ under CC BY-NC 4.0: <https://doi.org/10.5281/zenodo.23091822>.
 | `viewer_template.html` | Page template for the viewer (d3 + topojson-client from CDN). |
 | `tests/` | Unit tests for `nightfire.py` and the nightly aggregation. |
 | `docs/` | `explainer.md` and its figures (`explainer/`: charts from `make_figures.py`, real VIIRS image chips from `make_chips.py`), `reviews.md` (council findings), `decisions.md` (local choices with evidence). |
-| `outputs/` | Generated CSVs and the per-granule cache (git-ignored). |
+| `outputs/` | Segment Parquet exports, the merged night store, small CSVs and per-granule caches (git-ignored). |
 
 ## Running
 
@@ -92,6 +93,104 @@ Scripts use `# %%` cells and a parameterised `main()`, per `AGENTS.md`. Dates
 are local evening dates; night N uses overpasses on UTC dates N and N+1, which
 must be within NOAA's ~91-day AWS retention. For older nights (from mid-2023),
 pass `source="azure"` to `pipeline.main` to read NOAA's Azure copy (D63).
+
+## Storage and local operations (D69)
+
+`pipeline.main` writes `overpasses_<tag>.parquet`, `site_nights_<tag>.parquet`
+and `copies_<tag>.parquet` with fixed Arrow schemas and zstd compression.
+`store.read_segment(folder, tag, table)` prefers Parquet and falls back to legacy CSV.
+It restores the CSV frame's values, dtypes, columns and index, including exact
+timestamp text. Optional columns keep their physical types on quiet nights.
+Mixed audit fields use typed struct children; D69 records the schema choices.
+
+The website's default build and `update.main` sync and read the merged store:
+
+```text
+outputs/store/overpasses/night=YYYY-MM-DD/part.parquet
+outputs/store/site_nights/night=YYYY-MM-DD/part.parquet
+outputs/store/copies/night=YYYY-MM-DD/part.parquet
+outputs/store/_segments.json
+```
+
+`night` occurs in the directory name, outside the file schema. Site-nights use
+their evening date; passes use `(time_utc + site_lon/15 h - 12 h).date()`;
+copies use the same rule with `centroid_lon`, including unassigned copies; a
+copy with no centroid longitude uses its UTC date.
+For passes, longitude comes from the site catalog, then that site's coordinates
+in the row's source segment's site-nights. If both are missing, the partition
+is the pass's UTC date; the row is retained until the website's `build_data`
+drops unknown sites. Provenance columns `_segment` and `_row` restore the legacy
+merged row order. `_time_utc_text` preserves the original timestamp spelling;
+all three are physical provenance fields, removed by the legacy-frame reader.
+The manifest retains the ordered segments, SHA-256 content hashes of the exports
+the reader selects (Parquet when present, else CSV), the jobs manifest and
+optional site catalog, the merged frame metadata, and a digest of the code and
+library versions that decide the store's contents. A changed or reordered
+source, or a changed digest, requires a rebuild. An unchanged prefix ingests its new last segments;
+an up-to-date sync hashes exports without decoding them. Ingest reuses the
+canonical merge over all segments and compares night contents, replacing only
+changed files. It still
+reads the older exports; it is not a streaming append. An interrupted write
+leaves a temporary sibling; readers accept only `part.parquet` and a completed
+manifest. Run sync again after an interrupted materialization.
+
+Local writers wait for an exclusive `<root>/.lock` held through rebuild,
+ingest or sync. A plain read holds a shared lock, and `load_tables` holds the
+exclusive lock across sync and its three reads, so readers see a completed store.
+Temporary filenames include the process ID and a unique suffix. Non-local
+roots require a single writer and readers must wait until it finishes.
+
+From `nightly-flaring/`, convert the existing exports (CSV originals retained)
+or rebuild the store without building the website or enriching imagery:
+
+```bash
+env -u PROJ_DATA -u GDAL_DATA .venv/bin/python -c "import store; store.main(action='convert')"
+env -u PROJ_DATA -u GDAL_DATA .venv/bin/python -c "import store; store.main(action='rebuild')"
+env -u PROJ_DATA -u GDAL_DATA .venv/bin/python -W ignore tests/check_store_real.py
+```
+
+Conversion skips existing Parquet and missing CSV tables. Use
+`store.main(action='convert', force=True)` only to replace existing Parquet
+from the retained CSVs; by default a stale CSV cannot replace a newer export.
+
+The acceptance script runs one heavy process at a time, loads its CSV reference
+with the `build_viewer.py` of pinned commit `7bc1699` (needs full git history),
+retains independent pickles, verifies scalar
+types and float bits as well as exact frames and rebuild-plus-ingest, and
+writes measurements under
+`outputs/store_acceptance/`. Use `store.read(table, root, nights=[...],
+columns=[...])` for partition and column selection. An explicit
+`build_viewer.main(segments=[...])` retains the direct segment path.
+
+The four fixture segments occupy 2,948,304,689 CSV bytes and 318,378,158
+Parquet bytes (89.2% less). The 2025 overpass export changes from 1,302,154,710
+to 133,631,709 bytes. See [the storage acceptance report](docs/store_report.md)
+for per-table sizes, load times and peak memory.
+
+`jobs_`, `missing_observations_`, `validation_*`, `run_summary_` and
+`detections_and_tier1_` retain their existing formats. Per-granule
+`overpasses_v5/` site/copy CSVs and stats caches are unchanged. Export writing
+uses an unnamed temporary CSV stream to preserve the old parser's inference
+and float rounding, then publishes only Parquet. The converter verifies each
+file before publishing it. A value outside the schema raises an error.
+
+This final pipeline export step measured +443 MiB peak memory on the 30-night
+overpasses (828,621 rows), versus +2 MiB for HEAD's CSV write. Scaling that one
+ratio to a 2025-sized segment suggests about +5.5 GB; that extrapolation was
+not measured. The normalization is retained to preserve CSV inference and bits.
+
+`pyarrow>=17` excludes the base environment's pyarrow 8 and provides the modern
+Arrow/pandas/filesystem stack; acceptance used pyarrow 25, pandas 2.2.3 and
+NumPy 1.26. Store-root I/O uses one `pyarrow.fs` filesystem. A
+`gs://bucket/prefix` root and Hive paths are intended for a later GCS copy and
+BigQuery external tables. Timestamps use microseconds (`coerce_timestamps="us"`);
+sub-microsecond values raise rather than truncate. The real fixture's times
+are whole seconds. No directory marker objects are created on non-local roots.
+For BigQuery, use a source URI such as
+`gs://bucket/prefix/overpasses/*.parquet` with Hive partitioning enabled;
+`night` comes from the `night=YYYY-MM-DD` path. GCS moves are copy plus delete,
+not atomic; temp-then-move is atomic only on local roots. None of this was run
+against GCS or BigQuery.
 
 ## Traffic accounting and speed experiments (D64)
 
@@ -296,11 +395,11 @@ window ends. Cached review chips survive offline rebuilds. No Earthdata token is
    is 0.0116 × mean RH.
 
 Per-granule caches are versioned as `overpasses_v5`; `out_dir` contains both
-that cache and the final CSVs. Development runs use `outputs/dev_v5`, preserving
+that cache and the final Parquet exports. Development runs use `outputs/dev_v5`, preserving
 v1/v2/v3 outputs and caches.
 
 Each cache entry needs both `<satellite>/<gid>.csv` and `<gid>_copies.csv`.
-`copies_<tag>.csv` exports every confirmed copy, including unassigned groups:
+`copies_<tag>.parquet` (legacy format: `.csv`) exports every confirmed copy, including unassigned groups:
 peak position, scan/component, footprint, M10 prominence, RH75% and peak RH,
 fit/bands/rejected temperature, peak cloud mask and clear neighbours, group ID,
 size, mean/max RH, centroid, assigned site and distance. Accepted pair edge

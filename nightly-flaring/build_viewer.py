@@ -1,8 +1,8 @@
 # %%
 """Build the flaring map website from one or more pipeline run segments.
 
-A segment is a run folder holding ``site_nights_<start>_<end>.csv`` and
-``overpasses_<start>_<end>.csv``. ``find_segments`` collects every segment
+A segment is a run folder holding site-night and overpass Parquet exports
+(or legacy CSVs). ``find_segments`` collects every segment
 under ``outputs/v5_*``; ``main`` joins them into one night series and writes a
 static site to ``outputs/site/``:
 
@@ -42,6 +42,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import validate_myc25  # noqa: E402
+import store  # noqa: E402
 from pipeline import dedupe_overpasses, strict_clear  # noqa: E402
 from regions import REGIONS, region_of  # noqa: E402
 
@@ -98,9 +99,13 @@ def find_segments(
     for folder in base.glob(pattern):
         if not folder.is_dir():
             continue
-        for path in folder.glob("site_nights_*_*.csv"):
-            tag = path.stem.removeprefix("site_nights_")
-            if (folder / f"overpasses_{tag}.csv").exists():
+        tags = {
+            path.stem.removeprefix("site_nights_")
+            for suffix in ("csv", "parquet")
+            for path in folder.glob(f"site_nights_*_*.{suffix}")
+        }
+        for tag in tags:
+            if store.segment_path(folder, tag, "overpasses").exists():
                 segments.append((folder, tag))
     if not segments:
         raise FileNotFoundError(f"no run segments in {base}/{pattern}")
@@ -116,15 +121,20 @@ def granule_owners(segments: list[tuple[Path, str]]) -> dict:
     owners = {}
     for i, (folder, tag) in enumerate(segments):
         manifest = folder / f"jobs_{tag}.csv"
-        overpasses = folder / f"overpasses_{tag}.csv"
-        coverage = pd.read_csv(
-            manifest
-            if manifest.exists()
-            else overpasses
-            if overpasses.exists()
-            else folder / f"copies_{tag}.csv",
-            usecols=lambda col: col in {"satellite", "granule", "complete"},
-        )
+        if manifest.exists():
+            coverage = pd.read_csv(
+                manifest,
+                usecols=lambda col: col in {"satellite", "granule", "complete"},
+            )
+        else:
+            table = (
+                "overpasses"
+                if store.segment_path(folder, tag, "overpasses").exists()
+                else "copies"
+            )
+            coverage = store.read_segment(
+                folder, tag, table, columns=["satellite", "granule"]
+            )
         if "complete" in coverage:
             coverage = coverage[coverage.complete.eq(True)]
         for key in (
@@ -138,16 +148,22 @@ def granule_owners(segments: list[tuple[Path, str]]) -> dict:
 
 def load_segments(
     segments: list[tuple[Path, str]],
+    *,
+    _ordered: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Concatenate segments; where nights overlap the later segment wins."""
     nights, over = [], []
     owners = granule_owners(segments)
     for i, (folder, tag) in enumerate(segments):
-        n = pd.read_csv(folder / f"site_nights_{tag}.csv")
+        n = store.read_segment(folder, tag, "site_nights")
         n["_segment"] = i
+        if _ordered:
+            n["_row"] = np.arange(len(n))
         nights.append(n)
-        o = pd.read_csv(folder / f"overpasses_{tag}.csv", low_memory=False)
+        o = store.read_segment(folder, tag, "overpasses")
         o["_segment"] = i
+        if _ordered:
+            o["_row"] = np.arange(len(o))
         keep = pd.Series(
             [
                 owners.get(key) == i
@@ -163,7 +179,7 @@ def load_segments(
         pd.concat(nights, ignore_index=True)
         .sort_values("_segment", kind="stable")
         .drop_duplicates(["site_id", "night"], keep="last")
-        .drop(columns="_segment")
+        .drop(columns=[] if _ordered else ["_segment"])
         .reset_index(drop=True)
     )
     # A granule near a segment boundary is read by both segments.
@@ -171,22 +187,27 @@ def load_segments(
         pd.concat(over, ignore_index=True)
         .sort_values("_segment", kind="stable")
         .drop_duplicates(["satellite", "granule", "site_id", "time_utc"], keep="last")
-        .drop(columns="_segment")
+        .drop(columns=[] if _ordered else ["_segment"])
         .reset_index(drop=True)
     )
     return nights, over
 
 
-def load_copies(segments: list[tuple[Path, str]]) -> pd.DataFrame:
+def load_copies(
+    segments: list[tuple[Path, str]], *, _ordered: bool = False
+) -> pd.DataFrame:
     """Join source-copy exports; the latest complete granule snapshot wins.
 
     Missing exports are an error: absence needs the source reassignment check.
     """
     owners = granule_owners(segments)
     tables = [
-        pd.read_csv(folder / f"copies_{tag}.csv", low_memory=False).assign(_segment=i)
+        store.read_segment(folder, tag, "copies").assign(_segment=i)
         for i, (folder, tag) in enumerate(segments)
     ]
+    if _ordered:
+        for frame in tables:
+            frame["_row"] = np.arange(len(frame))
     nonempty = [table for table in tables if not table.empty]
     copies = pd.concat(nonempty or tables[:1], ignore_index=True)
     keep = [
@@ -197,12 +218,20 @@ def load_copies(segments: list[tuple[Path, str]]) -> pd.DataFrame:
     ]
     return (
         copies.loc[keep]
-        .drop(columns="_segment")
+        .drop(columns=[] if _ordered else ["_segment"])
         .drop_duplicates(
             ["satellite", "granule", "group_id", "peak_row", "peak_col"], keep="last"
         )
         .reset_index(drop=True)
     )
+
+
+def load_tables(
+    base: Path = OUT_DIR, root: Path | str | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Sync the night store and return the website's three legacy frames."""
+    root = base / "store" if root is None else root
+    return store.load_tables(find_segments(base), root)
 
 
 def night_series(nights: pd.DataFrame) -> list[str]:
@@ -557,13 +586,18 @@ def main(
     passes: dict | None = None,
     evidence_dir: Path | None = None,
     skip_emit: bool = False,
+    base: Path = OUT_DIR,
+    root=None,
 ) -> Path:
     """Build the website from ``segments`` (default: every ``outputs/v5_*`` run)."""
+    copies = None
     if data is None:
-        segments = segments or find_segments()
-        for folder, tag in segments:
-            print(f"segment {folder.name}: {tag}")
-        nights, over = load_segments(segments)
+        if not segments:
+            nights, over, copies = load_tables(base, root)
+        else:
+            for folder, tag in segments:
+                print(f"segment {folder.name}: {tag}")
+            nights, over = load_segments(segments)
         data, passes = build_data(nights, over)
     elif evidence_dir is None:
         raise ValueError("prebuilt data requires evidence_dir")
@@ -604,7 +638,8 @@ def main(
             if source.exists():
                 shutil.copytree(source, site_dir / folder, dirs_exist_ok=True)
     else:
-        copies = load_copies(segments)
+        if copies is None:
+            copies = load_copies(segments)
         flareout_data = flareouts.screen(nights, over, copies)
         if not skip_emit:
             emit.enrich(flareout_data, site_dir=site_dir)

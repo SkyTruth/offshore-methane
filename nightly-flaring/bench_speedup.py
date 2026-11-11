@@ -30,6 +30,7 @@ import granule_coverage
 import orbit
 import pipeline
 import speedup
+import store
 
 HERE = Path(__file__).resolve().parent
 OUTPUT = HERE / "outputs/speedup"
@@ -93,18 +94,22 @@ def tier1_ids(output: Path) -> tuple[int, ...]:
     ids = set()
     nights = set()
     for root in dict.fromkeys(REFERENCES.values()):
-        files = sorted(root.glob("site_nights_*.csv"))
-        if len(files) != 1:
+        tags = {
+            p.stem.removeprefix("site_nights_")
+            for suffix in ("csv", "parquet")
+            for p in root.glob(f"site_nights_*.{suffix}")
+        }
+        if len(tags) != 1:
             raise ValueError(f"expected one reference nightly table in {root}")
-        for frame in pd.read_csv(
-            files[0], usecols=["site_id", "status", "night"], chunksize=100000
-        ):
-            nights.update(frame.night)
-            ids.update(
-                frame.loc[
-                    frame.status.isin(["flaring", "flaring_cloud"]), "site_id"
-                ].astype(int)
-            )
+        frame = store.read_segment(
+            root, tags.pop(), "site_nights", columns=["site_id", "status", "night"]
+        )
+        nights.update(frame.night)
+        ids.update(
+            frame.loc[
+                frame.status.isin(["flaring", "flaring_cloud"]), "site_id"
+            ].astype(int)
+        )
     _write_json(path, sorted(ids))
     _write_json(
         output / "tier1_evidence.json",

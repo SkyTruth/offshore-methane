@@ -1818,6 +1818,140 @@ view-angle effects and non-upstream classification remain deferred. The
 - **Status:** results in the production `outputs/v5_backlog_2025/`; code in
   `08e8eaa` on `nightly-flaring`; website published as gh-pages `2a4f143`.
 
+### D69 Parquet segment exports and a local-night store (v5)
+- **Choice:** `pipeline.main` writes the three large exports as zstd Parquet;
+  this checkout has no `pipeline.run`. `store.py` defines fixed schemas and
+  restores the legacy CSV frame through per-file columns, dtypes and RangeIndex
+  metadata. The converter checks `assert_frame_equal(check_exact=True)` before
+  exposing each Parquet file and retains its CSV. Export writing first uses an
+  unnamed temporary CSV stream because pandas CSV parsing can change the last
+  float bits and infer a different dtype from the in-memory pipeline frame.
+  The converter skips existing Parquet and missing CSV tables; `force=True`
+  explicitly replaces Parquet from CSV. Parquet readers consolidate equal-dtype
+  columns like CSV frames, preserving pandas concat's zero-row dtype resolution.
+  The final pipeline normalization step measured +443 MiB peak memory for the
+  30-night overpasses (828,621 rows), versus +2 MiB at HEAD. Scaling that one
+  ratio to a 2025-sized export suggests +5.5 GB; that extrapolation was not
+  measured. Normalization remains to preserve legacy inference and float bits.
+  Detection, aggregation, resume and per-granule `overpasses_v5/` caches retain
+  their existing logic and formats. Small exports remain CSV/JSON as before.
+- **Alternatives:** inferring a schema per file, reconstructing timestamp text,
+  sorting only by scientific keys, or implementing ownership independently in
+  incremental ingest. The fixed schema prevents quiet-night type drift;
+  source ordinals and the canonical merge retain the existing row order and
+  pandas concat semantics.
+- **Why:** CSV segment parsing and repeated full ownership merges consume
+  memory and build time. The website's default `load_tables` syncs once and
+  reads merged night files on subsequent builds; explicit `segments` retain
+  the direct path. `update.main` uses the store path after processing.
+- **Storage:** `<root>/<table>/night=YYYY-MM-DD/part.parquet`, with `night`
+  absent from the physical file. Site-nights retain their own evening date.
+  Passes use `(time_utc + site_lon/15 h - 12 h).date()`, with the website site
+  catalog's longitude for that site, else that site's longitude from the row's
+  source segment's site-nights, else the pass's UTC date. Missing sites never
+  discard overpasses here: the frames retain them and `build_data` later drops
+  sites absent from its catalog. Copies use
+  `centroid_lon` in that formula, including unassigned copies; a copy with no
+  centroid longitude uses its UTC date. Midnight on
+  either side of Greenwich remains part of the preceding evening. `_segment` and `_row` retain the
+  segment ordinal and original row position; reads sort by them, drop them and
+  reset the RangeIndex. They survive deletion of earlier rows without changing
+  the order tokens in unrelated night files.
+- **Schema evidence:** inspected all four CSV segments in full with
+  `low_memory=False`: overpasses have 33 columns, site-nights 16, copies 40.
+  Their complete column sets agree; absent optional columns and dtype changes
+  are exercised in offline fixtures. Counts and IDs use nullable int64;
+  measurements use float64 and flags boolean. CSV blanks make overpass
+  `peak_row`/`peak_col` and copy `assigned_site` float64; metadata restores
+  those dtypes. Nullable flags restore object plus `np.nan`; all-empty string
+  fields restore float64 when inferred that way by CSV. `split_component_ids`,
+  `bands`, `fit_flag` and the four copy pair fields use struct children
+  `text:string`, `number:float64`, `integer:int64`. This retains numeric versus
+  string values after concatenating segments; chain-pair fields can contain
+  semicolon-separated values. The real complete exports have string split,
+  band and fit fields and numeric pair fields; mixed values and empty variants
+  are covered by fixtures. `time_utc` is a UTC microsecond timestamp, written
+  with `coerce_timestamps="us"` and a guard rejecting sub-microsecond values.
+  A `_time_utc_text` string companion lets equivalent instants with different
+  spellings round-trip exactly. Night dates use date32. Unknown fields,
+  incompatible values and integer-field negative zero raise errors naming the
+  table, column and offending value. Flags accept only boolean true/false or
+  blanks; numeric flags, boolean audit values and uint64 IDs are rejected.
+  All-blank nights round-trip as null dates. Omitted physical fields are null
+  and excluded again by the legacy column metadata.
+- **Operations:** `rebuild` replaces the store from the ordered segment list.
+  `ingest` requires a new last segment and unchanged recorded exports; otherwise
+  it names `rebuild` in the error. It recomputes the canonical full merge and
+  compares each night, replacing only changed files. This reads older exports
+  on ingestion; it avoids a second implementation of snapshot ownership and
+  empty-frame dtype inference. `_segments.json` records ordered absolute
+  segment paths, tags, SHA-256 content hashes of each reader-selected export
+  (Parquet if present, otherwise CSV), the jobs manifest and optional site
+  catalog, merged frame metadata, and a code digest: `store.py` as read at
+  import, the bytecode of `build_viewer.granule_owners`, `load_segments` and
+  `load_copies` as loaded, and the pandas, pyarrow and NumPy versions. The
+  digest is taken before materialising, so it describes the code that built
+  the store even if files change on disk during a long run. A changed digest
+  rebuilds the store, so a change to the merge rules, the schema or the
+  libraries cannot leave an old merge in place. The digest covers the three
+  loaders' bytecode, constants, names and default arguments; it does not
+  follow other `build_viewer` globals or helper functions. The loaders read
+  only `pd`, `np`, `store` and `granule_owners` today, and a test fails if
+  they start reading anything else. `sync` hashes file content and does no
+  materialization for an unchanged list, ingests an unchanged prefix's suffix
+  and rebuilds for changed, inserted or
+  removed segments. The completed manifest is removed before materialization
+  and published last. Readers reject a missing manifest, ignore temporary
+  siblings, and see each night file only after its temporary sibling is moved.
+  For local roots an exclusive `<root>/.lock` covers all of rebuild/ingest/sync;
+  a second writer waits. Plain reads hold shared locks; `load_tables` holds one
+  exclusive lock across sync and all three reads. Temp names include the
+  process ID and a unique suffix; each materialisation first deletes
+  `_segments.json.<pid>.<uuid>.tmp` at the root and
+  `part.parquet.<pid>.<uuid>.tmp` in the three table folders, the store's own
+  temp names; no other file under the root is
+  touched. Non-local roots require a single writer and
+  readers must wait for it to finish; no distributed lock is provided.
+- **Dependencies and portability:** require `pyarrow>=17` to exclude the base
+  environment's pyarrow 8 and use the modern Arrow/pandas/filesystem stack.
+  Tested with pyarrow 25, pandas 2.2.3, NumPy 1.26 and Python 3.10; the minimum
+  version itself is untested. All store-root I/O uses the filesystem from
+  `pyarrow.fs.FileSystem.from_uri`. Non-local writes create no directory marker
+  objects. BigQuery's source URI is `gs://bucket/prefix/overpasses/*.parquet`
+  with Hive partitioning, so `night` is obtained from its directory. `_segment`,
+  `_row` and `_time_utc_text` are physical provenance columns, hidden by the
+  legacy-frame reader. GCS moves are copy plus delete, not atomic; the atomic
+  temp rename guarantee applies only to local roots. Nothing here was run
+  against GCS or BigQuery. Sources stay local segment
+  exports; a GCS store root does not move or enrich the source caches.
+- **Measurements (2026-11-11):** four segments: 2,948,304,689 CSV bytes to
+  318,378,158 Parquet bytes, 89.2% smaller. Overpasses: 2,362,019,155 to
+  243,260,829; site-nights: 464,218,123 to 35,539,245; copies: 122,067,411 to
+  39,578,084. HEAD's CSV loader yields 5,139,701 site-nights, 18,751,171 overpasses
+  and 330,299 copies in 37.389 s, peak RSS 9,488.3 MiB. The up-to-date store loads in 20.232 s, peak RSS
+  10,220.4 MiB; full rebuild takes 59.909 s. First-three rebuild plus fourth
+  ingest matches full rebuild; ingest takes 50.012 s and preserves 1,929/1,933
+  prior files. Full load, rebuild and ingest results are recorded in [the acceptance report](store_report.md) and
+  generated by `tests/check_store_real.py`; the script runs one heavy worker
+  at a time and compares against the CSV loader of commit `7bc1699` with independent pickles,
+  per-cell object scalar types and exact float bits. SHA-256 hashing adds
+  0.122 s per warm-cache sync (0.122 s hashing versus 0.000487 s size/mtime
+  probes). The incremental worker, including strict equality checks, takes
+  160.570 s and peaks at 12,446.7 MiB RSS. On the update path a new segment
+  makes `load_tables` ingest and then read: 50.0 s + 20.2 s on this fixture,
+  against 37.4 s for the CSV loader. The acceptance script's reference loader
+  is pinned to commit `7bc1699`, the last one whose `build_viewer.py` reads the
+  segment CSVs directly, and its artifacts are written to
+  `outputs/store_acceptance/`, outside the store root.
+- **Remaining fixed-tag CSV readers:** development/research scripts
+  `dev_v4.py`, `compare_versions.py`, `report_v5.py`, `verify_qf1.py`,
+  `docs/explainer/make_chips.py`,
+  `docs/flareout_research/scripts_sol/{r2_evidence,spatial_and_peers,r2_primary_check,r2_dependence,r3_raw_audit}.py`
+  and `docs/flareout_research/scripts_opus/s00_cache.py` retain historical CSV
+  inputs. `dev_v5.py` writes diagnostic CSVs and reads per-granule caches.
+  `docs/explainer/make_figures.py` discovers current segments and now reads
+  copies through `store.read_segment`, including Parquet-only segments.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained
