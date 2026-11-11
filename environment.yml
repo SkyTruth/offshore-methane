@@ -10,7 +10,6 @@ dependencies:
   - jupyterlab_widgets
   - numpy
   - pandas
-  - pyarrow
   - ipywidgets
   - geopandas
   - pre-commit

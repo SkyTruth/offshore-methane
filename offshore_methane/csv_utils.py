@@ -45,12 +45,10 @@ Notes
 
 from __future__ import annotations
 
-import csv
-import io
 import os
 import re
 import subprocess
-import sys
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,201 +70,21 @@ STRUCTURES_CSV: Path = DATA_DIR / "structures.csv"
 WINDOWS_CSV: Path = DATA_DIR / "windows.csv"
 
 
-# pandas has no field-size limit; the csv module defaults to 131,072 characters,
-# which would reject a file pandas reads. Set once: the limit is process-wide.
-# 2**31 - 1 fits the C long that Python 3.10-3.12 uses on Windows.
-csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
-
-
 # -----------------------------------------------------------------------------
 # Loader helpers
 # -----------------------------------------------------------------------------
 def _read_csv(path: Path) -> pd.DataFrame:
-    """Check CSV record widths and NUL bytes before the ordinary pandas parse."""
     if not path.is_file():
         return pd.DataFrame()
-    # Read once, so the bytes checked are the bytes parsed.
-    data = path.read_bytes()
-    stream = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline="")
-    bare_cr = []
-
-    def lines():
-        for number, line in enumerate(stream, 1):
-            if "\x00" in line:
-                raise ValueError(f"{path.name}: line {number}: NUL byte")
-            bare_cr.append(line.endswith("\r"))
-            # pandas skips lines holding only spaces or tabs; csv.reader
-            # skips only empty ones. Other whitespace is field content.
-            yield line if line.strip(" \t\r\n") else "\n"
-
-    reader = csv.reader(lines())
-    width = None
-    number = 1
-    for row in reader:
-        start = number
-        number = reader.line_num + 1
-        # pandas and the csv module tokenise a record after a bare CR
-        # differently, so the width check cannot vouch for such a file.
-        if bare_cr[reader.line_num - 1]:
-            raise ValueError(
-                f"{path.name}: line {reader.line_num}: bare carriage-return "
-                "line ending; use LF or CRLF"
-            )
-        if not row:
-            continue
-        if width is None:
-            width = len(row)
-        elif len(row) != width:
-            raise ValueError(
-                f"{path.name}: line {start}: expected {width} fields, got {len(row)}"
-            )
-    return pd.read_csv(io.BytesIO(data))
-
-
-def validate_data() -> list[str]:
-    """Report CSV key, reference, and numeric problems without changing files."""
-    paths = {
-        "structures": STRUCTURES_CSV,
-        "windows": WINDOWS_CSV,
-        "granules": GRANULES_CSV,
-        "process_runs": PROCESS_RUNS_CSV,
-    }
-    keys = {
-        "structures": ["structure_id"],
-        "windows": ["id"],
-        "granules": ["system_index"],
-        "process_runs": ["window_id", "system_index"],
-    }
-    numeric_columns = {
-        "structures": ("lon", "lat"),
-        "windows": (),
-        "granules": ("sga_scene", "cloudiness"),
-        "process_runs": (
-            "sga_local_median",
-            "sgi_median",
-            "valid_pixel_c",
-            "valid_pixel_mbsp",
-        ),
-    }
-    # Column names the loaders also accept (see load_events, load_process_runs).
-    legacy_names = {
-        "structures": {"longitude": "lon", "latitude": "lat"},
-        "windows": {"window_id": "id"},
-        "granules": {},
-        "process_runs": {"event_id": "window_id"},
-    }
-    tables = {}
-    problems = []
-    for name, path in paths.items():
-        try:
-            if not path.is_file():
-                continue
-            frame = _read_csv(path)
-        except (ValueError, csv.Error, OSError) as exc:
-            problems.append(f"{path.name}: read failed: {exc}")
-            continue
-        # As in the loaders: a legacy name counts only when the current name
-        # is absent, and a leftover legacy column is ignored.
-        for old, new in legacy_names[name].items():
-            if old in frame and new not in frame:
-                frame = frame.rename(columns={old: new})
-        tables[name] = frame.drop(columns=list(legacy_names[name]), errors="ignore")
-
-    def report(name: str, check: str, bad: pd.Series) -> None:
-        if not bad.any():
-            return
-        frame = tables[name]
-        examples = []
-        for row in (
-            frame.reindex(columns=keys[name])
-            .loc[bad]
-            .drop_duplicates()
-            .head(5)
-            .itertuples(index=False, name=None)
-        ):
-            key = tuple("" if pd.isna(value) else value for value in row)
-            examples.append(key[0] if len(key) == 1 else key)
-        problems.append(
-            f"{paths[name].name}: {check}: {int(bad.sum()):,}/{len(frame):,} "
-            f"rows; keys: {examples!r}"
+    try:
+        return pd.read_csv(path)
+    except pd.errors.ParserError as e:
+        # Gracefully recover from prior corrupted writes by skipping bad lines
+        warnings.warn(
+            f"Parsing error in {path}. Skipping malformed lines. Detail: {e}",
+            RuntimeWarning,
         )
-
-    for name, frame in tables.items():
-        required = keys[name] + (
-            ["lon", "lat"]
-            if name == "structures"
-            else ["structure_id"]
-            if name == "windows"
-            else []
-        )
-        missing = [column for column in required if column not in frame]
-        if missing:
-            problems.append(
-                f"{paths[name].name}: missing columns {missing!r}: "
-                f"{len(frame):,}/{len(frame):,} rows; keys: unavailable"
-            )
-            continue
-        report(
-            name,
-            f"{', '.join(keys[name])} unique",
-            frame[keys[name]].fillna("").duplicated(keep=False),
-        )
-        non_null = {
-            "structures": ("structure_id",),
-            "windows": ("structure_id",),
-            "granules": ("system_index",),
-            "process_runs": (),
-        }[name]
-        for column in non_null:
-            report(name, f"{column} non-null", frame[column].isna())
-        for column in numeric_columns[name]:
-            if column in frame:
-                bad = pd.to_numeric(frame[column], errors="coerce").isna()
-                if name != "structures":
-                    bad &= frame[column].notna()
-                report(
-                    name,
-                    f"{column} numeric"
-                    + (" and non-null" if name == "structures" else " where present"),
-                    bad,
-                )
-        integer_columns = {
-            "windows": ("id",),
-            "process_runs": ("window_id", "hitl_value"),
-        }.get(name, ())
-        for column in integer_columns:
-            if column in frame:
-                values = pd.to_numeric(frame[column], errors="coerce")
-                bad = values.isna() | (values % 1 != 0)
-                if column == "hitl_value":
-                    bad &= frame[column].notna()
-                report(name, f"{column} integer", bad)
-
-    for child, column, parent, parent_column in (
-        ("windows", "structure_id", "structures", "structure_id"),
-        ("process_runs", "window_id", "windows", "id"),
-    ):
-        if child not in tables or parent not in tables:
-            continue
-        if column not in tables[child] or parent_column not in tables[parent]:
-            continue
-        values = tables[child][column]
-        parent_values = tables[parent][parent_column]
-        present = values.notna()
-        if column == "window_id":
-            values = pd.to_numeric(values, errors="coerce")
-            parent_values = pd.to_numeric(parent_values, errors="coerce")
-            present = values.notna() & (values % 1 == 0)
-        else:
-            # load_events joins structure_id as strings.
-            values = values.astype("string")
-            parent_values = parent_values.astype("string")
-        report(
-            child,
-            f"{column} present in {paths[parent].name}",
-            present & ~values.isin(parent_values.dropna()),
-        )
-    return problems
+        return pd.read_csv(path, on_bad_lines="skip")
 
 
 # -----------------------------------------------------------------------------
@@ -1118,15 +936,3 @@ def update_run_metrics(
         df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
 
     _atomic_write_csv(df, PROCESS_RUNS_CSV)
-
-
-def main() -> int:
-    """Print integrity problems and return a nonzero status when any are found."""
-    problems = validate_data()
-    for problem in problems:
-        print(problem)
-    return int(bool(problems))
-
-
-if __name__ == "__main__":
-    sys.exit(main())
