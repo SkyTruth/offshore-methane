@@ -1815,7 +1815,8 @@ view-angle effects and non-upstream classification remain deferred. The
     values and the tiles, contexts, top 25 and regional figures equal the
     baseline. Interactive in 375 ms, range statistics 2.3 ms, heap 52 MB. EMIT
     carousel checks pass.
-- **Status:** results in the production `outputs/v5_backlog_2025/`.
+- **Status:** results in the production `outputs/v5_backlog_2025/`; code in
+  `08e8eaa` on `nightly-flaring`; website published as gh-pages `2a4f143`.
 
 ## V5 development evidence (2026-11-08)
 
