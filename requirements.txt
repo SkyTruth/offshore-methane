@@ -2,7 +2,6 @@ earthengine-api
 geemap
 jupyter
 numpy
-pyarrow
 ipywidgets
 pre-commit
 ruff

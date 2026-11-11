@@ -184,19 +184,6 @@ CSV conventions
 - Numeric fields (e.g., medians, valid_pixel_*) use blanks for missing.
 - `process_runs.system_index` is blank to mark a window with “no granules found”.
 
-### Data validation and pixel analysis
-
-Run `python -m offshore_methane.csv_utils` to check the four store CSVs for
-key, reference, and numeric problems without modifying them. It prints each
-problem and exits 1 when any are found, or 0 when clean. CSV reads reject
-malformed row widths and NUL bytes before parsing: every row needs the same
-number of fields as the header, so a hand-edited row keeps its trailing commas
-for empty values.
-
-The pixel analysis table is stored separately as zstd-compressed Parquet
-(190,231 rows). Read it with `pd.read_parquet("data/sgi_vs_sga_pixels.parquet")`
-after `import pandas as pd`; `pyarrow` is included in the environment.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. All contributions must pass linting with `ruff` and the test suite before submission.

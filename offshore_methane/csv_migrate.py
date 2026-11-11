@@ -23,8 +23,6 @@ Or as a module:
 
 from __future__ import annotations
 
-import csv
-
 from pathlib import Path
 from typing import Optional, Tuple
 import os
@@ -466,10 +464,7 @@ def ensure_windows_header() -> bool:
         if first.lower().startswith("id,") or "structure_id" in first.lower():
             return False
         rest = f.read()
-    # csv_utils._read_csv rejects a header wider or narrower than its rows.
-    names = ["id", "structure_id", "start", "end", "citation", "country"]
-    n = len(next(csv.reader([first])))
-    header = ",".join(names[:n] + [f"extra{i}" for i in range(n - len(names))]) + "\n"
+    header = "id,structure_id,start,end,citation,country\n"
     tmp = path.with_suffix(path.suffix + ".tmpheader")
     with open(tmp, "w", newline="") as out:
         out.write(header)
