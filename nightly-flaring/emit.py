@@ -20,6 +20,11 @@ CMR_URL = "https://cmr.earthdata.nasa.gov/search/granules.json"
 PRODUCTS = ("EMITL2BCH4ENH", "EMITL1BRAD")
 COLLECTION = "NASA/EMIT/L1B/RAD"
 CHIP_RECIPE = "hitl-v7"
+RECIPES = (CHIP_RECIPE, "hitl-v6", "hitl-v5", "hitl-v4", "hitl-v3")
+# A source's centre moves when a longer record changes its detections (D68).
+# Reuse a scene's chip rendered within this distance: the 30 km chip's source
+# ring has a 410 m inner radius, and the coverage check uses a 300 m disc.
+REUSE_M = 300
 NO_DATA_MESSAGE = (
     "No EMIT data at the source in this scene (it falls between image strips)"
 )
@@ -384,43 +389,130 @@ def usable_chips(imagery: dict) -> bool:
     )
 
 
-def cached_chips(scene: dict, unit: dict, cache_dir: Path) -> dict | None:
+def _read_chip(folder: Path, recipe: str) -> dict | None:
     from PIL import Image
 
-    for recipe in (CHIP_RECIPE, "hitl-v6", "hitl-v5", "hitl-v4", "hitl-v3"):
-        folder = chip_folder(scene, unit, cache_dir, recipe)
-        try:
-            path = folder / "metadata.json"
-            result = json.loads(path.read_text())
-            if result["status"] not in ("available", "no_data"):
-                continue
-            if "source_coverage" not in result:
-                result.update(png_coverage(folder / "ch4.png"))
-                if result["source_coverage"] == "no_data":
-                    result.update(status="no_data", message=NO_DATA_MESSAGE)
-                path.write_text(json.dumps(result, indent=2))
-            # No-data is final, including a legacy tile: it has no chips to show.
+    try:
+        path = folder / "metadata.json"
+        result = json.loads(path.read_text())
+        if result["status"] not in ("available", "no_data"):
+            return None
+        if "source_coverage" not in result:
+            result.update(png_coverage(folder / "ch4.png"))
             if result["source_coverage"] == "no_data":
-                return {**result, "status": "no_data", "message": NO_DATA_MESSAGE}
+                result.update(status="no_data", message=NO_DATA_MESSAGE)
+            path.write_text(json.dumps(result, indent=2))
+        # No-data is final, including a legacy tile: it has no chips to show.
+        if result["source_coverage"] == "no_data":
+            return {**result, "status": "no_data", "message": NO_DATA_MESSAGE}
+        try:
+            for name in ("ch4.png", "rgb.png"):
+                with Image.open(folder / name) as im:
+                    im.verify()
+        except (OSError, ValueError):
+            result.update(_coverage(None, None, "unreadable_chip"))
+        return {
+            **result,
+            "cache_folder": str(folder),
+            # Older recipes may show missing data as black, not grey.
+            **({"legacy_render": True} if recipe != CHIP_RECIPE else {}),
+            **(
+                {"needs_render": True}
+                if recipe != CHIP_RECIPE or result["source_coverage"] == "unknown"
+                else {}
+            ),
+        }
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+_CENTRES: dict[Path, dict[str, list]] = {}
+
+
+def _centre_index(cache_dir: Path) -> dict[str, list]:
+    """Scene id -> [(folder, recipe, lat, lon)] for chips that record a centre."""
+    if cache_dir not in _CENTRES:
+        index: dict[str, list] = {}
+        for path in sorted((cache_dir / "chips").glob("*/metadata.json")):
             try:
-                for name in ("ch4.png", "rgb.png"):
-                    with Image.open(folder / name) as im:
-                        im.verify()
-            except (OSError, ValueError):
-                result.update(_coverage(None, None, "unreadable_chip"))
-            return {
-                **result,
-                "cache_folder": str(folder),
-                # Older recipes may show missing data as black, not grey.
-                **({"legacy_render": True} if recipe != CHIP_RECIPE else {}),
-                **(
-                    {"needs_render": True}
-                    if recipe != CHIP_RECIPE or result["source_coverage"] == "unknown"
-                    else {}
-                ),
-            }
-        except (OSError, ValueError, KeyError):
-            pass
+                meta = json.loads(path.read_text())
+                lat, lon = meta["centre"]
+                entry = (path.parent, meta["recipe_version"], lat, lon)
+                index.setdefault(meta["scene_id"], []).append(entry)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        _CENTRES[cache_dir] = index
+    return _CENTRES[cache_dir]
+
+
+def _offset_m(lat: float, lon: float, other_lat: float, other_lon: float) -> float:
+    a, b = math.radians(lat), math.radians(other_lat)
+    h = (
+        math.sin((b - a) / 2) ** 2
+        + math.cos(a) * math.cos(b) * math.sin(math.radians(other_lon - lon) / 2) ** 2
+    )
+    return 6371000 * 2 * math.asin(math.sqrt(min(1.0, max(0.0, h))))
+
+
+def note_centre(folder: Path, scene: dict, unit: dict, recipe: str) -> None:
+    """Record the centre a cached chip was rendered for, once (D68)."""
+    path = folder / "metadata.json"
+    try:
+        meta = json.loads(path.read_text())
+        if "centre" in meta:
+            return
+        meta.update(
+            scene_id=scene["scene_id"],
+            centre=[unit["lat"], unit["lon"]],
+            recipe_version=meta.get("recipe_version", recipe),
+        )
+        path.write_text(json.dumps(meta, indent=2))
+    except (OSError, ValueError, KeyError):
+        return
+    _CENTRES.pop(folder.parent.parent, None)
+
+
+def note_payload_centres(payload: dict, cache_dir: Path = CACHE) -> int:
+    """Record chip centres named by a previous build's Flare-outs or dark nights.
+
+    Chips cached before D68 carry no centre; the previous payload holds the
+    source centre each was rendered for, so a moved centre can still find it.
+    """
+    pairs = []
+    for source in (payload.get("sources") or {}).values():
+        pairs += [({"scene_id": sid}, source["unit"]) for sid in source["scenes"]]
+    for card in payload.get("candidates") or []:
+        scenes = (card.get("emit") or {}).get("scenes") or []
+        pairs += [(s, card["unit"]) for s in scenes if "scene_id" in s]
+    noted = 0
+    for scene, unit in pairs:
+        for recipe in RECIPES:
+            folder = chip_folder(scene, unit, cache_dir, recipe)
+            if (folder / "metadata.json").exists():
+                note_centre(folder, scene, unit, recipe)
+                noted += 1
+    return noted
+
+
+def cached_chips(scene: dict, unit: dict, cache_dir: Path) -> dict | None:
+    for recipe in RECIPES:
+        folder = chip_folder(scene, unit, cache_dir, recipe)
+        note_centre(folder, scene, unit, recipe)
+        result = _read_chip(folder, recipe)
+        if result:
+            return result
+    # Same scene rendered for this source before its centre moved (D68).
+    near = []
+    for folder, recipe, lat, lon in _centre_index(cache_dir).get(
+        scene["scene_id"], ()
+    ):
+        offset = _offset_m(unit["lat"], unit["lon"], lat, lon)
+        if offset <= REUSE_M:
+            near.append((recipe != CHIP_RECIPE, offset, str(folder), recipe))
+    for _, offset, folder, recipe in sorted(near):
+        result = _read_chip(Path(folder), recipe)
+        if result:
+            return {**result, "centre_offset_m": round(offset)}
     return None
 
 
@@ -527,6 +619,7 @@ def fetch_chips(
     """
     folder = chip_folder(scene, unit, cache_dir)
     metadata = folder / "metadata.json"
+    centre = dict(scene_id=scene["scene_id"], centre=[unit["lat"], unit["lon"]])
     cached = cached_chips(scene, unit, cache_dir)
     if cached and not cached.get("needs_render"):
         return cached
@@ -615,9 +708,11 @@ def fetch_chips(
                 message=NO_DATA_MESSAGE,
                 **coverage,
                 recipe_version=CHIP_RECIPE,
+                **centre,
             )
             folder.mkdir(parents=True, exist_ok=True)
             metadata.write_text(json.dumps(result, indent=2))
+            _CENTRES.pop(cache_dir, None)
             return result
         stats = raw.reduceRegion(
             ee.Reducer.percentile([2, 16, 50, 84, 98]),
@@ -677,8 +772,10 @@ def fetch_chips(
                 rgb_min=rgb_vis["min"],
                 rgb_max=rgb_vis["max"],
             ),
+            **centre,
         )
         metadata.write_text(json.dumps(result, indent=2))
+        _CENTRES.pop(cache_dir, None)
         return {**result, "cache_folder": str(folder)}
     except Exception:
         return cached or dict(
@@ -725,6 +822,8 @@ def attach_chips(scene, chips, site_dir, prefix):
     chips = dict(chips)
     folder = chips.pop("cache_folder", None)
     chips.pop("caption", None)
+    chips.pop("scene_id", None)
+    chips.pop("centre", None)
     legacy = chips.pop("needs_render", False)
     chips.setdefault("source_coverage", "unknown")
     if folder and site_dir and chips.get("source_coverage") == "covered":

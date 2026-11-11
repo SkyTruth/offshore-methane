@@ -10,12 +10,15 @@ export async function checkRound2({page,context,origin,build,report,snapshot}) {
     const before=await context.newPage();await before.goto(`${origin}/site_before/`);
     try {
       const values=[];
-      for(const name of ['All','Last 7','Last 30','Last 90']) {
+      // A longer record (D68) prepends nights: compare trailing ranges and nights by date.
+      const nights=p=>p.evaluate(()=>JSON.parse(document.querySelector('#flaring-data').textContent).nights);
+      const oldNights=await nights(before),offset=(await nights(page)).indexOf(oldNights[0]);assert.ok(offset>=0);
+      for(const name of [...(offset?[]:['All']),'Last 7','Last 30','Last 90']) {
         await page.getByRole('button',{name,exact:true}).click();await before.getByRole('button',{name,exact:true}).click();
         const now=await snapshot(page),baseline=await snapshot(before),after=now.contexts,old=baseline.contexts;assert.deepEqual(after,old);assert.deepEqual(now.tiles,baseline.tiles);values.push({range:name,contexts:after});
       }
       await page.getByRole('button',{name:'All',exact:true}).click();await before.getByRole('button',{name:'All',exact:true}).click();
-      const i=await page.evaluate(()=>{const a=__timeAxes,i=150;a.showStep('night',i);return i;});
+      const i=150;await page.evaluate(i=>__timeAxes.showStep('night',i),i+offset);
       const box=await before.locator('#strip').boundingBox(),bar=await before.locator('#strip > rect').nth(i).boundingBox();await before.mouse.click(bar.x+bar.width/2,box.y+20);
       assert.deepEqual((await snapshot(page)).contexts,(await snapshot(before)).contexts);assert.deepEqual((await snapshot(page)).tiles,(await snapshot(before)).tiles);return values;
     } finally {await before.close();}

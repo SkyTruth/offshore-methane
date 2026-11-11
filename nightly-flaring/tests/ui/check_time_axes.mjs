@@ -58,12 +58,21 @@ try {
     const realSnapshot=await snapshot(page);
     if(build==='site'){
       const before=await context.newPage();await before.goto(`${origin}/site_before/`,{waitUntil:'load'});
-      const baseline=await snapshot(before);await before.close();
-      report.correctness.before=baseline;report.correctness.after=realSnapshot;
-      report.correctness.all_range_tiles=JSON.stringify(baseline.tiles)===JSON.stringify(realSnapshot.tiles);
-      report.correctness.all_range_contexts=JSON.stringify(baseline.contexts)===JSON.stringify(realSnapshot.contexts);
-      report.correctness.all_range_top25=JSON.stringify(baseline.top)===JSON.stringify(realSnapshot.top);
-      report.correctness.all_range_regions=JSON.stringify(baseline.regions)===JSON.stringify(realSnapshot.regions);
+      const baseline=await snapshot(before);
+      // A longer record (D68) prepends nights: compare the baseline's own date range.
+      const nightsOf=p=>p.evaluate(()=>JSON.parse(document.querySelector('#flaring-data').textContent).nights);
+      const oldNights=await nightsOf(before);await before.close();
+      const newNights=await nightsOf(page),offset=newNights.indexOf(oldNights[0]);
+      let compared=realSnapshot;
+      if(offset>0&&newNights.at(-1)===oldNights.at(-1)){
+        await page.evaluate(([a,b])=>__timeAxes.setRange(a,b),[offset,newNights.length-1]);await page.waitForTimeout(400);
+        compared=await snapshot(page);await page.evaluate(n=>__timeAxes.setRange(0,n-1),newNights.length);await page.waitForTimeout(400);
+      }
+      report.correctness.baseline_offset=offset;report.correctness.before=baseline;report.correctness.after=compared;
+      report.correctness.all_range_tiles=JSON.stringify(baseline.tiles)===JSON.stringify(compared.tiles);
+      report.correctness.all_range_contexts=JSON.stringify(baseline.contexts)===JSON.stringify(compared.contexts);
+      report.correctness.all_range_top25=JSON.stringify(baseline.top)===JSON.stringify(compared.top);
+      report.correctness.all_range_regions=JSON.stringify(baseline.regions)===JSON.stringify(compared.regions);
     }
     report.correctness.block_sums=await page.evaluate(()=>{
       const a=__timeAxes,ids=[a.sites.find(s=>s.rh),a.sites.find(s=>!s.rh),...a.sites.filter(s=>s.cp).slice(0,8)];

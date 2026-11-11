@@ -1739,6 +1739,84 @@ view-angle effects and non-upstream classification remain deferred. The
   two frames on, before the paint; ↑ ↓ at a list end or onto the selected row
   move focus without rebuilding the detail; locator dots update the address.
 
+### D68 2025 backlog from Azure; website rebuilt over 2025-01-01..2026-11-04 (v5)
+- **Choice:** local nights 2025-01-01..12-31 (365) from NOAA's Azure copy (D63)
+  through `backfill.py` at 32 workers with the D64 options switched on (T1 v2 +
+  T7 + T2 v2), into `outputs/v5_backlog_2025/` (run script
+  `outputs/backlog_2025/run_backlog.py`, orbit files `outputs/backlog_2025/tle/`
+  from `fetch_tle.py`, 2024-12..2026-01). `build_viewer.find_segments` joins it
+  with the three 2026 segments, so the website covers 673 nights.
+- **Alternatives:** waiting to validate windowed geolocation on 2025 granules
+  before running (below); a cloud machine next to the data (not set up).
+- **Why:** the user asked for 2025 after D67 was published, and for the website
+  to be rebuilt and published when the run stopped.
+- **Evidence (2026-11-10..11):**
+  - *Run:* started 23:38 UTC, done 15:21 UTC: **943.3 min** (processing
+    925.3 min, then aggregation and MYC validation), 237,202/237,202 granules,
+    2,023.6 GB, 3.79 M requests. Pass 1 failed 39 granules on Azure read
+    timeouts and dropped connections (32 in the first hour, 7 NOAA-21 granules
+    from 2025-11-08); pass 2 completed all 39 in 0.5 min. The missing-observation
+    file is empty.
+  - *Speed:* 249–277 granules/min against 428–503 for 2026. T7 skipped 29%
+    (1,730/6,000 sampled granules) before download and T1 dropped 5% (304/6,000)
+    after the header, as in 2026 (28%, 6%). T2 v2 did not run:
+    `granule.py` keeps full geolocation for every granule before 2026
+    (`geo_mode: fallback_unvalidated_jrr_epoch`, 3,964/3,964 sampled granules
+    that reached geolocation), because the older GEO/JRR products use other fill
+    values and windowed reads were only checked against full reads on 2026 data.
+    Bytes per granule were 8.53 MB against 4.37 MB in 2026. Checking windowed
+    against full geolocation on 2021–2025 granules would roughly halve the
+    transfer for every earlier year.
+  - *Results:* 2,787,505 site-nights (7,637 × 365): clear, no flare 55.8%;
+    cloudy 41.8%; flaring 1.58%; flaring under cloud 0.77%; not observed 0.06%
+    (1,655, all above 50° latitude, 98% of them in May–August). Flaring sites per
+    night median 120 (range 62–180) against 124.5 (63–227) for 2026-01-01..08-08;
+    summed heat median 486 MW (149–849) against 552 MW (140–1,015).
+  - *Against MYC25Q4 2025* (the same calendar year, so not the short-period
+    comparison of D65): log-RH r = 0.92 (n = 550) against 0.75 (n = 503) for
+    2026, median ratio 0.83 against 0.67; per-pass detection at persistent
+    sites, like-for-like, 0.64 (152,341/262,218) against MYC's 0.63. Sites
+    detected at least once, by MYC regime: persistent 98.3% (350/356),
+    intermittent 94.2% (161/171), sporadic 58.2% (39/67), undetected 2.5%
+    (3/118).
+  - *Persian Gulf (D65's open question):* its lit share of clear site-nights
+    stays at 0.028–0.033 in every month of 2025 (heat 170–408 MW per night),
+    so the 2026 March–April fall to 0.020 is not a yearly pattern in this record.
+  - *Build:* 673 nights × 7,637 sites in 30.4 min (first attempt 38.7 min),
+    peak resident memory 10.0 GB with 7.4 GB of swap on a 25.8 GB machine.
+    `index.html` 6.3 MB (0.93 MB gzipped, against 0.65 MB for 308 nights); the
+    2026 night chunk keeps its name (`nights-2026.fbe67e61.json`), so cached
+    copies stay valid, and `nights-2025.ee09f574.json` (3.3 MB) is new.
+  - *Flare-outs:* 38 cards (Mid 16, Watch 22) against 19 (Mid 10, Watch 9); 14
+    start in 2025. Calibration now anchors on the record's first 29 nights,
+    2025-01-01..01-30 (46 bright units, 829 reference blocks; was 2026-01-01..30,
+    42 and 385); the miss-persistence point estimate 0.25 (upper 0.31) stays below
+    the 0.59 floor, so the floor is still the value used.
+  - *EMIT chips:* the longer record moved source centres (median 128 m, 90th
+    percentile 310 m, maximum 2.4 km, n = 255 sources in both builds). Chip
+    folders are keyed on the exact centre, so the first build found almost no
+    cached dark-night chips: nights with chips fell from 144 to 63 and 378 scenes
+    waited for the 60-render budget. `emit.cached_chips` now falls back to a chip
+    of the same scene rendered within `REUSE_M` = 300 m (current recipe first,
+    then nearest); the 30 km chip's source ring has a 410 m inner radius and the
+    coverage check a 300 m disc. Chip metadata records its centre;
+    `build_viewer.main` records centres from the previous build's payloads before
+    replacing it, so chips cached before D68 are found too. Rebuilt: 70 scenes
+    reused (offset median 109 m, maximum 299 m), 60 rendered, nights with chips
+    220, 259 scenes queued for later builds. Flare-outs chips: 77 available.
+  - *Page weight:* Flare-outs' embedded data grew from 1.1 MB to 4.1 MB. Pass
+    lists are 2.7 MB of it: the five longest Watch spells (dark since
+    2025-02..09) carry 1,478–2,196 passes each (204–303 KB). A five-year record
+    would grow these further; loading a card's pass list when it opens is the
+    next step.
+  - *Checks:* 291 pytest tests pass (5 new for chip reuse). The time-axis runner
+    passes 11/11 on the real build; its comparisons with the pre-D66 page now
+    align nights by date: over 2026-01-01..11-04, all 40,817 stored single-night
+    values and the tiles, contexts, top 25 and regional figures equal the
+    baseline. Interactive in 375 ms, range statistics 2.3 ms, heap 52 MB. EMIT
+    carousel checks pass.
+- **Status:** results in the production `outputs/v5_backlog_2025/`.
+
 ## V5 development evidence (2026-11-08)
 
 This section is the current development evidence; the V4 section above is retained

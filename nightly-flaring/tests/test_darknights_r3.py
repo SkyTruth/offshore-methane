@@ -317,3 +317,51 @@ def test_legacy_display_uses_grey_preserves_palette_and_stamps(tmp_path):
         assert output.getpixel((256, 256)) == (0, 0, 0)  # source ring
     with Image.open(source) as original:
         assert original.getpixel((100, 100)) == (0, 0, 0)
+
+
+def moved(unit, metres_north):
+    return {**unit, "lat": unit["lat"] + metres_north / 111_195}
+
+
+@pytest.mark.parametrize("north,reused", [(120, True), (290, True), (320, False)])
+def test_moved_centre_reuses_the_same_scene_chip(tmp_path, north, reused):
+    scene, unit = {"scene_id": "20260822T014348_2623401_008"}, candidate()["unit"]
+    folder = chip(tmp_path, scene, unit, "#00131f", recipe=emit.CHIP_RECIPE)
+    payload = {"sources": {"u": {"unit": unit, "scenes": {scene["scene_id"]: {}}}}}
+    assert emit.note_payload_centres(payload, tmp_path) == 1
+    meta = json.loads((folder / "metadata.json").read_text())
+    assert meta["centre"] == [unit["lat"], unit["lon"]]
+    assert meta["scene_id"] == scene["scene_id"]
+    result = emit.cached_chips(scene, moved(unit, north), tmp_path)
+    if reused:
+        assert result["cache_folder"] == str(folder)
+        assert abs(result["centre_offset_m"] - north) <= 1
+        assert "needs_render" not in result
+    else:
+        assert result is None
+    other = {"scene_id": "20260822T014348_2623401_009"}
+    assert emit.cached_chips(other, moved(unit, 50), tmp_path) is None
+
+
+def test_moved_centre_prefers_current_recipe_then_nearest(tmp_path):
+    scene, unit = {"scene_id": "s1"}, candidate()["unit"]
+    far = moved(unit, 200)
+    legacy = chip(tmp_path, scene, moved(unit, 20), "#00131f")
+    current = chip(tmp_path, scene, far, "#00131f", recipe=emit.CHIP_RECIPE)
+    emit.cached_chips(scene, moved(unit, 20), tmp_path)  # exact hit notes it
+    emit.cached_chips(scene, far, tmp_path)
+    result = emit.cached_chips(scene, unit, tmp_path)
+    assert result["cache_folder"] == str(current)
+    assert legacy != current
+
+
+def test_published_imagery_omits_cache_centre(tmp_path):
+    scene, unit = {"scene_id": "s2"}, candidate()["unit"]
+    chip(tmp_path, scene, unit, "#00131f", recipe=emit.CHIP_RECIPE)
+    payload = {"candidates": [{"unit": unit, "emit": {"scenes": [scene]}}]}
+    assert emit.note_payload_centres(payload, tmp_path) == 1
+    chips = emit.cached_chips(scene, moved(unit, 100), tmp_path)
+    emit.attach_chips(scene, chips, tmp_path / "site", "dn_u")
+    assert "centre" not in scene["imagery"] and "scene_id" not in scene["imagery"]
+    assert scene["imagery"]["centre_offset_m"] == 100
+    assert (tmp_path / "site" / scene["imagery"]["ch4"]).exists()

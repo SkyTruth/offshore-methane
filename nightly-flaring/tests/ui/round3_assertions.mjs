@@ -144,17 +144,20 @@ export async function checkRound3({page,context,origin,build,report,snapshot}) {
     const baseline=await context.newPage();await baseline.goto(`${origin}/site_before/`);
     try {
       const old=await baseline.evaluate(()=>JSON.parse(document.querySelector('#flaring-data').textContent).sites.map(r=>[r[0],r[5]]));
-      const count=await page.evaluate(old=>{
+      // A longer record (D68) prepends nights: align the old record by date.
+      const nightsOf=p=>p.evaluate(()=>JSON.parse(document.querySelector('#flaring-data').textContent).nights);
+      const oldNights=await nightsOf(baseline),offset=(await nightsOf(page)).indexOf(oldNights[0]);assert.ok(offset>=0);
+      const count=await page.evaluate(([old,offset])=>{
         const a=__timeAxes,byId=new Map(old);let compared=0,mismatches=0;
         const fmt=v=>v==null?'–':v===0?'0':v>=100?v.toFixed(0):v>=10?v.toFixed(1):v>=1?v.toFixed(2):v.toFixed(3);
-        for(const s of a.sites){let j=0;for(let i=0;i<s.st.length;i++)if('FD'.includes(s.st[i])){const value=byId.get(s.id)[j++];if(value!=null){compared++;if(fmt(a.rangeStats(s,i,i).mean)!==fmt(value))mismatches++;}}}
+        for(const s of a.sites){let j=0;for(let i=offset;i<s.st.length;i++)if('FD'.includes(s.st[i])){const value=(byId.get(s.id)||[])[j++];if(value!=null){compared++;if(fmt(a.rangeStats(s,i,i).mean)!==fmt(value))mismatches++;}}}
         return {compared,mismatches};
-      },old);
+      },[old,offset]);
       assert.equal(count.compared,40817);assert.equal(count.mismatches,0);
       const nights=[0,30,90,123,150,307],displays=[];
       await page.getByRole('button',{name:'All',exact:true}).click();
       for(const i of nights) {
-        await page.evaluate(i=>__timeAxes.showStep('night',i),i);
+        await page.evaluate(i=>__timeAxes.showStep('night',i),i+offset);
         const box=await baseline.locator('#strip').boundingBox(),bar=await baseline.locator('#strip > rect').nth(i).boundingBox();await baseline.mouse.click(bar.x+bar.width/2,box.y+20);
         const now=await snapshot(page),before=await snapshot(baseline);
         assert.deepEqual(now.tiles,before.tiles);assert.deepEqual(now.contexts,before.contexts);assert.deepEqual(now.regions,before.regions);
@@ -230,7 +233,9 @@ export async function checkRound3({page,context,origin,build,report,snapshot}) {
         const after=await phone.evaluate(()=>scrollY);assert.ok(after-before>100,selector+' did not scroll: '+before+' → '+after);results.push({selector,before,after});
         if(selector.includes('spell')) {
           const labels=await phone.locator('.spell-timeline > text').allTextContents();
-          const lanes=labels.filter(t=>/^\d/.test(t));assert.equal(lanes.length,19);assert.ok(new Set(lanes).size>=18);
+          // One lane per card; a source with two spells repeats its label (D68).
+          const [cards,sources]=await phone.evaluate(()=>{const c=JSON.parse(document.querySelector('#flareouts-data').textContent).candidates;return [c.length,new Set(c.map(x=>x.unit.id)).size];});
+          const lanes=labels.filter(t=>/^\d/.test(t));assert.equal(lanes.length,cards);assert.equal(new Set(lanes).size,sources);
         }
       }
       return results;

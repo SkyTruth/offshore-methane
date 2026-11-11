@@ -576,6 +576,16 @@ def main(
     if site_dir.is_symlink():
         raise ValueError("build destination must not be a symlink")
     if site_dir.exists():
+        if evidence_dir is None and not skip_emit:
+            import emit
+
+            # Chips keep working after a longer record moves source centres.
+            for name in ("flareouts.json", "darknights.json"):
+                try:
+                    payload = json.loads((site_dir / name).read_text())
+                except (OSError, ValueError):
+                    continue
+                emit.note_payload_centres(payload)
         shutil.rmtree(site_dir)
     (site_dir / "passes").mkdir(parents=True)
     for sid, rows in passes.items():
