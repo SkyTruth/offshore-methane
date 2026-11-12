@@ -710,3 +710,118 @@ clear passes with a detection is 0.27 here vs 0.63 in MYC25Q4 (`n_det /
 n_clear`). Candidate causes: MYC counts detections whether or not the pass is
 clear, VNF triggers on M11 and M12+M13 as well as M10 (fix 6), and MYC
 association basins are wider than the 2 km nearest-site rule.
+
+## Review: Parquet exports and night-partitioned store (D69)
+
+### Round 1 (2026-11-11)
+
+Reviewers: GPT-6.1 Sol (NO-GO, 2 blockers, 2 should-fix, 1 nit) and Claude
+Opus 5.5 (NO-GO, 1 blocker, 6 should-fix, 2 nits, portability notes). Both ran
+`pytest -q tests` (321 passed) and compared the store with HEAD's
+`load_segments`/`load_copies` on the smallest real segment (`v5_30n`: 828,621
+overpasses, 229,110 site-nights, 14,791 copies; identical including float
+bits) and on synthetic multi-segment fixtures (boundary granule, incomplete
+retry, legacy segment without a manifest, empty copies export, dropped row,
+duplicate keys, mixed formats; identical except S1-05).
+
+| # | Reviewer | Severity | Finding | Resolution |
+|---|---|---|---|---|
+| S1-01 | Opus | blocker | `convert` always re-reads the CSV and replaces the Parquet. A segment first written as CSV and rewritten by the new pipeline has its fresh Parquet replaced by the stale CSV; `sync` then rebuilds from the old data. A Parquet-only segment raises `FileNotFoundError` and stops the loop. | Skip existing Parquet and missing CSVs; explicit force. `test_converter_skips_existing_parquet_unless_forced`, `test_converter_skips_missing_csv`. |
+| S1-02 | Sol, Opus | blocker (Sol), should-fix (Opus) | No writer lock. Two `sync` calls interleaved so that a valid manifest was published over the other writer's partitions: an obsolete boundary copy reappeared and the next `sync` reported `noop`. Opus: 2/40 concurrent trials raised on the shared temp name; a reader can mix old and new partitions. | Local writers wait; shared reads and one sync/read transaction. `test_two_sync_processes_serialize_complete_stores`, `test_reader_waits_for_complete_writer`, `test_load_tables_locks_across_three_reads`. |
+| S1-03 | Sol, Opus | blocker (Sol), nit (Opus) | The segment fingerprint is size + `mtime_ns`. A same-size rewrite with the mtime restored changed `rh_mw` 0.0 → 9.0 and `sync` returned `noop`. | SHA-256 of reader-selected content. `test_content_fingerprint_same_stat_rewrite`; real hashing overhead in `check_store_real.py`. |
+| S1-04 | Opus | should-fix | The overpass night uses the site catalog whenever the file exists; a `site_id` missing from it raises and aborts `sync`, `load_tables`, `build_viewer.main` and `update.main`. HEAD drops such rows in `build_data`. Re-running `fetch_gfw_oil.py` can shrink the catalog. | Catalog → source-segment longitude → UTC date, retaining rows. `test_overpass_missing_catalog_sites_use_segment_then_utc`. |
+| S1-05 | Opus | should-fix | Parquet-read frames have one block per column, CSV-read frames are consolidated; with a zero-row overpasses export, columns that are all-NaN elsewhere concatenate to `object` instead of `float64` (`temp_k`, `area_m2`). 0/4 real segments affected. | Consolidated decoded frames before concat. `test_zero_row_overpasses_concat_matches_csv` (also fails with consolidation disabled). |
+| S1-06 | Opus | should-fix | `write_export` normalises through `to_csv` + `read_csv`: +443 MiB peak on the 30-night overpasses versus +2 MiB at HEAD; about +5.5 GB extrapolated to a 2025-sized segment (one ratio, not measured). | Retained normalization; documented +443 MiB / +2 MiB and unmeasured +5.5 GB extrapolation. `test_write_export_preserves_csv_inference_and_float_rounding`. |
+| S1-07 | Opus | should-fix | `docs/explainer/make_figures.py` takes segments from `find_segments()` but reads `copies_<tag>.csv` directly, so a Parquet-only segment raises. Dev and research scripts read fixed old tags that still have CSVs. | Figure copies use `read_segment`; fixed-tag exceptions listed in D69. `test_explainer_reads_parquet_only_copies`. |
+| S1-08 | Sol, Opus | should-fix | `tests/check_store_real.py` builds its reference with the modified loader and serialises it through the encoder under test; an injected decoder fault (−0.0 → 0.0) still passed. `assert_frame_equal` treats `1 == 1.0` and `None == nan` in object columns as equal. | HEAD CSV loader and independent pickles; scalar types and float bits. `test_real_reference_uses_head_csv_loader_and_independent_pickles`, `test_real_comparison_catches_decoder_faults`. |
+| S1-09 | Sol | should-fix | Conversion gaps on hand-made frames: a flag column holding −0.0 or 2.0 is coerced to booleans without error; boolean audit values with blanks, an all-empty `night`, `uint64` ids and a boolean segment concatenated with an all-blank float segment raise unclear errors. Not shown to be reachable from the pipeline. | Fail-closed contextual errors; blank nights round-trip. `test_flags_reject_nonboolean_values`, `test_unrepresentable_values_name_table_column_value`, `test_all_blank_nights_round_trip`. |
+| S1-10 | Opus | nit | `build_viewer.main(segments=[])` used to mean "all segments" and now fails; `store.read(nights=[date])` returns nothing because it compares strings. | Empty segments discover all; dates accepted. `test_main_empty_segments_means_discover_all`, `test_read_accepts_date_nights`. |
+| S1-11 | Sol | nit | README still calls the segment exports CSV (`README.md:365`). | README identifies Parquet exports and legacy CSV (manual export-wording check). |
+| S1-12 | Opus, Sol | portability (inference; nothing run against GCS or BigQuery) | `time_utc` is written at nanosecond precision and BigQuery timestamps are microsecond; pyarrow's GCS `create_dir` writes zero-byte marker objects that a `gs://…/overpasses/*` external table could match; `fs.move` on GCS is copy + delete, so the temp-then-move guarantee holds for local roots only; `_segment`, `_row` and the `time_utc` text companion appear as user columns. | Microseconds with loss guard; no remote markers; documented URI/provenance/non-atomic moves. `test_microsecond_timestamps_and_loss_guard`, `test_nonlocal_writes_create_no_directory_markers`; real timestamp check. |
+
+### Round 2 (2026-11-11)
+
+Reviewers: GPT-6.1 Sol (NO-GO, 1 blocker, 1 should-fix) and Claude Opus 5.5
+(GO, 3 should-fix, 6 nits). `pytest -q tests`: 356 passed. Both mutated the
+round 1 fixes in scratch copies (19 and 22 mutations); every mutation made a
+regression test fail. Both re-ran the `v5_30n` comparison against HEAD's CSV
+loader (229,110 site-nights, 828,621 overpasses, 14,791 copies): identical,
+including scalar types and float bits. The main session applied the fixes
+below; the suite then gave 362 passed.
+
+| # | Reviewer | Severity | Finding | Resolution |
+|---|---|---|---|---|
+| S2-01 | Sol, Opus | blocker (Sol), should-fix (Opus) | `tests/check_store_real.py` ran `convert(..., force=True)` on every segment, so the acceptance run replaced a newer Parquet export with its stale CSV (`rh_mw` 99.0 → 0.0) and reported PASS. | Not forced; `test_acceptance_convert_keeps_newer_parquet` |
+| S2-02 | Sol | should-fix | The reference loader read moving `HEAD`; after this change is committed the reference would use the decoder under test. | Reference pinned to `7bc1699`; `test_acceptance_reference_is_pinned_before_this_change` |
+| S2-03 | Opus | should-fix | `sync` compared only segment fingerprints, so a later change to `granule_owners`, `load_segments`, `load_copies` or the encoder left the store at `noop`. | Manifest records a digest of `store.py` and the three loaders; a mismatch rebuilds; `test_code_change_rebuilds_store`, `test_code_key_covers_store_and_viewer_loaders` |
+| S2-04 | Opus | should-fix | Acceptance artifacts were written inside the store root: 5.8 GB of the fixture's 6.3 GB `outputs/store`. | Moved to `outputs/store_acceptance/` |
+| S2-05 | Opus | nit | Temp files from a crashed writer were never removed. | Removed at the start of each materialisation, under the lock; `test_materialize_removes_crashed_writer_temp_files` |
+| S2-06 | Opus | nit | A copy with no `centroid_lon` raised and stopped the build; HEAD keeps the row. 0/14,791 `v5_30n` copies affected. | Falls back to the UTC date; `test_copy_without_centroid_uses_utc_date` |
+| S2-07 | Opus | nit | D69 reports load time only for an up-to-date store. On the update path `load_tables` ingests and then reads: 50.0 s + 20.2 s on the full fixture against 37.4 s for the CSV loader. | Recorded in D69 |
+| S2-08 | Opus | nit | `read()` on a missing root creates the folder and lock file before raising; the lock wait has no timeout or message. | Not fixed |
+| S2-09 | Opus | nit | `convert` verifies with `assert_frame_equal`, which treats −0.0 and 0.0, and `1` and `1.0` in object columns, as equal. | Not fixed; the acceptance script checks float bits and scalar types |
+| S2-10 | Opus | nit | Readers now use `low_memory=False` where HEAD used the pandas default for site-nights; results are identical on all four real segments. | No change |
+
+### Round 3 (2026-11-11)
+
+Scope: the fixes the main session applied after round 2. Reviewers: GPT-6.1
+Sol (NO-GO, 2 blockers, 1 should-fix, 2 nits) and Claude Opus 5.5 (GO, 1
+should-fix, 6 nits). `pytest -q tests`: 362 passed. Both reverted S2-01, S2-02,
+S2-03, S2-05 and S2-06 one at a time and each revert failed its test. Both
+re-ran `v5_30n` against the pinned reference loader: identical (229,110
+site-nights, 828,621 overpasses, 14,791 copies); Opus repeated it with
+`centroid_lon` blanked on 200 copies: identical. The main session applied the
+fixes below; the suite then gave 366 passed.
+
+| # | Reviewer | Severity | Finding | Resolution |
+|---|---|---|---|---|
+| S3-01 | Sol, Opus | blocker (Sol), should-fix (Opus) | `_code_key` hashed the source files on disk at the end of materialisation. A process that imported the loaders before an edit rebuilt with the old code and recorded the new digest; a fresh process then returned `noop` and served the old merge (`rh_mw` 10.0 against 9.0). | Digest of `store.py` as read at import, the loaders' loaded bytecode, and the pandas, pyarrow and NumPy versions, taken before materialising; `test_code_key_describes_loaded_code_not_files_on_disk`, `test_code_key_changes_with_loader_bytecode_and_library_versions` |
+| S3-02 | Sol | blocker | The temp cleanup deleted every `*.tmp` under the store root, including a pipeline export being written by a process that does not take the store lock: the export then failed with `FileNotFoundError`. | Only `_segments.json.*.tmp` at the root and `part.parquet.*.tmp` in the three table folders are deleted; `test_materialize_removes_crashed_writer_temp_files` |
+| S3-03 | Sol, Opus | should-fix (Sol), nit (Opus) | In a depth-1 clone the pinned reference commit is absent and `test_real_reference_uses_head_csv_loader_and_independent_pickles` failed. | The test skips with the reason; the script's docstring and README state that the reference needs full history |
+| S3-04 | Sol, Opus | nit | No test kept the acceptance artifacts outside the store root. | `test_acceptance_artifacts_are_outside_the_store_root` |
+| S3-05 | Sol, Opus | nit | README, `store_report.md` and D69 still said `HEAD` for the reference loader; D69 still said missing copy coordinates raise; `store_report.md` pointed at a report file that a rerun has not yet written. | Corrected; `store_report.md` states its figures are from the round 2 run |
+| S3-06 | main session | defect in the S3-01 fix | The bytecode digest used `repr` of constants; set constants print in hash-seed order, so two processes computed different digests and the two-writer test failed. | Constants are rendered in sorted order; `test_code_key_is_stable_across_hash_seeds` |
+| S3-07 | Opus | nit | On a non-local root the cleanup runs without a lock. | D69 states a non-local root has a single writer |
+
+### Round 4 (2026-11-11)
+
+Scope: the round 3 fixes. Reviewers: GPT-6.1 Sol (GO, 2 should-fix) and Claude
+Opus 5.5 (GO, 1 should-fix, 3 nits). `pytest -q tests`: 366 passed. Both
+rebuilt the pre-fix code in scratch copies and the regression tests for S3-01,
+S3-02 and S3-06 failed there. The S3-01 sequence (loader edited on disk after
+import) now makes a fresh process rebuild. The code digest was identical
+across hash seeds, working directories, importlib loading, notebook-cell
+execution and `-O`; it costs 26–27 µs per call, and a warm no-op `sync` on
+`v5_30n` takes 5.27 ms (median). `v5_30n` again matched the pinned reference
+on all three tables. The main session applied the fixes below; the suite then
+gave 369 passed.
+
+| # | Reviewer | Severity | Finding | Resolution |
+|---|---|---|---|---|
+| S4-01 | Sol | should-fix | The cleanup matched by prefix and suffix, so `_segments.json.tmp` and `part.parquet.tmp` were deleted although they are not the store's `<name>.<pid>.<uuid>.tmp` names. | Exact pattern match; `test_materialize_removes_crashed_writer_temp_files` |
+| S4-02 | Sol, Opus | should-fix (Sol), nit (Opus) | The digest omitted the loaders' default arguments and the values of globals they read: a changed default or global left the key equal and `sync` at `noop`. No loader depends on either today. | Defaults are hashed; `test_code_key_covers_loader_defaults`. Globals are not followed; `test_loaders_read_only_globals_the_code_key_accounts_for` fails if a loader starts reading one, and D69 states the limit |
+| S4-03 | Opus | should-fix | In a notebook kernel, re-running an edited `store.py` as cells after `build_viewer` was imported built the store with the old decoder and recorded the new digest. | The digest includes the `store` module `build_viewer` imported; `test_code_key_covers_the_store_module_the_loaders_use` |
+| S4-04 | Opus | nit | README's manifest description omitted the code digest. | Added |
+| S4-05 | Opus | nit | A loader wrapped by a closure-based decorator hashes as the wrapper; `Mock(wraps=loader)` has no `__code__`. Occurs only in tests. | No change |
+| S4-06 | Opus | nit | `-OO` strips docstrings and changes the digest; no project invocation uses it. | No change |
+
+### Website check by the main session (2026-11-11)
+
+Baseline: commit `7bc1699` code reading the four real segments' CSVs.
+Compared with the final code reading the store:
+
+- The three frames, by per-column digest of dtype, value bytes and per-cell
+  Python type: 5,139,701 site-nights (16 columns), 18,751,171 overpasses (33),
+  330,299 copies (40) — identical.
+- `build_data` output: identical apart from `meta.generated`. Pass rows:
+  1,269/1,269 site files identical. `flareouts.screen` and `darknights.screen`
+  output: byte-identical.
+- `build_viewer.main(skip_emit=True)` through the store wrote
+  `data/nights-2025.ee09f574.json`, `nights-2026.fbe67e61.json`,
+  `clearpasses-2025.d35c9880.json` and `clearpasses-2026.aae3c1bd.json`; all
+  four are byte-identical to the files served at
+  `https://skytruth.github.io/offshore-methane/data/` on that date.
+- The built site loaded in a browser with no console errors: 673 nights, 7,637
+  sites, the four data files and a pass file returned HTTP 200, and the
+  Flare-outs view rendered. EMIT enrichment was skipped (it needs the network
+  and does not read the three frames' storage).

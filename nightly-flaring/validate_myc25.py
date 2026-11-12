@@ -15,6 +15,8 @@ import pandas as pd
 import requests
 from scipy.spatial import cKDTree
 
+import store
+
 HERE = Path(__file__).resolve().parent
 OUT_DIR = HERE / "outputs"
 MYC_URL = (
@@ -297,10 +299,18 @@ def main(
     """Validate one run against annual MYC regimes (default last available year)."""
     import json
 
-    nights = pd.read_csv(site_nights_csv or out_dir / f"site_nights_{tag}.csv")
-    over = pd.read_csv(overpasses_csv or out_dir / f"overpasses_{tag}.csv")
-    copies_path = out_dir / f"copies_{tag}.csv"
-    copies = pd.read_csv(copies_path) if copies_path.exists() else None
+    def read_override(path, table):
+        if path is None:
+            return store.read_segment(out_dir, tag, table)
+        path = Path(path)
+        return store.read_export(path)
+
+    nights = read_override(site_nights_csv, "site_nights")
+    over = read_override(overpasses_csv, "overpasses")
+    copies_path = store.segment_path(out_dir, tag, "copies")
+    copies = (
+        store.read_segment(out_dir, tag, "copies") if copies_path.exists() else None
+    )
     sites = match_sites(nights, load_myc(year), match_m, over, copies)
     summary = validation_summary(sites, match_m)
     print(f"MYC25Q4 {year}; run {tag} (short-period rates vs annual reference)")

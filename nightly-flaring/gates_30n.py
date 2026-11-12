@@ -28,6 +28,7 @@ from scipy.spatial import cKDTree
 import granule as g
 import nightfire as nf
 import pipeline as p
+import store
 import validate_myc25 as v
 
 TAG = "2026-10-06_2026-11-04"
@@ -63,7 +64,7 @@ def sha256(path: Path) -> str:
 
 def load(folder: Path, tag: str, sites: pd.DataFrame) -> dict:
     """Raw records, deduplicated night-time records, and detections."""
-    over = pd.read_csv(folder / f"overpasses_{tag}.csv")
+    over = store.read_segment(folder, tag, "overpasses")
     dd = p.dedupe_overpasses(over)
     dd = dd[dd.sza >= p.SZA_CLEAR].copy()
     lon = dd.site_id.map(sites.set_index("site_id").lon)
@@ -841,9 +842,9 @@ def main(
     myc = v.load_myc(2025)
     new = load(run, tag, sites)
     old = load(base, tag, sites)
-    copies = pd.read_csv(run / f"copies_{tag}.csv")
-    run_nights = pd.read_csv(run / f"site_nights_{tag}.csv")
-    v3_nights = pd.read_csv(base / f"site_nights_{tag}.csv")
+    copies = store.read_segment(run, tag, "copies")
+    run_nights = store.read_segment(run, tag, "site_nights")
+    v3_nights = store.read_segment(base, tag, "site_nights")
     lists = {}
     result = dict(
         gate1_baseline=gate1(base),

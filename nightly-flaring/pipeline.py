@@ -38,6 +38,7 @@ import granule  # noqa: E402
 import granule_coverage  # noqa: E402
 import nodd  # noqa: E402
 import speedup as speed  # noqa: E402
+import store  # noqa: E402
 
 OUT_DIR = HERE / "outputs"
 SITES_CSV = OUT_DIR / "gfw_oil_sites.csv"
@@ -598,7 +599,7 @@ def main(
         jobs, out_dir / f"overpasses_{PIPELINE_VERSION}", out_dir / f"jobs_{tag}.csv"
     )
     (out_dir / f"run_summary_{tag}.json").write_text(json.dumps(summary, indent=2))
-    copies.to_csv(out_dir / f"copies_{tag}.csv", index=False)
+    store.write_export(copies, out_dir / f"copies_{tag}.parquet", "copies")
     if speedup and speedup.get("tier2_detections_only"):
         # Missing clear/non-detection exposures must never masquerade as a
         # standard nightly product. Only explicit detection records are saved.
@@ -625,9 +626,11 @@ def main(
                 dtype=bool,
             )
         ]
-    over.to_csv(out_dir / f"overpasses_{tag}.csv", index=False)
+    store.write_export(
+        over.reset_index(drop=True), out_dir / f"overpasses_{tag}.parquet", "overpasses"
+    )
     nights = site_nights(over, sites, d0, d1)
-    nights.to_csv(out_dir / f"site_nights_{tag}.csv", index=False)
+    store.write_export(nights, out_dir / f"site_nights_{tag}.parquet", "site_nights")
     print(nights["status"].value_counts().to_string())
     return nights
 
