@@ -1232,7 +1232,18 @@ view-angle effects and non-upstream classification remain deferred. The
   dark nights at steady flares are unexplained. EMIT is daytime, hours from
   VIIRS; its CH4 index is not a concentration. Offline regressions cover these
   rules, cache progression and finality, compact payload, and monthly rebuild.
-- **Networked build results:** pending; the main session will fill this line.
+- **Networked build results (4 Nov 2026, 88 nights):** 11,670 clear dark nights
+  at all sources; 38 left out for a neighbour's own detection, 1,201 for fewer
+  than 10 other clear nights, 9,034 for a burning rate ≤50% and 34 for no lit
+  night before the run (each counted at its first failed rule); 1,363 listed in
+  904 runs at 187 sources. 82 listed nights (53 runs) have an EMIT scene within
+  two nights; 8 nights have rendered chips covering the source (10 scenes,
+  valid pixels within 300 m 76–101); 51 scenes are after the Earth Engine
+  cutoff (31 Aug 2026). darknights.json 0.90 MB.
+- **Explainer figures:** Figures 26–29 (`make_flareout_figures.py`): three real
+  nights against the rules (3889 listed; 3799 inside its 36-night run; 3780 with
+  its neighbour detected), 3780 and 3779-3781 on 1 Oct to scale, the rule
+  funnel above, and the review-order scatter. Part 2 figures become 30–32.
 - **Status:** active; review material only.
 
 ### D63 NOAA's Azure copy for nights older than the AWS window (v5)
