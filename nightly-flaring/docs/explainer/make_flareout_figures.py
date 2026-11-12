@@ -1,5 +1,5 @@
 # %%
-"""Write the Potential flare-outs figures for docs/explainer.md (Figures 20-25).
+"""Write the flare-out figures for docs/explainer.md (Figures 20-25 and 26-29).
 
 The charts read the screen's payload, ``outputs/site/flareouts.json``, which
 ``build_viewer.main()`` writes (as of local night 4 November 2026); Figure 22's
@@ -14,6 +14,7 @@ offline. Run from ``nightly-flaring/``:
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -564,7 +565,318 @@ def fig_emit_chips(d):
     print("wrote chips_emit.png")
 
 
-def main(chips: bool = True):
+# ------------------------------------------------------------ figures 26-29
+DN_PAYLOAD = ROOT / "outputs" / "site" / "darknights.json"
+# Real cases: one listed night and two nights the rules leave out.
+DN_CASES = [
+    ("3889", "2026-09-19", "Listed"),
+    ("3799", "2026-09-12", "Not listed: its own dark run"),
+    ("3780", "2026-10-01", "Not listed: a neighbour was detected"),
+]
+
+
+def dark_night_inputs() -> dict:
+    """Replay darknights.screen's rules in order on the v5 segments.
+
+    Returns the sequential rule counts, a ±14-night strip for each case in
+    DN_CASES, and the 3780 / neighbour geometry on 1 Oct 2026.
+    """
+    import build_viewer as BV
+    import darknights as dn
+    import flareouts as fo
+
+    segments = BV.find_segments()
+    nights, over = BV.load_segments(segments)
+    copies = BV.load_copies(segments)
+    days = pd.date_range(nights.night.min(), nights.night.max()).strftime("%Y-%m-%d").tolist()
+    p = fo.prepare_passes(nights, over)
+    c = fo.prepare_copies(copies, days[0], days[-1])
+    baseline_end = str((pd.Timestamp(days[0]) + pd.Timedelta(days=29)).date())
+    units = fo.source_units(c, baseline_end)
+    busy = dn.neighbour_detection_nights(c, units)
+    want = {sid: (night, verdict) for sid, night, verdict in DN_CASES}
+    counts = dict(total=0, neighbour=0, few=0, low=0, nobefore=0, listed=0)
+    cases, geometry = {}, {}
+    for unit in units:
+        h, cp, obs = fo.unit_history(unit, p, c, days)
+        h, cp = dn.rate_history(h, cp, unit, units)
+        case = next((sid for sid in want if int(sid) in unit["site_ids"]), None)
+        for spell in fo.dark_spells(h, days[0]):
+            dark = h.loc[spell["start"] : spell["end"]]
+            dark = dark[dark.qualified & ~dark.lit]
+            if dark.empty:
+                continue
+            run_start, run_end = dark.index[0], dark.index[-1]
+            for night in dark.index:
+                counts["total"] += 1
+                start = str((pd.Timestamp(night) - pd.Timedelta(days=dn.WINDOW)).date())
+                end = str((pd.Timestamp(night) + pd.Timedelta(days=dn.WINDOW)).date())
+                window = h.loc[start:end]
+                q = window[window.qualified & (window.index != night)]
+                q = q[~q.neighbour_only]
+                lit = int(q.rate_lit.sum())
+                before = q[(q.index < run_start) & q.rate_lit]
+                if case and night == want[case][0]:
+                    cases[case] = dict(
+                        unit=unit, night=night, verdict=want[case][1],
+                        run=(run_start, run_end, len(dark)), lit=lit, qualified=len(q),
+                        lit_before=not before.empty, neighbour=night in busy[unit["id"]],
+                        window=window[["qualified", "lit", "rate_lit", "neighbour_only"]].copy(),
+                    )
+                if night in busy[unit["id"]]:
+                    counts["neighbour"] += 1
+                elif len(q) < dn.MIN_QUALIFIED:
+                    counts["few"] += 1
+                elif lit <= len(q) / 2:
+                    counts["low"] += 1
+                elif before.empty:
+                    counts["nobefore"] += 1
+                else:
+                    counts["listed"] += 1
+    # 3780 on 1 Oct: both unit centres and every copy within 3 km that night.
+    a = next(u for u in units if 3780 in u["site_ids"])
+    b = min(
+        (u for u in units if u["id"] != a["id"]),
+        key=lambda u: F_distance(a, u),
+    )
+    near = c[(c.night == "2026-10-01")].copy()
+    near["d_a"] = [fo.distance_m(a["lat"], a["lon"], la, lo) for la, lo in zip(near.centroid_lat, near.centroid_lon)]
+    near = near[near.d_a <= 3000]
+    geometry = dict(a=a, b=b, copies=near)
+    return dict(counts=counts, cases=cases, geometry=geometry)
+
+
+def F_distance(u, v):
+    import flareouts as fo
+
+    return fo.distance_m(u["lat"], u["lon"], v["lat"], v["lon"])
+
+
+def fig_dn_funnel(inputs, payload):
+    """How each rule narrows every clear dark night down to the list."""
+    k = inputs["counts"]
+    c = payload["counts"]
+    steps = [
+        ("Clear dark nights at every source", k["total"], INK3, ""),
+        ("A neighbour within 1.5 km was detected that night", k["neighbour"], RAISE, "left out"),
+        ("Fewer than 10 other clear nights within 14 nights", k["few"], RAISE, "left out"),
+        ("Flare seen on half or fewer of them", k["low"], RAISE, "left out"),
+        ("No lit night before the run", k["nobefore"], RAISE, "left out"),
+        ("Listed: usually burning, then dark", k["listed"], AMBER, ""),
+        ("with an EMIT scene within two nights", c["with_emit_nearby"], CYAN, ""),
+        ("with EMIT images covering the source", c["with_chips"], CYAN, ""),
+    ]
+    x0, x1, y0, row = 330, 700, 46, 34
+    xs = F.Log(1, k["total"] * 1.3, x0, x1)
+    body = text(20, 24, "From every clear dark night to the list", size=13, fill=INK, weight=650)
+    for i, (label, n, color, note) in enumerate(steps):
+        y = y0 + i * row
+        indent = 18 if note or i >= 6 else 0
+        body += text(20 + indent, y + 15, label, size=12, fill=INK if not note else INK2)
+        body += rect(x0, y + 3, max(2, xs(max(n, 1)) - x0), 18, fill=color, rx=3)
+        lab = f"{n:,}" + (f" {note}" if note else "")
+        body += text(xs(max(n, 1)) + 8, y + 16, lab, size=12, fill=INK if not note else INK2, weight=600 if not note else 400)
+    yb = y0 + len(steps) * row + 8
+    for v in (1, 10, 100, 1000, 10000):
+        if v <= k["total"] * 1.3:
+            body += line(xs(v), y0, xs(v), yb - 6, stroke=RULE)
+            body += text(xs(v), yb + 8, f"{v:,}", size=11, fill=INK3, anchor="middle")
+    body += text(x0, yb + 26, "nights (log scale)", size=11, fill=INK3)
+    body += text(20, yb + 48, f"Rules are applied in this order; each night is counted at the first rule it fails. 88 nights, {payload['counts']['sources']} listed sources.", size=11.5, fill=INK3)
+    svg("dn_funnel", yb + 66, "From every clear dark night to the single dark nights list", body)
+
+
+def fig_dn_rules(inputs):
+    """Three real nights: one listed, two left out, with their ±14-night windows."""
+    order = [sid for sid, _, _ in DN_CASES]
+    cases = inputs["cases"]
+    x0, x1 = 196, 744
+    cw = (x1 - x0) / 29
+    body = text(20, 24, "Three real nights and the 14 nights either side", size=13, fill=INK, weight=650)
+    body += text(20, 42, "Each square is one night. The burning rate counts only the source's own detections on clear nights.", size=11.5, fill=INK2)
+    y = 66
+    for sid in order:
+        cs = cases[sid]
+        w = cs["window"]
+        nights = pd.date_range(pd.Timestamp(cs["night"]) - pd.Timedelta(days=14), periods=29).strftime("%Y-%m-%d")
+        good = cs["verdict"] == "Listed"
+        body += text(20, y + 14, f"{'/'.join(map(str, cs['unit']['site_ids']))} · {md(cs['night'])}", size=13, fill=INK, weight=650)
+        verdict = cs["verdict"].split(": ")
+        body += text(20, y + 31, verdict[0] + (":" if len(verdict) > 1 else ""), size=11.5, fill=AMBER if good else INK2, weight=600)
+        if len(verdict) > 1:
+            body += text(20, y + 46, verdict[1], size=11.5, fill=INK2)
+        rs, re_, rn = cs["run"]
+        for i, n in enumerate(nights):
+            x = x0 + i * cw
+            in_run = rs <= n <= re_
+            if n not in w.index:
+                fill, stroke = BG, RULE
+            else:
+                r = w.loc[n]
+                if r.qualified and r.rate_lit:
+                    fill, stroke = AMBER, None
+                elif r.neighbour_only and r.qualified:
+                    fill, stroke = BG, INK3
+                elif r.lit:
+                    fill, stroke = FL[1], None
+                elif r.qualified:
+                    fill, stroke = CLEAR, None
+                else:
+                    fill, stroke = CLOUD, None
+            body += rect(x + 1.5, y + 4, cw - 3, 22, fill=fill, stroke=stroke, sw=1.2, rx=3)
+            if n in w.index and w.loc[n].neighbour_only and w.loc[n].qualified:
+                cx, cy = x + cw / 2, y + 15
+                body += line(cx - 4, cy - 4, cx + 4, cy + 4, stroke=INK2, w=1.3) + line(cx - 4, cy + 4, cx + 4, cy - 4, stroke=INK2, w=1.3)
+            if in_run:
+                body += line(x + 1.5, y + 30, x + cw - 1.5, y + 30, stroke=FL[4], w=2)
+            if n == cs["night"]:
+                body += rect(x - 0.5, y + 1, cw + 1, 28, stroke=INK, sw=2, rx=4)
+        rate = cs["lit"] / cs["qualified"] if cs["qualified"] else 0
+        parts = [f"burning {cs['lit']}/{cs['qualified']} = {rate:.0%}" + (" (>50%)" if rate > 0.5 else " (not >50%)")]
+        parts.append("lit night before the run" if cs["lit_before"] else "no lit night before the run")
+        if cs["neighbour"]:
+            parts.append("neighbour detected that night")
+        run_txt = f"dark run {md(rs)}–{md(re_)} ({rn} clear dark nights)" if rs != re_ else "a one-night dark run"
+        body += text(x0, y + 46, " · ".join(parts), size=11.5, fill=INK if good else INK2)
+        body += text(x0, y + 62, run_txt, size=11, fill=INK3)
+        y += 86
+    keys = [
+        (rect(-6, -6, 12, 12, fill=AMBER, rx=2), "lit: its own detection, clear night"),
+        (rect(-6, -6, 12, 12, fill=CLEAR, rx=2), "clear, no detection (counts as unlit)"),
+        (rect(-6, -6, 12, 12, fill=BG, stroke=INK3, sw=1.2, rx=2) + line(-4, -4, 4, 4, stroke=INK2, w=1.3) + line(-4, 4, 4, -4, stroke=INK2, w=1.3), "only a neighbour seen (left out)"),
+        (rect(-6, -6, 12, 12, fill=FL[1], rx=2), "seen through cloud (not counted)"),
+        (rect(-6, -6, 12, 12, fill=CLOUD, rx=2), "cloud only: unknown"),
+        (line(-7, 0, 7, 0, stroke=FL[4], w=2), "the dark run"),
+    ]
+    for j, (mark, lab) in enumerate(keys):
+        x, yy = 20 + (j % 3) * 245, y + 6 + (j // 3) * 20
+        body += f'<g transform="translate({x + 6},{yy - 4})">{mark}</g>' + text(x + 18, yy, lab, size=11.5, fill=INK2)
+    body += text(20, y + 52, "The outlined square is the night being tested; it is left out of its own rate.", size=11.5, fill=INK3)
+    svg("dn_rules", y + 68, "Three real nights: one listed and two left out by the rules", body)
+
+
+def fig_dn_neighbour(inputs):
+    """3780 and its neighbour on 1 Oct 2026, drawn to scale."""
+    import flareouts as fo
+
+    g = inputs["geometry"]
+    a, b, cp = g["a"], g["b"], g["copies"]
+    kx = 111.32 * math.cos(math.radians(a["lat"]))
+
+    def km(lat, lon):
+        return ((lon - a["lon"]) * kx, (lat - a["lat"]) * 110.6)
+
+    cx, cy, s = 250, 205, 70  # px per km
+    body = text(20, 24, "Two sources 1.3 km apart: whose flare was seen?", size=13, fill=INK, weight=650)
+    body += text(20, 42, f"Source {a['id']} and its neighbour {b['id']}, night of 1 Oct 2026, to scale", size=11.5, fill=INK2)
+    P = lambda x, y: (cx + x * s, cy - y * s)  # noqa: E731
+    for r_km, lab, dash in [(1.0, "1 km: counts toward its burning rate", "4 3"), (1.5, "1.5 km: any detection inside means not dark", None)]:
+        body += circle(cx, cy, r_km * s, fill="none", stroke=CYAN if r_km == 1.5 else INK3, sw=1.4, stroke_dasharray=dash)
+    ky = cy + 1.5 * s + 58
+    body += line(40, ky - 4, 64, ky - 4, stroke=CYAN, w=1.4) + text(72, ky, f"1.5 km: any detection inside means {a['id']} was not dark", size=11.5, fill=INK2)
+    body += line(40, ky + 14, 64, ky + 14, stroke=INK3, w=1.4, dash="4 3") + text(72, ky + 18, "1 km: detections inside count toward its burning rate", size=11.5, fill=INK2)
+    bx, by = P(*km(b["lat"], b["lon"]))
+    body += circle(cx, cy, 6, fill=INK, stroke=BG, sw=2)
+    body += halo(cx - 10, cy + 22, a["id"], size=12, fill=INK, anchor="end", weight=650)
+    body += circle(bx, by, 6, fill=INK2, stroke=BG, sw=2)
+    body += halo(bx + 10, by + 4, b["id"], size=12, fill=INK2, weight=650)
+    dist_ab = fo.distance_m(a["lat"], a["lon"], b["lat"], b["lon"])
+    for r in cp.itertuples():
+        x, y = P(*km(r.centroid_lat, r.centroid_lon))
+        mw = r.group_rh_mw if pd.notna(r.group_rh_mw) else 1
+        body += circle(x, y, 3 + min(6, math.sqrt(max(mw, 0.1)) * 0.8), fill=AMBER, stroke=BG, sw=1, opacity=0.9,
+                       tip=f"{r.satellite} {r.time_utc}: {r.d_a:,.0f} m from {a['id']}, {mw:.0f} MW")
+    dmin, dmax = cp.d_a.min(), cp.d_a.max()
+    body += line(cx, cy + 1.5 * s + 18, cx + s, cy + 1.5 * s + 18, stroke=INK2, w=2)
+    body += text(cx + s / 2, cy + 1.5 * s + 34, "1 km", size=11, fill=INK2, anchor="middle")
+    nx = 470
+    body += rect(nx - 12, 64, 760 - nx - 8, 254, fill=PANEL, stroke=RULE, rx=9)
+    body += text(nx, 88, "What the record shows", size=12.5, fill=INK, weight=650)
+    body += lines(nx, 110, [
+        f"The two source centres are {dist_ab:,.0f} m apart.",
+        f"That night {len(cp)} detections fell {dmin:,.0f}–{dmax:,.0f} m",
+        f"from {a['id']}: just outside its 1.5 km circle,",
+        f"so {a['id']} counts as dark.",
+        "",
+        f"They lie nearest {b['id']}, which burned",
+        f"at {cp.group_rh_mw.min():.0f}–{cp.group_rh_mw.max():.0f} MW. Where a detection lands",
+        "shifts from pass to pass, so the record",
+        "cannot say which source was burning.",
+        "",
+        "Rule: a dark night is not listed when",
+        "another source within 1.5 km had its own",
+        "detection that night.",
+    ], size=11.5)
+    svg("dn_neighbour", 412, f"Source {a['id']} and neighbour {b['id']} on 1 Oct 2026, to scale", body)
+
+
+def fig_dn_order(payload):
+    """Every listed night by its two ranking parts, with lines of equal score."""
+    pts = []
+    for run in payload["runs"]:
+        best = max(run["nights"], key=lambda n: (n["score"] or -1))
+        for n in run["nights"]:
+            em = n["expected_misses"]
+            if em["miss_all"] is None:
+                continue
+            br = n["burning_rate"]
+            pts.append((F_wilson(br["lit"], br["qualified"]), 1 - em["miss_all"], n is best, run))
+    x0, x1, y0, y1 = 70, 560, 70, 350
+    xs, ys = Lin(0.2, 1, x0, x1), Lin(0, 1, y1, y0)
+    body = text(20, 24, "How Most surprising orders the list", size=13, fill=INK, weight=650)
+    body += F.frame(x0, y0, x1, y1)
+    for v in (0.2, 0.4, 0.6, 0.8, 1.0):
+        body += line(xs(v), y0, xs(v), y1, stroke=RULE) + text(xs(v), y1 + 17, f"{v:.0%}", size=11, fill=INK3, anchor="middle")
+    for v in (0, 0.25, 0.5, 0.75, 1):
+        body += line(x0, ys(v), x1, ys(v), stroke=RULE) + text(x0 - 8, ys(v) + 4, f"{v:.0%}", size=11, fill=INK3, anchor="end")
+    body += text((x0 + x1) / 2, y1 + 38, "how often the flare is seen (95% lower bound of lit / clear nights)", size=11.5, fill=INK3, anchor="middle")
+    body += text(20, 46, "Up: chance a flare this size is seen on at least one of the night's clear passes", size=11.5, fill=INK2)
+    for sc in (0.25, 0.5, 0.75):
+        xsamp = [0.2 + i * 0.01 for i in range(81)]
+        seg = [(xs(x), ys(sc / x)) for x in xsamp if sc / x <= 1]
+        body += path("M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in seg), stroke=CYAN, w=1, stroke_dasharray="4 4", opacity=0.8)
+        body += halo(seg[-1][0] - 4, seg[-1][1] - 6, f"score {sc:.2f}", size=10.5, fill=CYAN, anchor="end")
+    for x, y, best, run in pts:
+        if not best:
+            body += circle(xs(x), ys(y), 2, fill=INK3, opacity=0.55)
+    for x, y, best, run in pts:
+        if best:
+            body += circle(xs(x), ys(y), 2.8, fill=AMBER, opacity=0.85)
+    top = sorted((p for p in pts if p[2]), key=lambda p: -(p[0] * p[1]))[:3]
+    # Circle and number the first three; their names go in the notes column.
+    for i, (x, y, _, run) in enumerate(top):
+        body += circle(xs(x), ys(y), 5.5, fill="none", stroke=INK, sw=1.5)
+        body += halo(xs(x), ys(y) + 19 + (13 if i == 2 else 0), str(i + 1), size=11, fill=INK, anchor="middle", weight=700)
+    nx = 584
+    body += rect(nx - 12, y0 - 6, 760 - nx - 8, y1 - y0 + 12, fill=PANEL, stroke=RULE, rx=9)
+    body += text(nx, y0 + 14, "Reading it", size=12.5, fill=INK, weight=650)
+    body += lines(nx, y0 + 36, [
+        "Score = across × up.",
+        "Top right comes first: a",
+        "flare nearly always seen,",
+        "dark on a night when a",
+        "flame its size would very",
+        "likely have been seen.",
+        "",
+        "Orange: each run's best",
+        f"night ({len(payload['runs']):,} runs); grey:",
+        "its other nights.",
+    ], size=11.5)
+    body += text(nx, y0 + 214, "First in the list", size=12, fill=INK, weight=650)
+    body += lines(nx, y0 + 234, [
+        f"{i + 1}. {run['source_id']} · {md(run['start'])}" for i, (_, _, _, run) in enumerate(top)
+    ], size=11.5, fill=INK)
+    body += text(20, y1 + 56, "Passes on one night are not independent, so the score is a review order, not a probability.", size=11.5, fill=INK3)
+    svg("dn_order", y1 + 72, "Listed dark nights by burning rate and chance of detection", body)
+
+
+def F_wilson(lit: int, qualified: int) -> float:
+    import darknights as dn
+
+    return dn.wilson_lower_95(lit, qualified)
+
+
+def main(chips: bool = True, dark_nights: bool = True):
     d = load()
     fig_record(d)
     fig_tiers(d)
@@ -573,6 +885,13 @@ def main(chips: bool = True):
     fig_emit_timing()
     if chips:
         fig_emit_chips(d)
+    if dark_nights:
+        inputs = dark_night_inputs()
+        payload = json.loads(DN_PAYLOAD.read_text())
+        fig_dn_funnel(inputs, payload)
+        fig_dn_rules(inputs)
+        fig_dn_neighbour(inputs)
+        fig_dn_order(payload)
 
 
 # %%
